@@ -1,0 +1,1117 @@
+#!/usr/bin/env python3
+# Copyright 2026 InvestorClaw Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+
+"""
+Multi-provider financial data abstraction for InvestorClaw.
+
+Supported providers:
+  finnhub    - Finnhub.io: quotes, historical candles, company news, analyst ratings
+  yfinance   - Yahoo Finance (unofficial): batch quotes, historical, news, analyst
+  newsapi    - NewsAPI.org: news headlines only (no price data)
+  massive    - Massive (polygon.io-compatible): quotes, historical, news
+
+Provider priority is resolved at runtime from INVESTORCLAW_PRICE_PROVIDER env var
+or passed explicitly to PriceProvider(primary=...).
+
+All methods return plain dicts / lists of dicts — no pandas, no external types.
+"""
+
+import logging
+import math
+import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Dict, List, Optional
+
+import requests
+from ratelimit import limits, sleep_and_retry
+
+logger = logging.getLogger(__name__)
+
+# ─── .env loader (using python-dotenv) ────────────────────────────────────
+
+
+def _load_env(env_file: Optional[str] = None) -> None:
+    """Load .env from project directory if not already in environment."""
+    try:
+        from dotenv import load_dotenv
+
+        if env_file is None:
+            env_file = str(Path(__file__).parent.parent / ".env")
+        load_dotenv(env_file)
+    except ImportError:
+        pass  # python-dotenv not available; rely on environment variables
+
+
+_load_env()
+
+# ─── Provider implementations with official SDKs ──────────────────────────
+
+
+class FinnhubProvider:
+    """
+    Finnhub.io REST API provider (using official finnhub-python SDK).
+    Free tier: 60 calls/minute.
+    Docs: https://finnhub.io/docs/api
+    """
+
+    NAME = "finnhub"
+
+    def __init__(self, api_key: Optional[str] = None):
+        try:
+            import finnhub
+        except ImportError:
+            raise ImportError(
+                "finnhub-python not installed. Install with: pip install finnhub-python"
+            )
+
+        self.api_key = api_key or os.getenv("FINNHUB_KEY") or os.getenv("FINNHUB_API_KEY")
+        if not self.api_key:
+            raise ValueError("FINNHUB_KEY not set")
+
+        self._client = finnhub.Client(api_key=self.api_key)
+
+    @sleep_and_retry
+    @limits(calls=60, period=60)
+    def _rate_limited_quote(self, symbol: str) -> Optional[Dict]:
+        """Finnhub free tier is 60 calls/minute; serialize quote calls through one limiter."""
+        data = self._client.quote(symbol)
+        if not data or data.get("c", 0) == 0:
+            return None
+        return {
+            "symbol": symbol,
+            "price": data["c"],
+            "change": data.get("d", 0),
+            "pct_change": data.get("dp", 0),
+            "high": data.get("h", 0),
+            "low": data.get("l", 0),
+            "open": data.get("o", 0),
+            "prev_close": data.get("pc", 0),
+            "provider": self.NAME,
+        }
+
+    def get_quote(self, symbol: str) -> Optional[Dict]:
+        """Current quote. Returns dict with price, change, pct_change, high, low, open, prev_close."""
+        try:
+            return self._rate_limited_quote(symbol)
+        except Exception as e:
+            logger.warning(f"Finnhub quote({symbol}): {e}")
+            return None
+
+    def get_quotes(self, symbols: List[str]) -> Dict[str, Dict]:
+        """
+        Batch quotes via ThreadPoolExecutor for parallelism.
+        Rate limiter respects 60/min quota across threads.
+        """
+        results = {}
+        if not symbols:
+            return results
+
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            futures = {executor.submit(self.get_quote, sym): sym for sym in symbols}
+            for future in as_completed(futures):
+                sym = futures[future]
+                try:
+                    q = future.result()
+                    if q:
+                        results[sym] = q
+                except Exception as e:
+                    logger.warning(f"Finnhub get_quote({sym}) in thread pool: {e}")
+
+        return results
+
+    def get_history(self, symbol: str, days: int = 365) -> List[Dict]:
+        """
+        Daily OHLCV candles.
+        NOTE: Finnhub /stock/candle requires a Premium plan (returns 403 on free tier).
+        This method will return [] on free tier — Alpha Vantage or yfinance are preferred.
+        """
+        try:
+            to_ts = int(datetime.now().timestamp())
+            from_ts = int((datetime.now() - timedelta(days=days)).timestamp())
+            data = self._client.candle(symbol, "D", from_ts, to_ts)
+            if not data or data.get("s") != "ok":
+                return []
+            return [
+                {
+                    "date": datetime.fromtimestamp(t).strftime("%Y-%m-%d"),
+                    "open": o,
+                    "high": h,
+                    "low": l,
+                    "close": c,
+                    "volume": v,
+                    "symbol": symbol,
+                    "provider": self.NAME,
+                }
+                for t, o, h, l, c, v in zip(
+                    data["t"], data["o"], data["h"], data["l"], data["c"], data["v"]
+                )
+            ]
+        except Exception as e:
+            logger.warning(f"Finnhub history({symbol}): {e}")
+            return []
+
+    def get_news(self, symbols: List[str], days: int = 7) -> List[Dict]:
+        """Company news for a list of symbols over the past N days."""
+        to_date = datetime.now().strftime("%Y-%m-%d")
+        from_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+        articles = []
+
+        for sym in symbols:
+            try:
+                data = self._client.company_news(sym, from_date, to_date)
+                if not data:
+                    continue
+                for item in data[:5]:  # cap at 5 per symbol
+                    articles.append(
+                        {
+                            "symbol": sym,
+                            "headline": item.get("headline", ""),
+                            "summary": item.get("summary", ""),
+                            "source": item.get("source", ""),
+                            "url": item.get("url", ""),
+                            "datetime": datetime.fromtimestamp(item.get("datetime", 0)).strftime(
+                                "%Y-%m-%d %H:%M"
+                            ),
+                            "provider": self.NAME,
+                        }
+                    )
+            except Exception as e:
+                logger.warning(f"Finnhub news({sym}): {e}")
+
+        return articles
+
+    def get_general_news(self, category: str = "general") -> List[Dict]:
+        """General market-wide news from Finnhub by category.
+
+        Uses the Finnhub SDK's ``general_news(category)`` endpoint.
+        Categories: ``general``, ``forex``, ``crypto``, ``merger``.
+
+        Returns list of dicts in the same shape as ``get_news()`` (symbol set to
+        the category string so callers can distinguish source).
+        """
+        valid_categories = {"general", "forex", "crypto", "merger"}
+        if category not in valid_categories:
+            logger.warning(
+                f"Finnhub get_general_news: unknown category {category!r}; "
+                f"valid: {valid_categories}"
+            )
+            return []
+        try:
+            data = self._client.general_news(category, min_id=0)
+            if not data:
+                return []
+            articles = []
+            for item in data[:20]:  # cap at 20 to respect rate budget
+                articles.append(
+                    {
+                        "symbol": category,
+                        "headline": item.get("headline", ""),
+                        "summary": item.get("summary", ""),
+                        "source": item.get("source", ""),
+                        "url": item.get("url", ""),
+                        "datetime": (
+                            datetime.fromtimestamp(item.get("datetime", 0)).strftime(
+                                "%Y-%m-%d %H:%M"
+                            )
+                            if item.get("datetime")
+                            else ""
+                        ),
+                        "provider": self.NAME,
+                    }
+                )
+            return articles
+        except Exception as e:
+            logger.warning(f"Finnhub get_general_news({category}): {e}")
+            return []
+
+    def get_analyst_ratings(self, symbols: List[str]) -> Dict[str, Dict]:
+        """Latest analyst consensus recommendation for each symbol."""
+        results = {}
+
+        for sym in symbols:
+            try:
+                data = self._client.recommendation_trends(sym)
+                if not data or not isinstance(data, list) or len(data) == 0:
+                    continue
+                latest = data[0]
+                total = sum(
+                    [
+                        latest.get("strongBuy", 0),
+                        latest.get("buy", 0),
+                        latest.get("hold", 0),
+                        latest.get("sell", 0),
+                        latest.get("strongSell", 0),
+                    ]
+                )
+                results[sym] = {
+                    "symbol": sym,
+                    "period": latest.get("period", ""),
+                    "strong_buy": latest.get("strongBuy", 0),
+                    "buy": latest.get("buy", 0),
+                    "hold": latest.get("hold", 0),
+                    "sell": latest.get("sell", 0),
+                    "strong_sell": latest.get("strongSell", 0),
+                    "total": total,
+                    "provider": self.NAME,
+                }
+            except Exception as e:
+                logger.warning(f"Finnhub analyst({sym}): {e}")
+
+        return results
+
+
+class YFinanceProvider:
+    """
+    Yahoo Finance via yfinance (unofficial, no API key).
+    Fastest for batch quote downloads but rate-limited and non-deterministic.
+    """
+
+    NAME = "yfinance"
+
+    def __init__(self):
+        try:
+            import yfinance as yf
+
+            self._yf = yf
+        except ImportError:
+            raise ImportError("yfinance not installed. Install with: pip install yfinance")
+
+    @staticmethod
+    def _yf_symbol(sym: str) -> str:
+        """Convert broker symbols to yfinance format (BRK.B → BRK-B)."""
+        return sym.replace(".", "-")
+
+    def get_quotes(self, symbols: List[str]) -> Dict[str, Dict]:
+        """Batch quote download — one HTTP call for all symbols."""
+        if not symbols:
+            return {}
+
+        yf_syms = [self._yf_symbol(s) for s in symbols]
+        reverse = {self._yf_symbol(s): s for s in symbols}
+        try:
+            data = self._yf.download(
+                yf_syms if len(yf_syms) > 1 else yf_syms[0],
+                period="1d",
+                progress=False,
+                auto_adjust=True,
+            )
+            results = {}
+            if data.empty:
+                return {}
+
+            if len(yf_syms) == 1:
+                yf_sym = yf_syms[0]
+                orig = reverse[yf_sym]
+                row = data.iloc[-1]
+                close_val = row.get("Close", row.get("close", 0))
+                if hasattr(close_val, "iloc"):
+                    close_val = close_val.iloc[0] if len(close_val) > 0 else 0
+                results[orig] = {
+                    "symbol": orig,
+                    "price": float(close_val),
+                    "provider": self.NAME,
+                }
+            else:
+                close = data["Close"] if "Close" in data.columns else data["close"]
+                for yf_sym in yf_syms:
+                    orig = reverse[yf_sym]
+                    if yf_sym in close.columns and not close[yf_sym].isna().all():
+                        price = float(close[yf_sym].dropna().iloc[-1])
+                        results[orig] = {"symbol": orig, "price": price, "provider": self.NAME}
+            return results
+        except Exception as e:
+            logger.warning(f"yfinance batch quotes: {e}")
+            return {}
+
+    def get_quote(self, symbol: str) -> Optional[Dict]:
+        r = self.get_quotes([symbol])
+        return r.get(symbol)
+
+    def get_history(self, symbol: str, days: int = 365) -> List[Dict]:
+        """Historical daily OHLCV."""
+        try:
+            t = self._yf.Ticker(self._yf_symbol(symbol))
+            period = "1y" if days <= 365 else "2y"
+            hist = t.history(period=period)
+            if hist.empty:
+                return []
+            hist = hist.reset_index()
+            return [
+                {
+                    "date": str(row["Date"])[:10],
+                    "open": float(row["Open"]),
+                    "high": float(row["High"]),
+                    "low": float(row["Low"]),
+                    "close": float(row["Close"]),
+                    "volume": int(row["Volume"]),
+                    "symbol": symbol,
+                    "provider": self.NAME,
+                }
+                for _, row in hist.iterrows()
+            ]
+        except Exception as e:
+            logger.warning(f"yfinance history {symbol}: {e}")
+            return []
+
+    def get_news(self, symbols: List[str], days: int = 7) -> List[Dict]:
+        """News via yfinance Ticker.news."""
+        articles = []
+        for sym in symbols:
+            try:
+                t = self._yf.Ticker(self._yf_symbol(sym))
+                for item in (t.news or [])[:5]:
+                    articles.append(
+                        {
+                            "symbol": sym,
+                            "headline": item.get("title", ""),
+                            "summary": item.get("summary", ""),
+                            "source": item.get("publisher", ""),
+                            "url": item.get("link", ""),
+                            "datetime": datetime.fromtimestamp(
+                                item.get("providerPublishTime", 0)
+                            ).strftime("%Y-%m-%d %H:%M"),
+                            "provider": self.NAME,
+                        }
+                    )
+            except Exception as e:
+                logger.warning(f"yfinance news {sym}: {e}")
+        return articles
+
+    def get_analyst_ratings(self, symbols: List[str]) -> Dict[str, Dict]:
+        results = {}
+        for sym in symbols:
+            try:
+                t = self._yf.Ticker(self._yf_symbol(sym))
+                rec = t.recommendations
+                if rec is None or rec.empty:
+                    continue
+                latest = rec.iloc[-1]
+                results[sym] = {
+                    "symbol": sym,
+                    "period": str(rec.index[-1])[:10],
+                    "consensus": str(latest.get("To Grade", latest.get("Action", ""))),
+                    "firm": str(latest.get("Firm", "")),
+                    "provider": self.NAME,
+                }
+            except Exception as e:
+                logger.warning(f"yfinance analyst {sym}: {e}")
+        return results
+
+
+class NewsAPIProvider:
+    """
+    NewsAPI.org — news headlines and sentiment only (using newsapi-python).
+    Free tier: 100 requests/day. No price data.
+    """
+
+    NAME = "newsapi"
+
+    def __init__(self, api_key: Optional[str] = None):
+        self.api_key = api_key or os.getenv("NEWSAPI_KEY")
+        if not self.api_key:
+            raise ValueError("NEWSAPI_KEY not set")
+
+        # Use requests directly; newsapi-python package is thin wrapper
+        self._base = "https://newsapi.org/v2"
+
+    @sleep_and_retry
+    @limits(calls=30, period=60)
+    def _get(self, path: str, params: dict = None) -> Optional[dict]:
+        try:
+            params = params or {}
+            params["apiKey"] = self.api_key
+            r = requests.get(f"{self._base}{path}", params=params, timeout=10)
+            r.raise_for_status()
+            return r.json()
+        except Exception as e:
+            logger.warning(f"NewsAPI {path}: {type(e).__name__}")
+            return None
+
+    def get_news(self, symbols: List[str], days: int = 7) -> List[Dict]:
+        """News headlines for a list of ticker symbols."""
+        from_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+        articles = []
+
+        for i in range(0, len(symbols), 5):
+            batch = symbols[i : i + 5]
+            q = " OR ".join(batch)
+            data = self._get(
+                "/everything",
+                {
+                    "q": q,
+                    "from": from_date,
+                    "sortBy": "publishedAt",
+                    "language": "en",
+                    "pageSize": 20,
+                },
+            )
+            if not data or data.get("status") != "ok":
+                continue
+
+            for item in data.get("articles", []):
+                title = (item.get("title") or "").upper()
+                matched = next((s for s in batch if s in title), batch[0])
+                articles.append(
+                    {
+                        "symbol": matched,
+                        "headline": item.get("title", ""),
+                        "summary": item.get("description", ""),
+                        "source": item.get("source", {}).get("name", ""),
+                        "url": item.get("url", ""),
+                        "datetime": (item.get("publishedAt") or "")[:16].replace("T", " "),
+                        "provider": self.NAME,
+                    }
+                )
+        return articles
+
+    def get_quotes(self, symbols: List[str]) -> Dict[str, Dict]:
+        raise NotImplementedError("NewsAPI does not provide price data")
+
+    def get_history(self, symbol: str, days: int = 365) -> List[Dict]:
+        raise NotImplementedError("NewsAPI does not provide price data")
+
+    def get_analyst_ratings(self, symbols: List[str]) -> Dict[str, Dict]:
+        raise NotImplementedError("NewsAPI does not provide analyst ratings")
+
+
+class PolygonProvider:
+    """
+    Polygon.io market data provider (using official polygon-io SDK).
+    Starter plan: real-time quotes, full OHLCV history, news.
+    Docs: https://polygon.io/docs/stocks
+    """
+
+    NAME = "massive"
+
+    def __init__(self, api_key: Optional[str] = None):
+        try:
+            from polygon import RESTClient
+        except ImportError:
+            raise ImportError("polygon-io not installed. Install with: pip install polygon-io")
+
+        self.api_key = api_key or os.getenv("MASSIVE_API_KEY") or os.getenv("POLYGON_API_KEY")
+        if not self.api_key:
+            raise ValueError("MASSIVE_API_KEY / POLYGON_API_KEY not set")
+
+        self._client = RESTClient(api_key=self.api_key)
+
+    def get_quote(self, symbol: str) -> Optional[Dict]:
+        """Previous-day close (free tier)."""
+        try:
+            data = self._client.get_previous_close(symbol)
+            if not data or not data.results:
+                return None
+            r = data.results[0]
+            return {
+                "symbol": symbol,
+                "price": r.c,
+                "open": r.o,
+                "high": r.h,
+                "low": r.l,
+                "volume": r.v,
+                "date": datetime.fromtimestamp(r.t / 1000).strftime("%Y-%m-%d"),
+                "provider": self.NAME,
+            }
+        except Exception as e:
+            logger.warning(f"Polygon quote({symbol}): {e}")
+            return None
+
+    def get_quotes(self, symbols: List[str]) -> Dict[str, Dict]:
+        """
+        Batch quotes via snapshot endpoint (Starter+ plan) or prev-day fallback.
+        """
+        results = {}
+
+        # Try batch snapshot (Starter+ plan only)
+        try:
+            joined = ",".join(symbols)
+            data = self._client.get_snapshot_ticker(symbols=joined)
+            if data and data.results:
+                for t in data.results:
+                    day = t.day or {}
+                    last = t.last_trade or {}
+                    results[t.ticker] = {
+                        "symbol": t.ticker,
+                        "price": day.c or last.p or 0,
+                        "open": day.o or 0,
+                        "high": day.h or 0,
+                        "low": day.l or 0,
+                        "volume": day.v or 0,
+                        "provider": self.NAME,
+                    }
+                return results
+        except Exception:
+            pass
+
+        # Free-tier fallback: sequential prev-day calls
+        logger.info(
+            f"Polygon batch snapshot unavailable; falling back to sequential for {len(symbols)} symbols"
+        )
+        for sym in symbols:
+            q = self.get_quote(sym)
+            if q:
+                results[sym] = q
+        return results
+
+    def get_history(self, symbol: str, days: int = 365) -> List[Dict]:
+        """Daily OHLCV aggregates."""
+        try:
+            to_date = datetime.now().strftime("%Y-%m-%d")
+            from_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+
+            data = self._client.list_aggs(
+                ticker=symbol,
+                timespan="day",
+                from_=from_date,
+                to=to_date,
+                limit=days,
+                sort="asc",
+            )
+
+            if not data or not data.results:
+                return []
+
+            return [
+                {
+                    "date": datetime.fromtimestamp(r.t / 1000).strftime("%Y-%m-%d"),
+                    "open": r.o,
+                    "high": r.h,
+                    "low": r.l,
+                    "close": r.c,
+                    "volume": r.v,
+                    "symbol": symbol,
+                    "provider": self.NAME,
+                }
+                for r in data.results
+            ]
+        except Exception as e:
+            logger.warning(f"Polygon history({symbol}): {e}")
+            return []
+
+    def get_news(self, symbols: List[str], days: int = 7) -> List[Dict]:
+        """Polygon news API."""
+        from_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+        articles = []
+
+        for sym in symbols:
+            try:
+                data = self._client.list_ticker_news(
+                    ticker=sym,
+                    published_utc_gte=from_date,
+                    limit=5,
+                )
+
+                if not data or not data.results:
+                    continue
+
+                for item in data.results:
+                    articles.append(
+                        {
+                            "symbol": sym,
+                            "headline": item.title or "",
+                            "summary": item.description or "",
+                            "source": (item.publisher or {}).get("name", "")
+                            if hasattr(item.publisher, "get")
+                            else "",
+                            "url": item.article_url or "",
+                            "datetime": (item.published_utc or "")[:16].replace("T", " "),
+                            "provider": self.NAME,
+                        }
+                    )
+            except Exception as e:
+                logger.warning(f"Polygon news({sym}): {e}")
+
+        return articles
+
+    def get_analyst_ratings(self, symbols: List[str]) -> Dict[str, Dict]:
+        raise NotImplementedError(
+            "Polygon does not provide analyst recommendations — use Finnhub or yfinance"
+        )
+
+
+# Backwards-compat alias
+MassiveProvider = PolygonProvider
+
+
+class AlphaVantageProvider:
+    """
+    Alpha Vantage REST API provider.
+    Free tier: 25 requests/day (500/day with free key registration).
+    Docs: https://www.alphavantage.co/documentation/
+    """
+
+    NAME = "alpha_vantage"
+
+    def __init__(self, api_key: Optional[str] = None):
+        self.api_key = api_key or os.getenv("ALPHA_VANTAGE_KEY")
+        if not self.api_key:
+            raise ValueError("ALPHA_VANTAGE_KEY not set")
+        self._base = "https://www.alphavantage.co/query"
+        self._session = requests.Session()
+
+    @sleep_and_retry
+    @limits(calls=4, period=60)
+    def _get(self, params: dict, timeout: int = 15) -> Optional[dict]:
+        try:
+            params["apikey"] = self.api_key
+            r = self._session.get(self._base, params=params, timeout=timeout)
+            r.raise_for_status()
+            data = r.json()
+            if "Information" in data or "Note" in data:
+                msg = data.get("Information") or data.get("Note", "")
+                logger.warning(f"AlphaVantage API message: {msg[:120]}")
+                return None
+            return data
+        except Exception as e:
+            logger.warning(f"AlphaVantage: {e}")
+            return None
+
+    def get_quote(self, symbol: str) -> Optional[Dict]:
+        """Global Quote endpoint — current price."""
+        data = self._get({"function": "GLOBAL_QUOTE", "symbol": symbol})
+        if not data:
+            return None
+
+        q = data.get("Global Quote", {})
+        price_str = q.get("05. price", "0")
+        try:
+            price = float(price_str)
+        except ValueError:
+            return None
+
+        if price == 0:
+            return None
+
+        return {
+            "symbol": symbol,
+            "price": price,
+            "change": float(q.get("09. change", 0) or 0),
+            "pct_change": float((q.get("10. change percent", "0%") or "0%").replace("%", "") or 0),
+            "high": float(q.get("03. high", 0) or 0),
+            "low": float(q.get("04. low", 0) or 0),
+            "open": float(q.get("02. open", 0) or 0),
+            "prev_close": float(q.get("08. previous close", 0) or 0),
+            "volume": int(q.get("06. volume", 0) or 0),
+            "provider": self.NAME,
+        }
+
+    def get_quotes(self, symbols: List[str]) -> Dict[str, Dict]:
+        """Sequential quotes (no batch endpoint on free tier)."""
+        results = {}
+        for sym in symbols:
+            q = self.get_quote(sym)
+            if q:
+                results[sym] = q
+        return results
+
+    def get_history(self, symbol: str, days: int = 365) -> List[Dict]:
+        """Daily adjusted time series."""
+        output_size = "full" if days > 100 else "compact"
+        data = self._get(
+            {
+                "function": "TIME_SERIES_DAILY_ADJUSTED",
+                "symbol": symbol,
+                "outputsize": output_size,
+            }
+        )
+        if not data:
+            return []
+
+        ts = data.get("Time Series (Daily)", {})
+        cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+        results = []
+        for date_str in sorted(ts.keys(), reverse=True):
+            if date_str < cutoff:
+                break
+            row = ts[date_str]
+            results.append(
+                {
+                    "date": date_str,
+                    "open": float(row.get("1. open", 0) or 0),
+                    "high": float(row.get("2. high", 0) or 0),
+                    "low": float(row.get("3. low", 0) or 0),
+                    "close": float(row.get("5. adjusted close", row.get("4. close", 0)) or 0),
+                    "volume": int(row.get("6. volume", 0) or 0),
+                    "symbol": symbol,
+                    "provider": self.NAME,
+                }
+            )
+        return results
+
+    def get_news(self, symbols: List[str], days: int = 7) -> List[Dict]:
+        """News sentiment endpoint (requires paid plan for most content)."""
+        tickers = ",".join(symbols[:5])
+        data = self._get(
+            {
+                "function": "NEWS_SENTIMENT",
+                "tickers": tickers,
+                "limit": 20,
+            }
+        )
+        if not data or "feed" not in data:
+            return []
+
+        articles = []
+        for item in data["feed"]:
+            ticker_sentiment = item.get("ticker_sentiment", [{}])
+            sym = ticker_sentiment[0].get("ticker", symbols[0]) if ticker_sentiment else symbols[0]
+            articles.append(
+                {
+                    "symbol": sym,
+                    "headline": item.get("title", ""),
+                    "summary": item.get("summary", ""),
+                    "source": item.get("source", ""),
+                    "url": item.get("url", ""),
+                    "datetime": (item.get("time_published") or "")[:16].replace("T", " "),
+                    "provider": self.NAME,
+                }
+            )
+        return articles
+
+    def get_analyst_ratings(self, symbols: List[str]) -> Dict[str, Dict]:
+        """Earnings estimates used as proxy for analyst coverage."""
+        results = {}
+        for sym in symbols:
+            data = self._get({"function": "EARNINGS", "symbol": sym})
+            if not data or "annualEarnings" not in data:
+                continue
+            annual = data["annualEarnings"]
+            if not annual:
+                continue
+            results[sym] = {
+                "symbol": sym,
+                "period": annual[0].get("fiscalDateEnding", ""),
+                "consensus": "covered",
+                "provider": self.NAME,
+            }
+        return results
+
+
+# ─── Unified PriceProvider facade ─────────────────────────────────────────────
+
+PROVIDER_CLASSES = {
+    "finnhub": FinnhubProvider,
+    "yfinance": YFinanceProvider,
+    "newsapi": NewsAPIProvider,
+    "massive": PolygonProvider,
+    "polygon": PolygonProvider,
+    "alpha_vantage": AlphaVantageProvider,
+}
+
+
+def _build_provider(name: str):
+    cls = PROVIDER_CLASSES.get(name)
+    if cls is None:
+        raise ValueError(f"Unknown provider: {name!r}. Valid: {list(PROVIDER_CLASSES)}")
+    try:
+        return cls()
+    except (ValueError, ImportError) as e:
+        logger.warning(f"Cannot initialise {name}: {e}")
+        return None
+
+
+class PriceProvider:
+    """
+    Data-type-aware, quota-sharding financial data provider facade.
+
+    Different operation types are routed to optimal providers:
+      quotes     → yfinance (1 batch call, no quota) → Polygon (1 batch call, Starter+)
+                   → Finnhub (sequential, 60/min, no daily limit)
+      history    → Alpha Vantage (adjusted close, 500/day) → Finnhub (candles, unlimited)
+                   → yfinance
+      news       → NewsAPI (broad, 100/day) + Finnhub (company-specific) — AGGREGATED
+      analyst    → Finnhub (recommendations, unlimited) → yfinance
+
+    For large portfolios, quotes are sharded across providers respecting daily quotas:
+      INVESTORCLAW_QUOTA_ALPHAVANTAGE=500   (default, adjust if on paid plan)
+      INVESTORCLAW_QUOTA_NEWSAPI=100
+
+    Override routing via env vars:
+      INVESTORCLAW_PRICE_PROVIDER=auto|finnhub|yfinance|massive|polygon|alpha_vantage
+      INVESTORCLAW_FALLBACK_CHAIN=yfinance,massive  (comma-separated)
+    """
+
+    # Per-provider daily call budgets (free tier defaults)
+    _DEFAULT_QUOTAS: Dict[str, int] = {
+        "finnhub": 999_999,
+        "yfinance": 999_999,
+        "massive": 999_999,
+        "polygon": 999_999,
+        "alpha_vantage": 500,
+        "newsapi": 100,
+    }
+
+    # Preferred provider order per operation type (first available wins)
+    _OP_ROUTING: Dict[str, List[str]] = {
+        "quotes": ["massive", "yfinance", "finnhub"],
+        "history": ["alpha_vantage", "finnhub", "yfinance"],
+        "news": ["newsapi", "finnhub"],
+        "analyst": ["finnhub", "yfinance"],
+    }
+
+    def __init__(
+        self,
+        primary: Optional[str] = None,
+        fallback: Optional[List[str]] = None,
+    ):
+        self._override = os.getenv("INVESTORCLAW_PRICE_PROVIDER", "auto")
+        if self._override == "auto":
+            self._override = None
+
+        self._fallback_names = [
+            f.strip() for f in os.getenv("INVESTORCLAW_FALLBACK_CHAIN", "").split(",") if f.strip()
+        ]
+        if primary:
+            self._override = primary
+        if fallback:
+            self._fallback_names = fallback
+
+        # Build provider pool
+        self._pool: Dict[str, object] = {}
+        for name in list(PROVIDER_CLASSES.keys()):
+            p = _build_provider(name)
+            if p is not None:
+                self._pool[name] = p
+
+        # Read per-provider quotas from env
+        self._quotas = dict(self._DEFAULT_QUOTAS)
+        for name in self._pool:
+            env_key = f"INVESTORCLAW_QUOTA_{name.upper()}"
+            env_val = os.getenv(env_key)
+            if env_val and env_val.isdigit():
+                self._quotas[name] = int(env_val)
+        self._quota_used: Dict[str, int] = {k: 0 for k in self._quotas}
+
+        available = list(self._pool.keys())
+        logger.info(f"PriceProvider: available={available}, override={self._override or 'routing'}")
+
+    def _providers_for_op(self, op_type: str) -> List:
+        """Return ordered list of available provider instances for an operation type."""
+        if self._override:
+            ordered = [self._override] + self._fallback_names
+        else:
+            ordered = self._OP_ROUTING.get(op_type, ["yfinance"])
+        result = []
+        for name in ordered:
+            p = self._pool.get(name)
+            if p and self._quota_used.get(name, 0) < self._quotas.get(name, 0):
+                result.append(p)
+        return result
+
+    def _use_quota(self, provider_name: str, calls: int = 1) -> None:
+        self._quota_used[provider_name] = self._quota_used.get(provider_name, 0) + calls
+
+    @staticmethod
+    def _estimate_quota_cost(provider_name: str, method: str, item_count: int = 1) -> int:
+        """Estimate outbound request count for quota tracking/failover decisions."""
+        if item_count <= 0:
+            return 0
+        if method == "get_quote" or method == "get_history":
+            return 1
+        if method == "get_quotes":
+            if provider_name in {"alpha_vantage", "finnhub"}:
+                return item_count
+            return 1
+        if method == "get_news":
+            if provider_name == "newsapi":
+                return math.ceil(item_count / 5)
+            if provider_name == "finnhub":
+                return item_count
+            return 1
+        if method == "get_analyst_ratings":
+            return item_count if provider_name in {"finnhub", "yfinance", "alpha_vantage"} else 1
+        return 1
+
+    def _try_op(self, op_type: str, method: str, *args, **kwargs):
+        """Try each provider in routing order; return first successful non-empty result."""
+        for provider in self._providers_for_op(op_type):
+            fn = getattr(provider, method, None)
+            if fn is None:
+                continue
+            try:
+                result = fn(*args, **kwargs)
+                if result:
+                    item_count = 1
+                    if args and isinstance(args[0], list):
+                        item_count = len(args[0])
+                    self._use_quota(
+                        provider.NAME,
+                        self._estimate_quota_cost(provider.NAME, method, item_count),
+                    )
+                    return result
+            except NotImplementedError:
+                pass
+            except Exception as e:
+                logger.warning(f"{provider.NAME}.{method} failed: {e}")
+        empty: Dict = {}
+        return empty if method in ("get_quotes", "get_analyst_ratings") else []
+
+    def get_quote(self, symbol: str) -> Optional[Dict]:
+        """Current price for a single symbol."""
+        result = self._try_op("quotes", "get_quote", symbol)
+        return result if result else None
+
+    def get_quotes(self, symbols: List[str]) -> Dict[str, Dict]:
+        """Batch current prices for all symbols."""
+        if not symbols:
+            return {}
+
+        remaining = [s for s in symbols if s is not None and str(s).strip()]
+        results: Dict[str, Dict] = {}
+
+        for provider in self._providers_for_op("quotes"):
+            if not remaining:
+                break
+            fn = getattr(provider, "get_quotes", None)
+            if fn is None:
+                continue
+            try:
+                # Charge quota BEFORE batch dispatch so over-budget requests get properly gated
+                cost = self._estimate_quota_cost(provider.NAME, "get_quotes", len(remaining))
+                self._use_quota(provider.NAME, cost)
+
+                batch = fn(remaining)
+                if batch:
+                    results.update(batch)
+                    remaining = [s for s in remaining if s not in results]
+            except NotImplementedError:
+                pass
+            except Exception as e:
+                logger.warning(f"{provider.NAME}.get_quotes({len(remaining)} syms) failed: {e}")
+
+        if remaining:
+            logger.warning(
+                f"get_quotes: no price data for {len(remaining)} symbols: "
+                f"{remaining[:5]}{'...' if len(remaining) > 5 else ''}"
+            )
+        return results
+
+    def get_history(self, symbol: str, days: int = 365) -> List[Dict]:
+        """Daily OHLCV history."""
+        return self._try_op("history", "get_history", symbol, days=days)
+
+    def get_news(self, symbols: List[str], days: int = 7) -> List[Dict]:
+        """News headlines. Aggregates from NewsAPI AND Finnhub."""
+        articles: List[Dict] = []
+        seen_urls: set = set()
+        for provider in self._providers_for_op("news"):
+            fn = getattr(provider, "get_news", None)
+            if fn is None:
+                continue
+            try:
+                # Charge quota BEFORE batch dispatch so over-budget requests get properly gated
+                cost = self._estimate_quota_cost(provider.NAME, "get_news", len(symbols))
+                self._use_quota(provider.NAME, cost)
+
+                for a in fn(symbols, days=days):
+                    url = a.get("url", "")
+                    if url and url not in seen_urls:
+                        seen_urls.add(url)
+                        articles.append(a)
+            except (NotImplementedError, Exception) as e:
+                logger.warning(f"{provider.NAME}.get_news failed: {e}")
+        return articles
+
+    def get_analyst_ratings(self, symbols: List[str]) -> Dict[str, Dict]:
+        """Analyst consensus."""
+        return self._try_op("analyst", "get_analyst_ratings", symbols)
+
+    def quota_status(self) -> Dict[str, Dict]:
+        """Return quota used/remaining per provider (for diagnostics)."""
+        return {
+            name: {
+                "used": self._quota_used.get(name, 0),
+                "limit": self._quotas.get(name, 0),
+                "remaining": self._quotas.get(name, 0) - self._quota_used.get(name, 0),
+                "available": name in self._pool,
+            }
+            for name in self._DEFAULT_QUOTAS
+        }
+
+    @property
+    def primary_name(self) -> str:
+        """Name of the primary quote provider (for diagnostics)."""
+        return self._override or self._OP_ROUTING.get("quotes", ["yfinance"])[0]
+
+
+# ─── Portfolio update priority engine ────────────────────────────────────────
+
+
+class PortfolioUpdatePriority:
+    """
+    Tiers holdings by portfolio weight so high-impact positions get more
+    frequent, higher-fidelity price updates while the tail is refreshed cheaply.
+
+    Tier assignment (by cumulative portfolio weight):
+      Tier 1 — Core      : Top N positions covering ~50% of portfolio value
+                           → real-time provider (Finnhub), short TTL (15 min)
+      Tier 2 — Major     : Next positions covering 50-80% of portfolio value
+                           → batch provider (yfinance), medium TTL (30 min)
+      Tier 3 — Standard  : Remaining (<20% coverage, many small positions)
+                           → batch provider (yfinance), session TTL (60 min)
+
+    Usage:
+        portfolio = [  # from CDM
+            {"symbol": "AAPL", "quantity": 100, "current_price": 150},
+            ...
+        ]
+        tier = PortfolioUpdatePriority.tier_for_symbol("AAPL", portfolio)
+        if tier <= 1:
+            provider = finnhub
+        else:
+            provider = yfinance
+    """
+
+    @staticmethod
+    def tier_for_symbol(symbol: str, portfolio: list) -> int:
+        """
+        Return tier (1, 2, or 3) for a given symbol based on portfolio allocation.
+        portfolio: list of dicts with 'symbol', 'quantity', 'current_price'
+        """
+        # Compute total portfolio value
+        total_value = sum(
+            (h.get("quantity", 0) or 0) * (h.get("current_price", 0) or 0) for h in portfolio
+        )
+        if total_value == 0:
+            return 3
+
+        # Sort by holding value descending
+        holdings = sorted(
+            [
+                (
+                    h.get("symbol", ""),
+                    (h.get("quantity", 0) or 0) * (h.get("current_price", 0) or 0),
+                )
+                for h in portfolio
+            ],
+            key=lambda x: x[1],
+            reverse=True,
+        )
+
+        cumulative = 0.0
+        for sym, value in holdings:
+            cumulative += value
+            pct = cumulative / total_value
+            if sym == symbol:
+                if pct <= 0.50:
+                    return 1
+                elif pct <= 0.80:
+                    return 2
+                else:
+                    return 3
+        return 3

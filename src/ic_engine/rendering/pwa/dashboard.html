@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#1a1a2e">
+    <title>InvestorClaw - Portfolio Dashboard</title>
+    <link rel="manifest" href="manifest.json">
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='75' font-size='75' font-weight='bold' fill='%23f0a000'>🦅</text></svg>">
+    <link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+    <div id="app">
+        <div class="container">
+            <header class="navbar">
+                <div class="navbar-brand">
+                    <h1>InvestorClaw Dashboard</h1>
+                    <span class="navbar-version">v2.0.0</span>
+                </div>
+                <nav class="navbar-nav">
+                    <button class="nav-tab active" data-tab="overview">Overview</button>
+                    <button class="nav-tab" data-tab="performance">Performance</button>
+                    <button class="nav-tab" data-tab="bonds">Bonds</button>
+                    <button class="nav-tab" data-tab="analyst">Analyst</button>
+                    <button class="nav-tab" data-tab="cashflow">Cashflow</button>
+                </nav>
+            </header>
+
+            <main class="main-content">
+                <!-- Overview Tab -->
+                <section id="overview-tab" class="tab-content active">
+                    <div class="section-header">
+                        <h2>Portfolio Overview</h2>
+                        <span class="as-of-date"></span>
+                    </div>
+                    <div class="holdings-summary"></div>
+                    <div class="charts-grid">
+                        <div class="chart-container">
+                            <div id="asset-allocation-chart"></div>
+                        </div>
+                        <div class="chart-container">
+                            <div id="sector-breakdown-chart"></div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Performance Tab -->
+                <section id="performance-tab" class="tab-content">
+                    <div class="section-header">
+                        <h2>Performance Analytics</h2>
+                    </div>
+                    <div class="performance-metrics"></div>
+                    <div class="chart-container">
+                        <div id="returns-chart"></div>
+                    </div>
+                </section>
+
+                <!-- Bonds Tab -->
+                <section id="bonds-tab" class="tab-content">
+                    <div class="section-header">
+                        <h2>Bond Analysis</h2>
+                    </div>
+                    <div class="bonds-analysis"></div>
+                </section>
+
+                <!-- Analyst Tab -->
+                <section id="analyst-tab" class="tab-content">
+                    <div class="section-header">
+                        <h2>Analyst Insights</h2>
+                    </div>
+                    <div class="analyst-insights"></div>
+                </section>
+
+                <!-- Cashflow Tab -->
+                <section id="cashflow-tab" class="tab-content">
+                    <div class="section-header">
+                        <h2>Cashflow Calendar</h2>
+                    </div>
+                    <div class="cashflow-calendar"></div>
+                </section>
+            </main>
+
+            <footer class="footer">
+                <p>&copy; 2026 InvestorClaw. CDM 5.x compliant. <a href="https://github.com/perlowja/InvestorClaw">GitHub</a></p>
+            </footer>
+        </div>
+    </div>
+
+    <!-- Data placeholder (embedded in static mode, fetched in server mode) -->
+    <!-- DATA_PLACEHOLDER -->
+
+    <script src="assets/data-loader.js"></script>
+    <script src="assets/charts.js"></script>
+    <script src="assets/app.js"></script>
+
+    <script>
+        // Register service worker for offline support
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('service-worker.js').catch(err => {
+                console.log('Service worker registration failed:', err);
+            });
+        }
+    </script>
+</body>
+</html>

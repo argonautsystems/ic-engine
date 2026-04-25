@@ -1,0 +1,1087 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="InvestorClaw Integrated Dashboard - Portfolio Analysis + Live Agent Chat">
+    <title>InvestorClaw Dashboard</title>
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+    <script src="assets/data-loader.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary-bg: #0f1419;
+            --secondary-bg: #1a1f2e;
+            --tertiary-bg: #252d3d;
+            --border-color: #3a4556;
+            --text-primary: #e8eef2;
+            --text-secondary: #a8b2c1;
+            --accent-cyan: #00d9ff;
+            --accent-blue: #0080ff;
+            --accent-amber: #ffa500;
+            --accent-green: #10b981;
+            --accent-red: #ef4444;
+            --font-mono: 'IBM Plex Mono', 'Courier New', monospace;
+            --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', sans-serif;
+        }
+
+        html, body {
+            width: 100%;
+            height: 100%;
+            background-color: var(--primary-bg);
+            color: var(--text-primary);
+            font-family: var(--font-sans);
+            overflow: hidden;
+        }
+
+        .dashboard-container {
+            display: grid;
+            grid-template-columns: 1fr 380px;
+            grid-template-rows: auto 1fr;
+            height: 100vh;
+            gap: 0;
+        }
+
+        /* Header */
+        .header {
+            grid-column: 1 / -1;
+            background-color: var(--secondary-bg);
+            border-bottom: 1px solid var(--border-color);
+            padding: 1rem 1.5rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            z-index: 100;
+        }
+
+        .header-title {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .header-title h1 {
+            font-size: 1.25rem;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+        }
+
+        .header-title .logo {
+            color: var(--accent-cyan);
+            font-family: var(--font-mono);
+            font-size: 1.1rem;
+            font-weight: bold;
+        }
+
+        .header-status {
+            display: flex;
+            gap: 2rem;
+            align-items: center;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
+
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: var(--accent-green);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        /* Main content area */
+        .main-content {
+            display: grid;
+            grid-template-columns: 1fr 380px;
+            gap: 0;
+            height: 100%;
+            grid-column: 1 / -1;
+        }
+
+        /* Left panel: Dashboard */
+        .dashboard-panel {
+            overflow-y: auto;
+            background-color: var(--primary-bg);
+            border-right: 1px solid var(--border-color);
+        }
+
+        .dashboard-panel::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .dashboard-panel::-webkit-scrollbar-track {
+            background: var(--secondary-bg);
+        }
+
+        .dashboard-panel::-webkit-scrollbar-thumb {
+            background: var(--tertiary-bg);
+            border-radius: 4px;
+        }
+
+        .dashboard-panel::-webkit-scrollbar-thumb:hover {
+            background: var(--border-color);
+        }
+
+        .dashboard-content {
+            padding: 2rem;
+        }
+
+        /* Tab navigation */
+        .tab-nav {
+            display: flex;
+            gap: 0.5rem;
+            padding: 0 2rem 1rem;
+            border-bottom: 1px solid var(--border-color);
+            overflow-x: auto;
+            background-color: var(--secondary-bg);
+        }
+
+        .tab-btn {
+            padding: 0.75rem 1rem;
+            background: none;
+            border: none;
+            border-bottom: 2px solid transparent;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: 500;
+            white-space: nowrap;
+            transition: all 0.2s ease;
+            font-family: var(--font-sans);
+        }
+
+        .tab-btn:hover {
+            color: var(--accent-cyan);
+        }
+
+        .tab-btn.active {
+            color: var(--accent-cyan);
+            border-bottom-color: var(--accent-cyan);
+        }
+
+        /* Tab content */
+        .tab-content {
+            display: none;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        /* Right panel: Chat */
+        .chat-panel {
+            display: flex;
+            flex-direction: column;
+            background-color: var(--secondary-bg);
+            border-left: 1px solid var(--border-color);
+        }
+
+        .chat-header {
+            padding: 1rem;
+            border-bottom: 1px solid var(--border-color);
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 1rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+
+        .chat-messages::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .chat-messages::-webkit-scrollbar-track {
+            background: var(--secondary-bg);
+        }
+
+        .chat-messages::-webkit-scrollbar-thumb {
+            background: var(--tertiary-bg);
+            border-radius: 3px;
+        }
+
+        .message {
+            padding: 0.75rem 0.875rem;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            line-height: 1.4;
+            word-wrap: break-word;
+            max-width: 100%;
+            animation: slideIn 0.2s ease;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(4px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .message.user {
+            background-color: var(--tertiary-bg);
+            color: var(--text-primary);
+            align-self: flex-end;
+            border-left: 2px solid var(--accent-blue);
+        }
+
+        .message.agent {
+            background-color: rgba(0, 217, 255, 0.1);
+            color: var(--text-primary);
+            border-left: 2px solid var(--accent-cyan);
+        }
+
+        .message.system {
+            background-color: rgba(255, 165, 0, 0.1);
+            color: var(--accent-amber);
+            font-size: 0.8rem;
+            border-left: 2px solid var(--accent-amber);
+            align-self: center;
+            text-align: center;
+            width: 95%;
+        }
+
+        .chat-input-area {
+            padding: 1rem;
+            border-top: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .chat-input-wrapper {
+            display: flex;
+            gap: 0.5rem;
+            align-items: flex-end;
+        }
+
+        .chat-input {
+            flex: 1;
+            background-color: var(--tertiary-bg);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 0.75rem;
+            border-radius: 4px;
+            font-family: var(--font-sans);
+            font-size: 0.85rem;
+            resize: none;
+            max-height: 60px;
+        }
+
+        .chat-input::placeholder {
+            color: var(--text-secondary);
+        }
+
+        .chat-input:focus {
+            outline: none;
+            border-color: var(--accent-cyan);
+            box-shadow: 0 0 0 2px rgba(0, 217, 255, 0.1);
+        }
+
+        .chat-btn {
+            background-color: var(--accent-cyan);
+            color: var(--primary-bg);
+            border: none;
+            padding: 0.75rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.85rem;
+            transition: all 0.2s ease;
+            white-space: nowrap;
+        }
+
+        .chat-btn:hover {
+            background-color: #00b8d4;
+            transform: translateY(-1px);
+        }
+
+        .chat-btn:active {
+            transform: translateY(0);
+        }
+
+        .chat-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .quick-actions {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .quick-action-btn {
+            background-color: rgba(0, 217, 255, 0.1);
+            color: var(--accent-cyan);
+            border: 1px solid var(--border-color);
+            padding: 0.5rem 0.75rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.75rem;
+            transition: all 0.2s ease;
+            text-align: left;
+        }
+
+        .quick-action-btn:hover {
+            background-color: rgba(0, 217, 255, 0.2);
+            border-color: var(--accent-cyan);
+        }
+
+        /* Chart containers */
+        .chart-container {
+            background-color: var(--secondary-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 1rem;
+            margin-bottom: 1.5rem;
+            min-height: 300px;
+        }
+
+        .chart-title {
+            font-size: 0.9rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            color: var(--text-primary);
+        }
+
+        /* Metrics grid */
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .metric-card {
+            background-color: var(--secondary-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 1rem;
+            transition: all 0.2s ease;
+        }
+
+        .metric-card:hover {
+            border-color: var(--accent-cyan);
+            background-color: rgba(0, 217, 255, 0.05);
+        }
+
+        .metric-label {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 0.5rem;
+        }
+
+        .metric-value {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: var(--text-primary);
+            font-family: var(--font-mono);
+        }
+
+        .metric-change {
+            font-size: 0.8rem;
+            margin-top: 0.5rem;
+            font-weight: 500;
+        }
+
+        .metric-change.positive {
+            color: var(--accent-green);
+        }
+
+        .metric-change.negative {
+            color: var(--accent-red);
+        }
+
+        /* Tables */
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85rem;
+        }
+
+        .data-table thead {
+            background-color: var(--tertiary-bg);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .data-table th {
+            padding: 0.75rem;
+            text-align: left;
+            color: var(--text-secondary);
+            font-weight: 600;
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .data-table td {
+            padding: 0.75rem;
+            border-bottom: 1px solid var(--border-color);
+            color: var(--text-primary);
+        }
+
+        .data-table tr:hover {
+            background-color: rgba(0, 217, 255, 0.05);
+        }
+
+        .data-table td:first-child {
+            font-weight: 500;
+            color: var(--accent-cyan);
+        }
+
+        /* Loading state */
+        .loading {
+            text-align: center;
+            padding: 2rem;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid var(--border-color);
+            border-top-color: var(--accent-cyan);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Responsive adjustments */
+        @media (max-width: 1200px) {
+            .dashboard-container {
+                grid-template-columns: 1fr 300px;
+            }
+        }
+
+        @media (max-width: 900px) {
+            .dashboard-container {
+                grid-template-columns: 1fr;
+                grid-template-rows: auto auto 1fr;
+            }
+
+            .main-content {
+                grid-template-columns: 1fr;
+            }
+
+            .dashboard-panel {
+                border-right: none;
+                border-bottom: 1px solid var(--border-color);
+            }
+
+            .chat-panel {
+                border-left: none;
+                border-top: 1px solid var(--border-color);
+                max-height: 40vh;
+            }
+
+            .chat-messages {
+                max-height: 200px;
+            }
+        }
+
+        /* Connection status indicator */
+        .connection-status {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 0.5rem;
+        }
+
+        .connection-status.connected {
+            background-color: var(--accent-green);
+            box-shadow: 0 0 8px var(--accent-green);
+        }
+
+        .connection-status.disconnected {
+            background-color: var(--accent-red);
+        }
+
+        .connection-status.connecting {
+            background-color: var(--accent-amber);
+            animation: pulse 1s infinite;
+        }
+    </style>
+</head>
+<body>
+    <div class="dashboard-container">
+        <!-- Header -->
+        <div class="header">
+            <div class="header-title">
+                <div class="logo">🦅</div>
+                <h1>InvestorClaw</h1>
+            </div>
+            <div class="header-status">
+                <div class="status-item">
+                    <span class="status-dot"></span>
+                    <span id="portfolio-status">Portfolio Loaded</span>
+                </div>
+                <div class="status-item">
+                    <span class="connection-status connecting" id="connection-status"></span>
+                    <span id="connection-text">Connecting</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Left Panel: Dashboard -->
+            <div class="dashboard-panel">
+                <!-- Tab Navigation -->
+                <div class="tab-nav" id="tab-nav">
+                    <button class="tab-btn active" data-tab="holdings">Holdings</button>
+                    <button class="tab-btn" data-tab="performance">Performance</button>
+                    <button class="tab-btn" data-tab="bonds">Bonds</button>
+                    <button class="tab-btn" data-tab="analyst">Analyst</button>
+                    <button class="tab-btn" data-tab="news">News</button>
+                    <button class="tab-btn" data-tab="cashflow">Cashflow</button>
+                    <button class="tab-btn" data-tab="optimize">Optimize</button>
+                    <button class="tab-btn" data-tab="synthesis">Analysis</button>
+                </div>
+
+                <!-- Tab Content -->
+                <div class="dashboard-content">
+                    <div id="holdings" class="tab-content active">
+                        <div class="metrics-grid" id="holdings-metrics"></div>
+                        <div class="chart-container">
+                            <div class="chart-title">Asset Allocation</div>
+                            <div id="asset-allocation-chart"></div>
+                        </div>
+                        <div class="chart-container">
+                            <div class="chart-title">Top Holdings</div>
+                            <table class="data-table" id="holdings-table">
+                                <thead>
+                                    <tr>
+                                        <th>Symbol</th>
+                                        <th>Shares</th>
+                                        <th>Price</th>
+                                        <th>Value</th>
+                                        <th>%</th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div id="performance" class="tab-content">
+                        <div class="metrics-grid" id="performance-metrics"></div>
+                        <div class="chart-container">
+                            <div class="chart-title">Performance History</div>
+                            <div id="performance-chart"></div>
+                        </div>
+                    </div>
+
+                    <div id="bonds" class="tab-content">
+                        <div class="metrics-grid" id="bonds-metrics"></div>
+                        <div class="chart-container">
+                            <div class="chart-title">Bond Ladder</div>
+                            <div id="bond-ladder-chart"></div>
+                        </div>
+                    </div>
+
+                    <div id="analyst" class="tab-content">
+                        <div class="metrics-grid" id="analyst-metrics"></div>
+                        <div class="chart-container">
+                            <div class="chart-title">Analyst Ratings</div>
+                            <table class="data-table" id="analyst-table">
+                                <thead>
+                                    <tr>
+                                        <th>Symbol</th>
+                                        <th>Rating</th>
+                                        <th>Target</th>
+                                        <th>Upside</th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div id="news" class="tab-content">
+                        <div class="chart-container">
+                            <div class="chart-title">Sentiment Timeline</div>
+                            <div id="sentiment-chart"></div>
+                        </div>
+                    </div>
+
+                    <div id="cashflow" class="tab-content">
+                        <div class="metrics-grid" id="cashflow-metrics"></div>
+                        <div class="chart-container">
+                            <div class="chart-title">Upcoming Cashflows</div>
+                            <table class="data-table" id="cashflow-table">
+                                <thead>
+                                    <tr>
+                                        <th>Date</th>
+                                        <th>Symbol</th>
+                                        <th>Type</th>
+                                        <th>Amount</th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div id="optimize" class="tab-content">
+                        <div class="metrics-grid" id="optimize-metrics"></div>
+                        <div class="chart-container">
+                            <div class="chart-title">Efficient Frontier</div>
+                            <div id="efficient-frontier-chart"></div>
+                        </div>
+                        <div class="chart-container">
+                            <div class="chart-title">Recommended Trades</div>
+                            <table class="data-table" id="optimize-table">
+                                <thead>
+                                    <tr>
+                                        <th>Symbol</th>
+                                        <th>Action</th>
+                                        <th>Quantity</th>
+                                        <th>Reason</th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div id="synthesis" class="tab-content">
+                        <div id="synthesis-content"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Panel: Chat -->
+            <div class="chat-panel">
+                <div class="chat-header">Agent Chat</div>
+                <div class="chat-messages" id="chat-messages"></div>
+                <div class="chat-input-area">
+                    <div class="quick-actions" id="quick-actions">
+                        <button class="quick-action-btn" data-action="tax-loss-harvest">💡 Tax-Loss Harvest</button>
+                        <button class="quick-action-btn" data-action="rebalance">⚖️ Rebalance</button>
+                        <button class="quick-action-btn" data-action="risk-check">⚠️ Risk Check</button>
+                    </div>
+                    <div class="chat-input-wrapper">
+                        <textarea class="chat-input" id="chat-input" placeholder="Ask about your portfolio..." rows="2"></textarea>
+                        <button class="chat-btn" id="chat-send">Send</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        class DashboardApp {
+            constructor() {
+                this.ws = null;
+                this.dashboardData = {};
+                this.currentTab = 'holdings';
+                this.deploymentMode = 'unknown';
+            }
+
+            async init() {
+                // Use data-loader abstraction to get data
+                try {
+                    this.deploymentMode = await window.DataLoader.detectDeploymentMode();
+                    this.dashboardData = await window.DataLoader.loadData();
+                } catch (err) {
+                    console.error('Failed to load dashboard data:', err);
+                    this.addSystemMessage(`⚠️ Failed to load data: ${err.message}`);
+                }
+
+                this.setupWebSocket();
+                this.setupEventListeners();
+                this.loadDashboardData();
+            }
+
+            setupWebSocket() {
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const host = window.location.host;
+                const wsUrl = `${protocol}//${host}/ws/dashboard`;
+
+                this.ws = new WebSocket(wsUrl);
+
+                this.ws.onopen = () => {
+                    this.updateConnectionStatus(true);
+                    this.addSystemMessage('Connected to agent');
+                };
+
+                this.ws.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    this.handleMessage(data);
+                };
+
+                this.ws.onerror = () => {
+                    this.updateConnectionStatus(false, 'error');
+                };
+
+                this.ws.onclose = () => {
+                    this.updateConnectionStatus(false);
+                };
+            }
+
+            setupEventListeners() {
+                // Tab navigation
+                document.querySelectorAll('.tab-btn').forEach(btn => {
+                    btn.addEventListener('click', (e) => this.switchTab(e.target.dataset.tab));
+                });
+
+                // Chat
+                document.getElementById('chat-send').addEventListener('click', () => this.sendChat());
+                document.getElementById('chat-input').addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        this.sendChat();
+                    }
+                });
+
+                // Quick actions
+                document.querySelectorAll('.quick-action-btn').forEach(btn => {
+                    btn.addEventListener('click', (e) => this.handleQuickAction(e.target.dataset.action));
+                });
+            }
+
+            switchTab(tabName) {
+                document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
+                document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+                document.getElementById(tabName).classList.add('active');
+                document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
+                this.currentTab = tabName;
+                this.renderTab(tabName);
+            }
+
+            renderTab(tabName) {
+                const data = this.dashboardData;
+
+                switch (tabName) {
+                    case 'holdings':
+                        this.renderHoldings(data.holdings || {});
+                        break;
+                    case 'performance':
+                        this.renderPerformance(data.performance || {});
+                        break;
+                    case 'bonds':
+                        this.renderBonds(data.bonds || {});
+                        break;
+                    case 'analyst':
+                        this.renderAnalyst(data.analyst || {});
+                        break;
+                    case 'news':
+                        this.renderNews(data.news || {});
+                        break;
+                    case 'cashflow':
+                        this.renderCashflow(data.cashflow || {});
+                        break;
+                    case 'optimize':
+                        this.renderOptimize(data.optimize || {});
+                        break;
+                    case 'synthesis':
+                        this.renderSynthesis(data.synthesis || {});
+                        break;
+                }
+            }
+
+            renderHoldings(data) {
+                const holdings = data.positions || [];
+                const summary = data.summary || {};
+
+                // Metrics
+                const metricsHtml = `
+                    <div class="metric-card">
+                        <div class="metric-label">Total Value</div>
+                        <div class="metric-value">$${this.formatNumber(summary.total_value || 0)}</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-label">Holdings</div>
+                        <div class="metric-value">${holdings.length}</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-label">Cash %</div>
+                        <div class="metric-value">${this.formatPercent(summary.cash_pct || 0)}</div>
+                    </div>
+                `;
+                document.getElementById('holdings-metrics').innerHTML = metricsHtml;
+
+                // Chart
+                if (holdings.length > 0) {
+                    const symbols = holdings.map(h => h.symbol);
+                    const values = holdings.map(h => h.market_value || 0);
+                    Plotly.newPlot('asset-allocation-chart', [{
+                        labels: symbols,
+                        values: values,
+                        type: 'pie',
+                        marker: { colors: ['#00d9ff', '#0080ff', '#ffa500', '#10b981', '#ef4444'] }
+                    }], {
+                        margin: { l: 0, r: 0, t: 0, b: 0 },
+                        paper_bgcolor: 'rgba(0,0,0,0)',
+                        font: { color: '#e8eef2', family: 'IBM Plex Mono' }
+                    }, { responsive: true });
+                }
+
+                // Table
+                const tbody = document.querySelector('#holdings-table tbody');
+                tbody.innerHTML = holdings.slice(0, 10).map(h => `
+                    <tr>
+                        <td>${h.symbol}</td>
+                        <td>${this.formatNumber(h.quantity || 0)}</td>
+                        <td>$${this.formatNumber(h.price || 0)}</td>
+                        <td>$${this.formatNumber(h.market_value || 0)}</td>
+                        <td>${this.formatPercent((h.market_value / summary.total_value || 0))}</td>
+                    </tr>
+                `).join('');
+            }
+
+            renderPerformance(data) {
+                const metrics = data.metrics || {};
+                const metricsHtml = `
+                    <div class="metric-card">
+                        <div class="metric-label">YTD Return</div>
+                        <div class="metric-value" style="color: ${metrics.ytd_return > 0 ? '#10b981' : '#ef4444'}">
+                            ${this.formatPercent(metrics.ytd_return || 0)}
+                        </div>
+                        <div class="metric-change ${metrics.ytd_return > 0 ? 'positive' : 'negative'}">
+                            ${metrics.ytd_return > 0 ? '↑' : '↓'} vs benchmark
+                        </div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-label">Sharpe Ratio</div>
+                        <div class="metric-value">${this.formatNumber(metrics.sharpe_ratio || 0)}</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-label">Volatility</div>
+                        <div class="metric-value">${this.formatPercent(metrics.volatility || 0)}</div>
+                    </div>
+                `;
+                document.getElementById('performance-metrics').innerHTML = metricsHtml;
+            }
+
+            renderBonds(data) {
+                const positions = data.positions || [];
+                const metricsHtml = `
+                    <div class="metric-card">
+                        <div class="metric-label">Bond Value</div>
+                        <div class="metric-value">$${this.formatNumber(data.total_value || 0)}</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-label">Avg Yield</div>
+                        <div class="metric-value">${this.formatPercent(data.avg_yield || 0)}</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-label">Duration</div>
+                        <div class="metric-value">${this.formatNumber(data.duration || 0)}</div>
+                    </div>
+                `;
+                document.getElementById('bonds-metrics').innerHTML = metricsHtml;
+            }
+
+            renderAnalyst(data) {
+                const recommendations = data.recommendations || {};
+                const metricsHtml = `
+                    <div class="metric-card">
+                        <div class="metric-label">Consensus</div>
+                        <div class="metric-value">${data.consensus || 'N/A'}</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-label">Avg Target</div>
+                        <div class="metric-value">$${this.formatNumber(data.avg_target || 0)}</div>
+                    </div>
+                `;
+                document.getElementById('analyst-metrics').innerHTML = metricsHtml;
+
+                const tbody = document.querySelector('#analyst-table tbody');
+                tbody.innerHTML = Object.entries(recommendations).slice(0, 10).map(([symbol, rec]) => `
+                    <tr>
+                        <td>${symbol}</td>
+                        <td>${rec.consensus || 'Hold'}</td>
+                        <td>$${this.formatNumber(rec.target_price || 0)}</td>
+                        <td>${this.formatPercent((rec.target_price / rec.current_price - 1) || 0)}</td>
+                    </tr>
+                `).join('');
+            }
+
+            renderNews(data) {
+                const headlines = data.top_positive || [];
+                // Sentiment chart placeholder
+                document.getElementById('sentiment-chart').innerHTML = '<div class="loading">Loading sentiment data...</div>';
+            }
+
+            renderCashflow(data) {
+                const items = data.items || [];
+                const metricsHtml = `
+                    <div class="metric-card">
+                        <div class="metric-label">YTD Cashflow</div>
+                        <div class="metric-value">$${this.formatNumber(data.ytd_total || 0)}</div>
+                    </div>
+                `;
+                document.getElementById('cashflow-metrics').innerHTML = metricsHtml;
+
+                const tbody = document.querySelector('#cashflow-table tbody');
+                tbody.innerHTML = items.slice(0, 10).map(item => `
+                    <tr>
+                        <td>${item.date || 'N/A'}</td>
+                        <td>${item.symbol || 'N/A'}</td>
+                        <td>${item.type || 'Dividend'}</td>
+                        <td>$${this.formatNumber(item.amount || 0)}</td>
+                    </tr>
+                `).join('');
+            }
+
+            renderOptimize(data) {
+                const metricsHtml = `
+                    <div class="metric-card">
+                        <div class="metric-label">Recommended Return</div>
+                        <div class="metric-value" style="color: #10b981">+${this.formatPercent(data.expected_return_diff || 0)}</div>
+                    </div>
+                `;
+                document.getElementById('optimize-metrics').innerHTML = metricsHtml;
+            }
+
+            renderSynthesis(data) {
+                const content = data.brief || data.summary || 'No analysis available.';
+                document.getElementById('synthesis-content').innerHTML = `
+                    <div class="chart-container">
+                        <div class="chart-title">Portfolio Analysis</div>
+                        <p style="line-height: 1.6; color: var(--text-primary);">${content}</p>
+                    </div>
+                `;
+            }
+
+            loadDashboardData() {
+                this.renderTab(this.currentTab);
+            }
+
+            sendChat() {
+                const input = document.getElementById('chat-input');
+                const message = input.value.trim();
+                if (!message) return;
+
+                this.addMessage(message, 'user');
+                input.value = '';
+
+                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    this.ws.send(JSON.stringify({
+                        type: 'chat',
+                        content: message,
+                        current_tab: this.currentTab
+                    }));
+                }
+            }
+
+            handleQuickAction(action) {
+                const prompts = {
+                    'tax-loss-harvest': 'Show me tax-loss harvesting opportunities in my portfolio',
+                    'rebalance': 'What\'s the best way to rebalance my portfolio?',
+                    'risk-check': 'Is my portfolio properly diversified?'
+                };
+
+                document.getElementById('chat-input').value = prompts[action] || '';
+                this.sendChat();
+            }
+
+            addMessage(content, role) {
+                const messagesDiv = document.getElementById('chat-messages');
+                const messageEl = document.createElement('div');
+                messageEl.className = `message ${role}`;
+                messageEl.textContent = content;
+                messagesDiv.appendChild(messageEl);
+                messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            }
+
+            addSystemMessage(content) {
+                const messagesDiv = document.getElementById('chat-messages');
+                const messageEl = document.createElement('div');
+                messageEl.className = 'message system';
+                messageEl.textContent = content;
+                messagesDiv.appendChild(messageEl);
+            }
+
+            handleMessage(data) {
+                if (data.type === 'chat' && data.role === 'agent') {
+                    this.addMessage(data.content, 'agent');
+                } else if (data.type === 'command_result') {
+                    this.dashboardData = data.result;
+                    this.renderTab(this.currentTab);
+                    this.addSystemMessage(`Updated ${data.command} data`);
+                }
+            }
+
+            updateConnectionStatus(connected, status = 'connected') {
+                const statusEl = document.getElementById('connection-status');
+                const textEl = document.getElementById('connection-text');
+
+                statusEl.className = `connection-status ${status}`;
+                textEl.textContent = connected ? 'Connected' : 'Disconnected';
+            }
+
+            formatNumber(num) {
+                return new Intl.NumberFormat('en-US', {
+                    maximumFractionDigits: 2,
+                    minimumFractionDigits: 0
+                }).format(num);
+            }
+
+            formatPercent(num) {
+                return new Intl.NumberFormat('en-US', {
+                    style: 'percent',
+                    maximumFractionDigits: 2
+                }).format(num);
+            }
+        }
+
+        // Register service worker for offline capability
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('service-worker.js', { scope: '/' }).then(
+                (registration) => console.log('Service Worker registered:', registration),
+                (error) => console.log('Service Worker registration failed:', error)
+            );
+        }
+
+        // Initialize on page load
+        window.addEventListener('DOMContentLoaded', async () => {
+            const app = new DashboardApp();
+            await app.init();
+        });
+    </script>
+</body>
+</html>

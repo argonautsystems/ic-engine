@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#1a1a2e">
+    <title>InvestorClaw - Portfolio Dashboard</title>
+    <link rel="manifest" href="manifest.json">
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='75' font-size='75' font-weight='bold' fill='%23f0a000'>🦅</text></svg>">
+    <link rel="stylesheet" href="assets/styles.css">
+    <style>
+        /* Mission Control rail (stonkmode only) */
+        __STONKMODE_CSS__
+    </style>
+</head>
+<body>
+    <div id="app">
+        __STONKMODE_WRAP_START__
+        <div class="container">
+            <header class="navbar">
+                <div class="navbar-brand">
+                    <h1>InvestorClaw Dashboard</h1>
+                    <span class="navbar-version">v2.0.0</span>
+                    <span class="navbar-status">
+                        <span class="total-value">$__TOTAL__</span>
+                        <span class="last-update">as of __AS_OF__</span>
+                        <span class="freshness-status" id="freshness-status">Freshness pending</span>
+                        <button class="refresh-btn" type="button" onclick="IC.refreshDashboard()">Refresh</button>
+                    </span>
+                </div>
+                <nav class="navbar-nav dashboard-navigation" aria-label="Dashboard navigation">
+                    <div class="primary-tabs" role="tablist" aria-label="Dashboard groups">
+                        <button class="nav-tab primary-tab active" data-group="core" role="tab" aria-selected="true">Core</button>
+                        <button class="nav-tab primary-tab" data-group="analysis" role="tab" aria-selected="false">Analysis</button>
+                        <button class="nav-tab primary-tab" data-group="recommendations" role="tab" aria-selected="false">Recommendations</button>
+                        <button class="nav-tab primary-tab" data-group="utility" role="tab" aria-selected="false">Utility</button>
+                    </div>
+                    <div class="secondary-tabs active" data-secondary-group="core" role="tablist" aria-label="Core tools">
+                        <button class="nav-tab secondary-tab active" data-tab="holdings" role="tab" aria-selected="true">Holdings</button>
+                        <button class="nav-tab secondary-tab" data-tab="performance" role="tab" aria-selected="false">Performance</button>
+                        <button class="nav-tab secondary-tab" data-tab="cashflow" role="tab" aria-selected="false">Cashflow</button>
+                        <button class="nav-tab secondary-tab" data-tab="bonds" role="tab" aria-selected="false">Bonds</button>
+                        <button class="nav-tab secondary-tab" data-tab="synthesis" role="tab" aria-selected="false">Synthesis</button>
+                        <button class="nav-tab secondary-tab" data-tab="news" role="tab" aria-selected="false">News</button>
+                    </div>
+                    <div class="secondary-tabs" data-secondary-group="analysis" role="tablist" aria-label="Analysis tools">
+                        <button class="nav-tab secondary-tab" data-tab="whatchanged" role="tab" aria-selected="false">What Changed</button>
+                        <button class="nav-tab secondary-tab" data-tab="scenarios" role="tab" aria-selected="false">Scenarios</button>
+                        <button class="nav-tab secondary-tab" data-tab="peer" role="tab" aria-selected="false">Peer Analysis</button>
+                        <button class="nav-tab secondary-tab" data-tab="analyst" role="tab" aria-selected="false">Analyst Ratings</button>
+                    </div>
+                    <div class="secondary-tabs" data-secondary-group="recommendations" role="tablist" aria-label="Recommendation tools">
+                        <button class="nav-tab secondary-tab" data-tab="optimize" role="tab" aria-selected="false">Optimize</button>
+                        <button class="nav-tab secondary-tab" data-tab="rebalancetax" role="tab" aria-selected="false">Rebalance & Tax</button>
+                        <button class="nav-tab secondary-tab" data-tab="recommendations" role="tab" aria-selected="false">Recommendations</button>
+                    </div>
+                    <div class="secondary-tabs" data-secondary-group="utility" role="tablist" aria-label="Utility tools">
+                        <button class="nav-tab secondary-tab" data-tab="reports" role="tab" aria-selected="false">Reports</button>
+                        <button class="nav-tab secondary-tab" data-tab="settings" role="tab" aria-selected="false">Settings</button>
+                        <button class="nav-tab secondary-tab" data-tab="about" role="tab" aria-selected="false">About</button>
+                    </div>
+                </nav>
+            </header>
+
+            <main class="main-content">
+                <!-- 1. Holdings Tab -->
+                <section id="holdings-tab" class="tab-content active">
+                    <div class="section-header">
+                        <h2>Portfolio Holdings</h2>
+                        <span class="as-of-date"></span>
+                    </div>
+                    <div id="holdings-content"></div>
+                    <div class="holdings-summary"></div>
+                    <div class="charts-grid">
+                        <div class="chart-container">
+                            <div id="asset-allocation-chart"></div>
+                        </div>
+                        <div class="chart-container">
+                            <div id="sector-breakdown-chart"></div>
+                        </div>
+                    </div>
+                    <div class="holdings-table"></div>
+                </section>
+
+                <!-- 2. Performance Tab -->
+                <section id="performance-tab" class="tab-content">
+                    <div class="section-header">
+                        <h2>Performance Analytics</h2>
+                    </div>
+                    <div id="performance-content"></div>
+                    <div class="performance-metrics"></div>
+                    <div class="chart-container">
+                        <div id="returns-chart"></div>
+                    </div>
+                    <div class="performance-table"></div>
+                </section>
+
+                <!-- 3. Bonds Tab -->
+                <section id="bonds-tab" class="tab-content">
+                    <div class="section-header">
+                        <h2>Bond Analysis</h2>
+                    </div>
+                    <div id="bonds-content"></div>
+                    <div class="bonds-summary"></div>
+                    <div class="chart-container">
+                        <div id="bond-ladder-chart"></div>
+                    </div>
+                    <div class="bonds-table"></div>
+                </section>
+
+                <!-- 4. Analyst Tab -->
+                <section id="analyst-tab" class="tab-content">
+                    <div class="section-header">
+                        <h2>Analyst Insights</h2>
+                    </div>
+                    <div id="analyst-content"></div>
+                    <div class="analyst-summary"></div>
+                    <div class="analyst-grid"></div>
+                    <div class="analyst-ratings-table"></div>
+                </section>
+
+                <!-- 5. News Tab -->
+                <section id="news-tab" class="tab-content">
+                    <div class="section-header">
+                        <h2>News & Sentiment</h2>
+                    </div>
+                    <div id="news-content"></div>
+                    <div class="news-sentiment-chart"></div>
+                    <div class="news-timeline"></div>
+                </section>
+
+                <!-- 6. Cashflow Tab -->
+                <section id="cashflow-tab" class="tab-content">
+                    <div class="section-header">
+                        <h2>Cashflow Calendar</h2>
+                    </div>
+                    <div id="cashflow-content"></div>
+                    <div class="cashflow-summary"></div>
+                    <div class="cashflow-calendar"></div>
+                </section>
+
+                <!-- 7. Optimize Tab -->
+                <section id="optimize-tab" class="tab-content">
+                    <div class="section-header">
+                        <h2>Portfolio Optimization</h2>
+                    </div>
+                    <div id="optimize-content"></div>
+                    <div class="efficient-frontier"></div>
+                    <div class="rebalance-trades"></div>
+                </section>
+
+                <!-- 8. Synthesis Tab -->
+                <section id="synthesis-tab" class="tab-content">
+                    <div class="section-header">
+                        <h2>Advisor Brief</h2>
+                    </div>
+                    <div id="synthesis-content"></div>
+                    <div class="synthesis-brief"></div>
+                    <div class="key-insights"></div>
+                </section>
+
+                <!-- 9. What Changed Tab -->
+                <section id="whatchanged-tab" class="tab-content">
+                    <div class="section-header">
+                        <h2>Attribution Analysis</h2>
+                    </div>
+                    <div id="whatchanged-content"></div>
+                    <div class="attribution-summary"></div>
+                    <div class="factor-breakdown"></div>
+                    <div class="top-movers"></div>
+                </section>
+
+                <!-- 10. Rebalance Tax Tab -->
+                <section id="rebalancetax-tab" class="tab-content">
+                    <div class="section-header">
+                        <h2>Tax-Loss Harvesting</h2>
+                    </div>
+                    <div id="rebalancetax-content"></div>
+                    <div class="tax-summary"></div>
+                    <div class="trade-list"></div>
+                    <div class="wash-sale-flags"></div>
+                </section>
+
+                <!-- 11. Recommendations Tab -->
+                <section id="recommendations-tab" class="tab-content">
+                    <div class="section-header">
+                        <h2>Recommendations</h2>
+                    </div>
+                    <div id="recommendations-content"></div>
+                    <div class="priority-recommendations"></div>
+                </section>
+
+                <!-- 12. Scenarios Tab -->
+                <section id="scenarios-tab" class="tab-content">
+                    <div class="section-header">
+                        <h2>Stress Testing</h2>
+                    </div>
+                    <div id="scenarios-content"></div>
+                    <div class="scenario-controls"></div>
+                    <div class="scenario-results"></div>
+                </section>
+
+                <!-- 13. Peer Tab -->
+                <section id="peer-tab" class="tab-content">
+                    <div class="section-header">
+                        <h2>Peer & Benchmark Analysis</h2>
+                    </div>
+                    <div id="peer-content"></div>
+                    <div class="beta-matrix"></div>
+                    <div class="active-share"></div>
+                    <div class="style-drift"></div>
+                </section>
+
+                <!-- 14. Reports Tab -->
+                <section id="reports-tab" class="tab-content">
+                    <div class="section-header">
+                        <h2>Reports & Export</h2>
+                    </div>
+                    <div id="reports-content"></div>
+                    <div class="export-controls"></div>
+                    <div class="report-templates"></div>
+                </section>
+
+                <!-- 15. Settings Tab -->
+                <section id="settings-tab" class="tab-content">
+                    <div class="section-header">
+                        <h2>Settings & Configuration</h2>
+                    </div>
+                    <div id="settings-content"></div>
+                    <div class="settings-provider"></div>
+                    <div class="settings-risk-profile"></div>
+                    <div class="settings-guardrails"></div>
+                    <div class="settings-stonkmode"></div>
+                </section>
+
+                <!-- 16. About Tab -->
+                <section id="about-tab" class="tab-content">
+                    <div class="section-header">
+                        <h2>About InvestorClaw</h2>
+                    </div>
+                    <div id="about-content"></div>
+                    <div class="about-content">
+                        <h3>Version __VERSION__</h3>
+                        <p>InvestorClaw: Portfolio analysis & market intelligence for Claude Code & OpenClaw</p>
+                        <p><strong>Disclaimer:</strong> __DISCLAIMER__ – Consult a qualified financial advisor before making investment decisions.</p>
+                        <p><strong>Fingerprint:</strong> <code>__FINGERPRINT__</code></p>
+                        <p><strong>CDM 5.x Compliant</strong> • Apache 2.0 License</p>
+                        <p><a href="https://github.com/perlowja/InvestorClaw" target="_blank">GitHub</a> • <a href="https://github.com/perlowja/InvestorClaw/issues" target="_blank">Issues</a></p>
+                    </div>
+                </section>
+            </main>
+
+            <footer class="footer">
+                <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; opacity: 0.8;">
+                    <span id="last-update">Portfolio as of __AS_OF__</span>
+                    <span style="text-align: center; flex: 1;">
+                        <strong>Educational Use Only</strong> — Not financial advice | Consult a qualified financial advisor before making investment decisions
+                    </span>
+                    <span id="version">v__VERSION__</span>
+                </div>
+            </footer>
+        </div>
+        __STONKMODE_WRAP_END__
+    </div>
+
+    <!-- Mission Control UI (stonkmode only) -->
+    __MISSION_CONTROL_HTML__
+
+    <!-- Data placeholder (embedded in static mode, fetched in server mode) -->
+    <script>
+        const DASHBOARD_DATA = __PAYLOAD__;
+    </script>
+
+    <!-- Avatars for stonkmode -->
+    <script src="assets/avatars/avatars.js"></script>
+
+    <!-- Chart, data, and app libraries -->
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+    <script src="assets/data-loader.js"></script>
+    <script src="assets/charts.js"></script>
+    <script src="assets/charts-extended.js"></script>
+    <script src="assets/app.js"></script>
+
+    <!-- Mission Control initialization (stonkmode only) -->
+    __MISSION_CONTROL_JS__
+
+    <!-- Service worker registration -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('service-worker.js').catch(err => {
+                console.log('Service worker registration failed:', err);
+            });
+        }
+    </script>
+
+</body>
+</html>

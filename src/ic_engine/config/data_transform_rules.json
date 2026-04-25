@@ -1,0 +1,139 @@
+{
+    "_comment": "Phase 2 data transform rules. Each entry normalizes one provider's raw output into the CDM-compatible canonical schema: symbol, date, open, high, low, close, adj_close, volume, source. Referenced by internal/data_transformer.py.",
+    "version": "1.0",
+    "canonical_schema": [
+        "symbol", "date", "open", "high", "low", "close",
+        "adj_close", "volume", "source"
+    ],
+    "transform_rules": [
+        {
+            "source": "yfinance_ohlcv",
+            "field_mappings": {
+                "Open": "open",
+                "High": "high",
+                "Low": "low",
+                "Close": "close",
+                "Adj Close": "adj_close",
+                "Volume": "volume",
+                "_symbol": "symbol"
+            },
+            "type_coercions": {
+                "open": "float64",
+                "high": "float64",
+                "low": "float64",
+                "close": "float64",
+                "adj_close": "float64",
+                "volume": "int64"
+            },
+            "derived_fields": {},
+            "drop_columns": ["Dividends", "Stock Splits", "Capital Gains"],
+            "add_columns": {
+                "source": "yfinance"
+            }
+        },
+        {
+            "source": "finnhub_candles",
+            "field_mappings": {
+                "o": "open",
+                "h": "high",
+                "l": "low",
+                "c": "close",
+                "v": "volume",
+                "t": "_timestamp",
+                "_symbol": "symbol"
+            },
+            "type_coercions": {
+                "open": "float64",
+                "high": "float64",
+                "low": "float64",
+                "close": "float64",
+                "volume": "int64"
+            },
+            "derived_fields": {
+                "date": "from_epoch:_timestamp",
+                "adj_close": "copy:close"
+            },
+            "drop_columns": ["s"],
+            "add_columns": {
+                "source": "finnhub"
+            }
+        },
+        {
+            "source": "polygon_aggs",
+            "field_mappings": {
+                "o": "open",
+                "h": "high",
+                "l": "low",
+                "c": "close",
+                "v": "volume",
+                "vw": "vwap",
+                "t": "_timestamp_ms",
+                "_symbol": "symbol"
+            },
+            "type_coercions": {
+                "open": "float64",
+                "high": "float64",
+                "low": "float64",
+                "close": "float64",
+                "volume": "int64"
+            },
+            "derived_fields": {
+                "adj_close": "copy:close",
+                "date": "from_epoch:_timestamp_ms"
+            },
+            "drop_columns": ["n"],
+            "add_columns": {
+                "source": "polygon"
+            }
+        },
+        {
+            "source": "alphavantage_daily",
+            "field_mappings": {
+                "1. open": "open",
+                "2. high": "high",
+                "3. low": "low",
+                "4. close": "close",
+                "5. volume": "volume",
+                "_date": "date",
+                "_symbol": "symbol"
+            },
+            "type_coercions": {
+                "open": "float64",
+                "high": "float64",
+                "low": "float64",
+                "close": "float64",
+                "volume": "int64",
+                "date": "date"
+            },
+            "derived_fields": {
+                "adj_close": "copy:close"
+            },
+            "drop_columns": [],
+            "add_columns": {
+                "source": "alphavantage"
+            }
+        },
+        {
+            "source": "newsapi_everything",
+            "field_mappings": {
+                "title": "headline",
+                "description": "summary",
+                "publishedAt": "published_at",
+                "url": "url",
+                "_symbol": "symbol"
+            },
+            "type_coercions": {
+                "headline": "str",
+                "summary": "str",
+                "url": "str",
+                "published_at": "datetime"
+            },
+            "derived_fields": {},
+            "drop_columns": ["urlToImage", "content", "author"],
+            "add_columns": {
+                "source": "newsapi"
+            },
+            "null_values": ["", "null", "[Removed]"]
+        }
+    ]
+}
