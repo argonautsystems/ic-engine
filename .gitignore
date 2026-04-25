@@ -1,0 +1,130 @@
+# Portfolio and holdings data (sensitive)
+holdings.json
+holdings_summary.json
+*.holdings.json
+benchmark_results.json
+data/fetch_output/
+portfolio_reports/
+portfolio_data/
+portfolios/
+*.csv
+!examples/**/*.csv
+!tests/**/*.csv
+!docs/samples/*.csv
+
+# Environment and local config
+.env
+.env.local
+.env.*.local
+.env.backup*
+.env.provider-*
+!.env.example
+*.key
+*.pem
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+node_modules/
+eggs/
+.eggs/
+lib64/
+# lib/ is the skill's source package — NOT a venv directory, do not ignore
+!lib/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Lock files
+# npm's package-lock.json MUST be committed for CI/CD reproducibility
+# (plugin-build job requires it for npm ci to work)
+# uv.lock MUST also be committed — `uv sync --frozen` in CI needs the
+# committed lock for reproducible Python installs (per project CLAUDE.md)
+yarn.lock
+poetry.lock
+
+# Build and test artifacts
+.coverage
+.pytest_cache/
+
+# Virtual environments (keep only on ARGONAS NAS, NOT in git remotes)
+venv/
+.venv/
+ENV/
+env/
+.env/
+.python/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Temp files
+*.tmp
+*.bak
+.~*
+portfolios/.sector_cache.json
+
+# Distribution artifacts
+InvestorClaw-distribution.zip
+*.distribution.zip
+
+# Development utilities (archived, not for distribution)
+# internal/ contains tier3_enrichment.py (CERBERUS consultation) — must be distributed
+# internal/
+
+# Benchmark and battery test results (large test output files)
+battery-results-*/
+*battery-report*
+scripts/wf_outputs/
+
+# Archive directory (backup and historical docs)
+archive/
+
+# Enterprise branch (private, development only)
+# IMPORTANT: Enterprise code must NOT be pushed to public remotes (GitHub, GitLab)
+# This directory is tracked ONLY on the enterprise branch
+/enterprise/
+*.enterprise.py
+requirements-enterprise.txt
+
+# Commercialization & Strategy (CONFIDENTIAL — enterprise branch ONLY)
+# CRITICAL SECURITY: These documents are NEVER pushed to public GitHub/GitLab
+# They contain pricing, financial models, go-to-market strategy, and investor materials
+PRODUCT_STRATEGY.md
+*STRATEGY*.md
+*COMMERCIALIZATION*.md
+*FINANCIAL*.md
+*PRICING*.md
+*ROADMAP*.md
+*INVESTOR*.md
+CLAUDE.md
+.harness/
+

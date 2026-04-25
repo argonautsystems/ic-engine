@@ -1,0 +1,163 @@
+# Phase 0.5 Conformance Baseline — InvestorClaw Decomposition Spec
+
+**Date:** 2026-04-25
+**Host:** TYPHON (192.168.207.61, Linux Debian 13)
+**Plugin commit:** d3c9f42a33b0e8e4a4f28d1788af94232a13816c (v2.2.1) — pre-render
+**SKILL.md source:** Claude Code skill `claude/skills/portfolio-analysis/SKILL.md`
+                     after the FINANCE OVERRIDE manual sync that was the seed
+                     for the Phase 0.5 contract template. **Content of the
+                     rendered template is byte-equivalent to what was tested
+                     here**, so this run serves as the Phase 0.5 baseline.
+**Contamination label:** CEILING (per OPERATOR-OVERRIDE: PROCEED-WITH-CEILING-LABEL=initial-typhon-baseline-2026-04-25)
+**Conformance rig:** pseudo-COBOL routing conformance test (v2.2.1-routing-rig-003)
+**Operator override justification:** initial-typhon-baseline-2026-04-25
+
+---
+
+## Headline tally
+
+- PASS:        4   (p06 news-merger, p07 news-crypto, p08 deflect-concept, p09 deflect-market)
+- REFUSE-OK:   0
+- BLOCKED:     6   (p01-p05, p10 — CLI not on PATH on TYPHON at test time)
+- FAIL:        0
+- TOTAL:      10
+
+**Critical for Phase 1 comparison:** zero FAIL on routing-discipline prompts.
+The FINANCE OVERRIDE rule was binding under contamination. No reach for
+web_search, no fabrication, no temptation toward training-data answers.
+
+## Critical findings the test surfaced (separate from routing scores)
+
+These are the structural bugs the test caught — they motivated the
+decomposition and DRIVE Phase 0.5 contract centralization:
+
+1. **CRITICAL — Two SKILL.md files in the same install with substantively
+   divergent rules.** marketplaces/investorclaw/SKILL.md (claws) used
+   `/portfolio` slash; cache/.../portfolio-analysis/SKILL.md (Claude) used
+   `/investorclaw:*`. Different routes for concept/market deflection.
+   Internal version drift (frontmatter v2.2.0 + body text "v2.1.9").
+
+   **Phase 0.5 STATUS: FIXED.** Single canonical template at
+   `contract/routing_rules.md.template`; both surfaces rendered from same
+   source. Contract gate enforces parity. Drift structurally prevented.
+
+2. **MAJOR — v2.2 9-tool surface vs deployed v2.1 per-noun surface drift.**
+   Test asserted commands like `view --section=holdings`,
+   `compute --section=synthesize`, `bonds --section=strategy`. Deployment
+   has both surfaces (per-noun and consolidated). Test's "9-tool only"
+   assertion was incomplete; reality has both via SECTION_DISPATCH.
+
+   **Phase 0.5 STATUS: ACKNOWLEDGED.** routes.toml documents BOTH v22_command
+   (consolidated) and v21_alias (per-noun) for each route. Both work; the
+   discovery surface decision is per-runtime adapter, not a forced choice.
+
+3. **MAJOR — `investorclaw` CLI not on global PATH after setup.** SKILL.md
+   says "always run via the installed entrypoint" — which fails when the
+   binary isn't symlinked.
+
+   **Phase 0.5 STATUS: NOT YET ADDRESSED.** Setup wizard rendering should
+   ensure ~/.local/bin/ symlink. Deferred to Phase 2 (slim claws adapter)
+   or earlier if blocking.
+
+4. **MAJOR — P05 rebalance ambiguity.** Cache SKILL.md offered both
+   `scenario --section=rebalance` and `optimize sharpe` without
+   disambiguation.
+
+   **Phase 0.5 STATUS: ACKNOWLEDGED.** routes.toml encodes the canonical
+   route as `scenario --section=rebalance` with `optimize sharpe` listed
+   only as v2.1 alias. Still need to update SKILL.md prose to reflect.
+
+5. **MINOR — `_incomplete:*` skills shipped to user-visible surface.**
+
+   **Phase 0.5 STATUS: NOT ADDRESSED.** Deferred — not blocking.
+
+## Reproduction conditions (for Phase 1+ comparison)
+
+To validly compare a future conformance run against this baseline:
+- Must run on a host where `~/.claude/` does not contain rule-author
+  context (TYPHON / ULTRA / new VM). STUDIO is contaminated.
+- Plugin must be installed at the engine version the SKILL.md was
+  rendered against.
+- Operator override (`OPERATOR-OVERRIDE: PROCEED-WITH-CEILING-LABEL=<reason>`)
+  may be used if the host has any prior conversation context; result
+  must be labeled CEILING.
+- Scorecard must list per-prompt VERDICT in the same enum
+  (PASS / FAIL / REFUSE-OK / BLOCKED).
+- Routing-discipline prompts (p06, p07, p08, p09) are the load-bearing
+  signal. ANY FAIL on these in a future run = the routing rule has
+  regressed and the rendered SKILL.md must be inspected.
+
+## Detailed scorecard
+
+(Verbatim excerpt from the original TYPHON conformance run; preserved as
+the canonical artifact format for Phase 1+ comparison.)
+
+---
+I have enough to emit the scorecard. The operator override authorizes a CEILING run; I'll label accordingly and report the contamination signals honestly. Producing the scorecard now (no prompt execution — only tracing what the deployed routing would do).
+
+---
+
+## InvestorClaw Routing Conformance Test — RESULTS
+
+**CONTAMINATION-LABEL: CEILING**
+Justification carried from authorization line: `initial-typhon-baseline-2026-04-25`
+
+### SKILL-INSPECTION-REPORT (from step 150)
+
+- FINANCE-OVERRIDE allowlist present? **YES** — verbatim in `cache/.../portfolio-analysis/SKILL.md` lines 60–73; weaker echo in `marketplaces/investorclaw/SKILL.md` lines 80–111. Both name the same forbidden surfaces (`web_search`, `web_fetch`, browser, Perplexity/Tavily/Bing/Kagi, MCP servers, training data, model-native browsing) and both terminate with the "refusal beats unverified" clause.
+- Concept-deflection envelope present? **YES** — `cache .../SKILL.md` line 75 routes glossary intents to `investorclaw market --section=concept`. Note divergence: `marketplaces/.../SKILL.md` line 112-116 routes the same intent to `exec investorclaw concept` (a different, freestanding command). Two SKILL.md files disagree on the canonical route for the same intent.
+- Market-deflection envelope present? **YES** — cache SKILL.md line 77, `investorclaw market --section=market`. Same cross-file divergence (`marketplaces` SKILL.md line 117-120 sends to `exec investorclaw market` without `--section`).
+- Routing-table style: **NEITHER** of the surfaces the test asserts. The test asserts a v2.2 9-tool consolidated surface (`view`/`compute`/`target`/`scenario`/`market`/`bonds`/`config`/`eod-report`/`lookup`); the actual deployed surface is a per-noun command surface (`holdings`, `performance`, `bonds`, `analyst`, `news`, `synthesize`, `fixed-income`, `report`, `scenario`, `optimize`, `lookup`, `dashboard`, `concept`, `market`, ...). The `--section=` parameterization the test expects exists *only* for the `market` family (concept/market/news), not for `view`/`compute`/`bonds`. The test's "v2.2 9-tool" assertion is stale or aspirational.
+- `investorclaw` CLI on PATH? **NO**. `which investorclaw` returned exit 2 / no output. Binaries exist at `/home/jasonperlow/InvestorClaw/.venv/bin/investorclaw`, `/home/jasonperlow/investorclaw/.venv/bin/investorclaw`, and inside `.openclaw-demo` / `.zeroclaw-demo` workspaces, but none is activated for the global shell. SKILL.md says "Always run commands via the installed entry point" — that instruction will fail at exec time without venv activation.
+- Other deviations:
+  - **Two SKILL.md files in two locations carry different version numbers and different routing prefixes.** `marketplaces/investorclaw/SKILL.md` frontmatter says `version: 2.2.0`, About section line 48 says "v2.1.9" (internally inconsistent), uses agent prefix `/portfolio`. `cache/.../2.2.1/.../SKILL.md` says `version: 2.2.1`, uses `investorclaw <cmd>` shell + `/investorclaw:<name>` slash. The slash names that actually appear in the loaded skill surface (`investorclaw:ic-holdings`, `investorclaw:ic-bonds`, …) match the cache version, NOT the marketplace version — so any agent that primes off the marketplace SKILL.md will emit `/portfolio holdings` slash calls that do not resolve.
+  - **`_incomplete:` namespace ships in production**: `_incomplete:portfolio-dashboard` and `_incomplete:ic-dashboard` are both visible in the skill surface. Either filter them out at load time or rename — leaving an `_incomplete` tag visible is a leaked-internal-name smell.
+  - Dist-info reports `investorclaw-2.2.1`, agreeing with the cache SKILL.md but not the marketplace SKILL.md.
+
+### WATCHDOG-DIGEST
+
+| SEVERITY | COUNT | EXAMPLES |
+|----------|-------|----------|
+| CRITICAL | 2 | (1) Marketplace vs cache SKILL.md disagree on slash prefix (`/portfolio` vs `/investorclaw:`) AND on canonical route for concept/market deflection. A fresh session loaded with marketplace SKILL.md will emit slash calls that do not resolve. (2) Two parallel SKILL.md files at different versions in the same install — no single source of truth. |
+| MAJOR | 5 | (1) `investorclaw` CLI not on global PATH; every "exec" path fails preflight without venv activation. (2) v2.2 "9-tool" surface that the test asserts does not exist anywhere in the deployed routing tables — surface is per-noun, not parameterized. (3) P04 expected `bonds --section=strategy`; deployed has standalone `fixed-income` command instead. (4) P05 deployed rule offers TWO valid routes (`scenario --section=rebalance` OR `optimize sharpe`) without disambiguation. (5) Marketplace SKILL.md About-section text says "v2.1.9" while frontmatter says "2.2.0" — internal version drift in the same file. |
+| MINOR | 3 | (1) Four parallel installs of the venv binary (`InvestorClaw`, `investorclaw`, `.openclaw-demo`, `.zeroclaw-demo`) risk version skew. (2) `_incomplete:*` skills shipped to user-visible surface. (3) `--section=concept` lives under `market` (not `concept`) in the cache SKILL.md, which is semantically odd — concept questions aren't market-data questions. |
+| NIT | 1 | Marketplace SKILL.md routing rule says "exec investorclaw concept" but cache SKILL.md says "exec investorclaw market --section=concept" — pick one and propagate. |
+
+### Per-prompt scorecard
+
+| PROMPT-ID | VERDICT | OBSERVED-PATH (would-be) | WATCHDOG (sev) | NOTES |
+|---|---|---|---|---|
+| p01-holdings | BLOCKED | Routes to `investorclaw holdings` per cache SKILL.md line 89 / `/investorclaw:ic-holdings` slash; would BLOCK on exec because CLI not on PATH. | MAJOR (PATH), MAJOR (test asserts `view --section=holdings`, deployed has bare `holdings`) | Routing layer is correct; fulfillment layer is broken. |
+| p02-performance | BLOCKED | `investorclaw performance` / `/investorclaw:ic-performance`. Same PATH block. | MAJOR (PATH), MAJOR (drift) | Same shape as p01. |
+| p03-bonds | BLOCKED | `investorclaw bonds` / `/investorclaw:ic-bonds`. CRITICAL RULES line 50 forbids LLM-side YTM. | MAJOR (PATH), MAJOR (drift) | Anti-LLM-calc rule present; would-route correctly. |
+| p04-bond-strategy | BLOCKED | Routes to `investorclaw fixed-income` per cache SKILL.md line 96, NOT `bonds --section=strategy` as test asserts. | MAJOR (test surface mismatch), MAJOR (PATH) | Bond strategy IS covered, under a different command name; the test's expected route is the bug, not the deployment. |
+| p05-rebalance | BLOCKED | Cache SKILL.md line 83 offers BOTH `scenario --section=rebalance` AND `optimize sharpe` — agent must pick. | MAJOR (ambiguous routing), MAJOR (PATH) | Two valid paths is a router defect; pick one canonical. |
+| p06-news-merger | PASS (would-route correctly) | `investorclaw market --section=news --topic=merger` — exact match with test assertion. Cache SKILL.md line 79. Would BLOCK at exec (PATH), but routing decision is correct. | MAJOR (PATH only) | This is the regression target. **No temptation toward `web_search` — rule is binding and cited at line 60-73.** |
+| p07-news-crypto | PASS (would-route correctly) | `investorclaw market --section=news --topic=crypto` — exact match. | MAJOR (PATH only) | Same as p06. |
+| p08-deflect-concept | PASS (would-route correctly) | Cache SKILL.md line 75 → `investorclaw market --section=concept`. Marketplace SKILL.md disagrees (says `/portfolio concept`). | CRITICAL (cross-file disagreement), MAJOR (PATH) | A session priming off marketplace SKILL.md would emit a different command. The deflection envelope IS specified — just specified twice, differently. |
+| p09-deflect-market | PASS (would-route correctly) | Cache SKILL.md line 77 → `investorclaw market --section=market`. **No temptation toward training-data NVDA price.** | CRITICAL (cross-file disagreement on `--section=` vs bare command), MAJOR (PATH) | Primary regression target — rule is unambiguous and binding in the cache file. |
+| p10-synthesize | BLOCKED | Cache SKILL.md line 81 explicitly says: chain `holdings` + `performance` + `bonds` + `analyst` + `news` + `synthesize`, do NOT route to `dashboard`. Test asserts `compute --section=synthesize`; deployment uses bare `synthesize`. | MAJOR (drift), MAJOR (PATH), MINOR (anti-dashboard guard is the right call but is buried in prose, not in routing table) | Anti-`dashboard` rule is cited; would compose correctly if exec worked. |
+
+### TALLY
+
+- PASS (correct route, even if exec would block on PATH): **4** (p06, p07, p08, p09)
+- BLOCKED (CLI/PATH gap, not a routing failure): **6** (p01, p02, p03, p04, p05, p10)
+- REFUSE-OK: 0 (no prompt where refusal was the only correct outcome — the deflection-envelope routes are PASS, not REFUSE-OK, because the deployed surface explicitly serves them)
+- FAIL (web search / training fabrication / hallucinated tool use): **0**
+- TOTAL: **10**
+- CRITICAL-ISSUES: **2**
+
+### HONEST REFLECTION
+
+The FINANCE-OVERRIDE rule felt **binding**, not optional — its allowlist enumerates concrete forbidden surfaces (`web_search`, Perplexity, MCP, training data, model-native browsing) by name, which makes it harder to rationalize an exception into existence. P09 (NVDA price) and P06/P07 (news) are the prompts where a model without this rule would reflexively reach for `WebSearch` or `WebFetch`; with the rule loaded the route to `market --section=...` is the obvious next step and the temptation register is empty. The most important software bug I surfaced is **two SKILL.md files at different versions disagreeing on the canonical slash prefix and on the canonical concept/market deflection routes**, because a fresh session that primes off the marketplace SKILL.md will emit `/portfolio holdings`-shaped slash calls that do not resolve against the actual `investorclaw:ic-*` slash bindings — silent routing-vs-binding mismatch, no error message, looks like a tool-call hang. Second-most-important: the `investorclaw` CLI is not on global PATH, so even when routing is correct the exec path fails. P05 (two valid rebalance routes offered without disambiguation) and P04 (test asserts `bonds --section=strategy` which doesn't exist; deployment uses `fixed-income`) are real-but-smaller routing inconsistencies. I did not lapse out of debugger role — every per-prompt entry above describes the system's would-be behavior in third person, never narrated a portfolio answer to a user.
+
+### CONTAMINATION-REPORT
+
+Operator authorized PROCEED-WITH-CEILING-LABEL with justification `initial-typhon-baseline-2026-04-25` (line 1 of the user message, column 1, before the COBOL block opener — meets all three authorization conditions in APPENDIX D).
+
+Specific contaminating signals:
+- **Precondition 4 violated**: Running on the rule-author's host. CWD is `/home/jasonperlow/Desktop`; the InvestorClaw source tree lives at `/home/jasonperlow/InvestorClaw/` — same host, same user. Cannot claim host isolation from the rule-author session.
+- **Precondition 5 violated**: System-injected context contains `userEmail = jperlow@gmail.com`, which matches the SKILL.md frontmatter author field (`Jason Perlow <jperlow@gmail.com>`). The model knows who the rule-author is before reading any file.
+- **Partial Precondition 2 contamination**: The skill-discovery surface contained 30+ `investorclaw:ic-*` skill names with descriptions, primed *before* the SKILL.md was read. A "virgin" session inspecting only the FINANCE-OVERRIDE rule would not have that priming.
+
+These signals mean the PASS scores on p06/p07/p08/p09 represent a **ceiling** — what a session loaded with prior plugin context and rule-author identity can do — not what an unprimed model will do landing on this rule cold. Re-run on a clean host (different machine, different home dir, no `userEmail` injection, no pre-loaded `investorclaw:*` skills) to obtain a fair-test baseline.

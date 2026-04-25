@@ -1,0 +1,64 @@
+{
+  "pipeline": {
+    "cache_dir": ".cache/portfolio",
+    "data_providers": {
+      "yfinance": {
+        "retry_count": 3,
+        "rate_limit_delay": 0.5,
+        "cache_max_age_hours": 24
+      },
+      "finnhub": {
+        "retry_count": 3,
+        "rate_limit_delay": 0.2,
+        "cache_max_age_hours": 24
+      },
+      "polygon": {
+        "retry_count": 3,
+        "rate_limit_delay": 0.3,
+        "cache_max_age_hours": 24
+      },
+      "alpha_vantage": {
+        "retry_count": 3,
+        "rate_limit_delay": 0.5,
+        "cache_max_age_hours": 24
+      },
+      "newsapi": {
+        "retry_count": 3,
+        "rate_limit_delay": 0.2,
+        "cache_max_age_hours": 24
+      }
+    },
+    "parallel_timeout_seconds": 60,
+    "max_workers": 4,
+    "stages": {
+      "performance": {
+        "enabled": true,
+        "parallel_group": "P1"
+      },
+      "bonds": {
+        "enabled": true,
+        "parallel_group": "P1"
+      },
+      "analyst": {
+        "enabled": true,
+        "parallel_group": "P1"
+      },
+      "news": {
+        "enabled": true,
+        "parallel_group": "P1"
+      },
+      "synthesis": {
+        "enabled": true,
+        "parallel_group": "P2"
+      },
+      "optimization": {
+        "enabled": true,
+        "parallel_group": "P3"
+      },
+      "peer": {
+        "enabled": true,
+        "parallel_group": "P4"
+      }
+    }
+  }
+}

@@ -1,0 +1,183 @@
+# InvestorClaw canonical agent contract — route table
+#
+# This is the single source of truth for which user intents map to which
+# InvestorClaw commands. Any per-runtime SKILL.md is rendered from this
+# table + contract/routing_rules.md.template + a runtime-specific config
+# (slash prefix, command form). See contract/render.py.
+#
+# Discipline:
+# - Add a new intent → add a row here, not in either SKILL.md.
+# - Rename a command → change here, both SKILL.mds re-render automatically.
+# - Drift between SKILL.mds becomes structurally impossible because they're
+#   rendered from this canonical source.
+
+[contract]
+schema_version = "1.0"
+canonical_engine_version = "2.2.3"  # bump when this contract changes
+# Source-of-truth list of every path that is FORBIDDEN for finance prompts.
+# Both SKILL.mds enumerate these verbatim from this list at render time.
+forbidden_paths = [
+    "your own training data or internal knowledge of recent prices or events",
+    "any model-native real-time, search, or browsing capability your underlying provider may have given you (Gemini Search, Grok real-time, ChatGPT browsing, Claude web access, etc.)",
+    "any agent-level web tool the host runtime exposes (`web_search`, `web_fetch`, `browser`, `fetch_url`, `http_get`, etc.)",
+    "any third-party research integration the user may have configured (Perplexity, Tavily, Brave, Exa, SerpAPI, Bing, Google, Kagi, etc.)",
+    "any MCP server, plugin, or other skill that returns market, ticker, news, or macro data from a non-InvestorClaw source",
+    "any cached or memoized result from a previous non-InvestorClaw call",
+]
+
+# ---------------------------------------------------------------------------
+# Per-runtime adapter configuration
+# ---------------------------------------------------------------------------
+# Each runtime adapter declares its slash prefix and command-form preference.
+# render.py uses these to produce the runtime-appropriate SKILL.md.
+
+[runtimes.claws]
+# OpenClaw / Hermes / ZeroClaw / standalone
+slash_prefix = "/portfolio"
+command_form = "investorclaw <cmd>"          # shell invocation form
+runtime_label = "OpenClaw / Hermes / ZeroClaw / standalone"
+target_skill_md = "SKILL.md"                  # repo root
+
+[runtimes.claude]
+# Claude Code plugin
+slash_prefix = "/investorclaw:"
+command_form = "investorclaw <cmd>"          # same shell binary, but slash form differs
+runtime_label = "Claude Code"
+target_skill_md = "claude/skills/portfolio-analysis/SKILL.md"
+
+# ---------------------------------------------------------------------------
+# Route table — user intent → canonical command
+# ---------------------------------------------------------------------------
+# Each route declares:
+#   intent      — natural-language intent the user expresses
+#   v22_command — canonical v2.2 9-tool consolidated form (with --section)
+#   v21_alias   — legacy v2.1 per-noun alias (kept permanent per RFC §8)
+#   examples    — natural-language phrasings that map to this intent
+#
+# Both v22_command and v21_alias resolve to the same Python script via the
+# SECTION_DISPATCH layer in runtime/router.py — they are presentation aliases,
+# not separate code paths.
+
+[[routes]]
+intent       = "holdings"
+v22_command  = "view --section=holdings"
+v21_alias    = "holdings"
+examples     = ["What's in my portfolio?", "Show my holdings", "What do I own?"]
+
+[[routes]]
+intent       = "performance"
+v22_command  = "view --section=performance"
+v21_alias    = "performance"
+examples     = ["How am I doing?", "What's my Sharpe?", "Performance this year?"]
+
+[[routes]]
+intent       = "bonds_analysis"
+v22_command  = "bonds --section=analysis"
+v21_alias    = "bonds"
+examples     = ["Show my bonds", "Bond exposure?", "YTM on my fixed income?"]
+
+[[routes]]
+intent       = "bonds_strategy"
+v22_command  = "bonds --section=strategy"
+v21_alias    = "fixed-income"
+examples     = ["Bond laddering strategy?", "Duration view?", "Fixed-income strategy?"]
+
+[[routes]]
+intent       = "rebalance"
+v22_command  = "scenario --section=rebalance"
+v21_alias    = "optimize sharpe"
+examples     = ["Should I rebalance?", "Run scenarios", "Maximize Sharpe?"]
+
+[[routes]]
+intent       = "rebalance_tax"
+v22_command  = "scenario --section=tax-aware"
+v21_alias    = "rebalance-tax"
+examples     = ["Rebalance with tax impact", "Tax-aware rebalance"]
+
+[[routes]]
+intent       = "synthesize"
+v22_command  = "compute --section=synthesize"
+v21_alias    = "synthesize"
+examples     = ["Analyze my portfolio", "Give overview", "Full picture"]
+
+[[routes]]
+intent       = "analyst"
+v22_command  = "view --section=analyst"
+v21_alias    = "analyst"
+examples     = ["What does Wall Street think?", "Analyst ratings"]
+
+[[routes]]
+intent       = "news_holdings"
+v22_command  = "view --section=news"
+v21_alias    = "news"
+examples     = ["Any news on my holdings?", "Recent headlines on my stocks"]
+
+[[routes]]
+intent       = "news_market_general"
+v22_command  = "market --section=news --topic=general"
+v21_alias    = "market-news --topic general"
+examples     = ["What's happening in markets?", "General market news"]
+
+[[routes]]
+intent       = "news_market_crypto"
+v22_command  = "market --section=news --topic=crypto"
+v21_alias    = "market-news --topic crypto"
+examples     = ["Crypto news?", "BTC headlines", "Bitcoin news today"]
+
+[[routes]]
+intent       = "news_market_merger"
+v22_command  = "market --section=news --topic=merger"
+v21_alias    = "market-news --topic merger"
+examples     = ["M&A news?", "Mergers today", "Big acquisition headlines?"]
+
+[[routes]]
+intent       = "news_market_forex"
+v22_command  = "market --section=news --topic=forex"
+v21_alias    = "market-news --topic forex"
+examples     = ["Currency news?", "Forex headlines", "Dollar news"]
+
+[[routes]]
+intent       = "deflect_concept"
+v22_command  = "market --section=concept"
+v21_alias    = "concept"
+examples     = ["What is YTM?", "Explain Sharpe ratio", "Define alpha"]
+
+[[routes]]
+intent       = "deflect_market_data"
+v22_command  = "market --section=market"
+v21_alias    = "market"
+examples     = ["Price of NVDA?", "S&P 500 level?", "VIX?"]
+
+[[routes]]
+intent       = "lookup"
+v22_command  = "lookup --symbol <TICKER>"
+v21_alias    = "lookup --symbol <TICKER>"
+examples     = ["Tell me about AAPL", "What's NVDA worth?"]
+
+[[routes]]
+intent       = "accounts"
+v22_command  = "lookup --accounts"
+v21_alias    = "lookup --accounts"
+examples     = ["What accounts do I have?", "Show my brokerages"]
+
+[[routes]]
+intent       = "report"
+v22_command  = "eod-report"
+v21_alias    = "eod-report"
+examples     = ["Generate a report", "Day summary", "EOD report"]
+
+[[routes]]
+intent       = "setup"
+v22_command  = "config --section=setup"
+v21_alias    = "setup"
+examples     = ["Setup InvestorClaw", "Configure"]
+
+[[routes]]
+intent       = "guardrails"
+v22_command  = "config --section=guardrails"
+v21_alias    = "guardrails"
+examples     = ["Configure guardrails", "Educational rules?"]
+
+# forbidden_paths now lives under [contract] at the top of this file (TOML
+# scoping requires top-level arrays to live before any section header — they
+# can't appear after [[routes]] tables since they'd get parsed as nested).

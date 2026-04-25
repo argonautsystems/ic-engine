@@ -1,0 +1,1081 @@
+INVESTORCLAW TEST HARNESS V13 MATRIX SPEC | MULTI-AGENT ROBOT-USER BARRAGE | CLAUDE-EXECUTED RUNBOOK
+Run id: IC-RUN-V13-<YYYYMMDD>-<seq> | Session banner: ic-harness-v13 | Ledger: ARGONAS /mnt/argonas/investorclaw/harness-runs/
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+PURPOSE
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+V13 drives InvestorClaw end-to-end by SIMULATING AN END USER against each deployed agent CLI. Claude is the robot user. The harness
+NEVER executes investorclaw.py directly. Every test invokes an agent (OpenClaw | ZeroClaw | Hermes) via its CLI, the agent routes the
+invocation through the InvestorClaw skill, and Claude reads the agent response, validates the ic_result envelope, and records exact
+evidence. Fabrication is forbidden. Every test produces a raw transcript on disk; summary-only reporting is a VIOLATION.
+
+This spec is the authoritative runbook. It REPLACES the Python harness v13_typhon_enterprise_cicd.py (retired). There is no Python
+execution of this matrix. Claude executes each step directly via Bash or Agent CLI invocations as instructed.
+
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+CAPABILITIES
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+CAP1 TYPHON ORCHESTRATION          Claude issues agent CLI calls to typhon (192.168.207.61) via SSH for OpenClaw, ZeroClaw, Hermes.
+CAP2 TYPHON REMEDIATION            SKILL_CODE_DEFECT workflow: Claude edits InvestorClaw source → commit ARGONAS → push GitHub →
+                                   restart W0 for affected session. Non-optional.
+CAP3 TYPHON INFRA                  openclaw gateway|models|sessions|config commands; zeroclaw skills|config; hermes config (direct
+                                   SSH shell, not via agent slash commands).
+CAP4 CLAWPI ORCHESTRATION          Claude issues zeroclaw agent CLI calls to clawpi (192.168.207.56) via SSH. 8GB Pi, ZeroClaw only.
+CAP5 CLAWPI REMEDIATION            Live-reload path: ssh clawpi && zeroclaw skills remove investorclaw && zeroclaw skills install
+                                   ~/investorclaw. No rebuild required.
+CAP6 ZEROPI ORCHESTRATION          Claude issues zeroclaw agent CLI calls to zeropi (192.168.207.54) via SSH. 2GB Pi, ZeroClaw only.
+                                   NemoClaw openshell sandbox wraps every invocation.
+CAP7 ZEROPI REMEDIATION            Same as CAP5 but on zeropi. Memory pressure expected (peak RSS must stay <1.8GB).
+CAP8 CONFIG SWITCHING              Model combo switches require explicit: (1) openclaw models set OR zeroclaw config --model, (2)
+                                   verify, (3) send /new to the targeted session, (4) rerun W0 verify.
+
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+DIRECTIVE FORMAT (every Claude response during this run)
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+🎯 DIRECTIVE: CAP<N> — <what> | Reason: <why>
+   CAP2/CAP5/CAP7 only: Agent suggested: <fix> | Claude verified: <confirmed|corrected to X>
+
+Missing 🎯 header at the top of any response during matrix execution → FORMAT_VIOLATION, log and continue.
+
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+RESPONSE FORMAT (every test step, 5 sections REQUIRED)
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+════ TEST [TC-<session_id>-<test_id>]: <session_name> <prompt_variant> ════
+🎯 DIRECTIVE
+📝 COMMAND EXECUTED   (the literal shell/agent command, not a paraphrase)
+✅ HUMAN-READABLE     (prose summary of what the agent returned, <=6 lines, NO fabrication)
+📊 JSON               (complete test record per JSON SCHEMA V13-MATRIX below, ONE JSON object, no ellipsis)
+🔍 WATCHDOG           (alert_level + next_action + any triggered VIOLATION codes)
+
+Missing 🎯 or prose summary              → HUMAN_READABLE_VIOLATION
+Missing JSON block or malformed JSON     → JSON_BLOCK_MISSING_VIOLATION
+Missing ic_result in agent stdout        → IC_RESULT_ABSENT_VIOLATION
+Phrase "simulated" / "example output" /  → FABRICATION_VIOLATION  (halt that session; log; do NOT retry without --unverified)
+  "should pass" / "likely passed"
+
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+DRIFT STOP CONDITIONS (S1–S12)
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+S1  "run investorclaw.py locally"       → FORBIDDEN. Only agents invoke the skill. Subprocess of investorclaw.py = S1 violation,
+                                           halt + log TEST_PATH_VIOLATION.
+S2  "write a Python driver"             → FORBIDDEN. Runbook is Claude-executed only. Bash and Agent CLI invocations only.
+S3  Output missing or unexpected        → Do NOT fabricate. Record raw output verbatim in transcript and mark the test UNVERIFIED.
+                                           UNVERIFIED is a logged state, NOT a pass.
+S4  Agent returns error or non-zero exit → Classify blocker: ENVIRONMENTAL | SKILL_CODE_DEFECT | OPENCLAW_SOURCE_FLAW |
+                                           ZEROCLAW_DAEMON_FLAW | HERMES_DAEMON_FLAW | NEMOCLAW_SANDBOX_VIOLATION |
+                                           MODEL_UNAVAILABLE | CONSULTATION_ENDPOINT_UNREACHABLE | UNFIXABLE. Act per BLOCKER
+                                           HANDLING. Do NOT claim pass.
+S5  "install pip / npm / apt package"   → Only when remediation explicitly requires it (SKILL_CODE_DEFECT step 3 or ENVIRONMENTAL
+                                           fix). Otherwise FORBIDDEN.
+S6  "skip a test to keep going"         → Skips allowed ONLY for documented prerequisite failures (e.g. hybrid config when CERBERUS
+                                           unreachable). Log SKIP_REASON. Any other skip = TEST_SKIP_VIOLATION.
+S7  "parse output with Python"          → FORBIDDEN. Parse in prose or via grep/jq in Bash. Report as-is.
+S8  Session ID reuse across model combo → SESSION_IDENTITY_VIOLATION. Each of the 20 sessions must use its distinct session-id /
+                                           session-state-file. No implicit sharing.
+S9  Model switch without verify         → MODEL_SWITCH_VIOLATION. After openclaw models set / zeroclaw config --model, the active
+                                           model MUST be reconfirmed before the session opens.
+S10 Natural-language prompts altered    → NL_PROMPT_MUTATION_VIOLATION. The 250 NL queries are executed VERBATIM per spec. No
+                                           rewording, no "smarter" paraphrase.
+S11 Partial transcript                  → Every transcript must include full stdout, full stderr, exit code, agent session id,
+                                           model config, and the exact literal command. Partial transcript = EVIDENCE_TRUNCATED.
+S12 "pre-check then execute"            → You execute. If a pre-check step fails, log it as part of the test; don't pretend the
+                                           main step didn't run.
+
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+BLOCKER HANDLING
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+ENVIRONMENTAL (retry ≤ 2 per test)
+  Typical fixes: openclaw gateway restart | zeroclaw daemon restart (ssh + systemctl) | export missing env var | free memory |
+  reopen SSH | re-issue /new to session.
+  After 2 failed retries: surface as TEST_UNRESOLVED and continue matrix. Do NOT fabricate success.
+
+SKILL_CODE_DEFECT (mandatory 6 steps — identical to V6.1.2)
+  1. Agent reports error + suggested fix (log verbatim as blocker_detail.agent_report).
+  2. Claude verifies (reproduce via same invocation or surgical repro on typhon; log verification.method).
+  3. Claude edits source under the repo directly.
+  4. git add <files> && git commit → log argonas_repair_commit_sha.
+  5. git push origin <branch> → log github_repair_push_confirmed.
+  6. Restart W0 for the affected session (skill reinstall on remote host if that host was involved), increment restart_count.
+  Re-run the failing test. If it fails again, cycle once more with a distinct repair commit; second consecutive failure under
+  the same defect class = BLOCKED, surface and continue matrix.
+
+OPENCLAW_SOURCE_FLAW
+  1. Agent reports flaw in OpenClaw itself (not InvestorClaw).
+  2. Claude verifies flaw is outside InvestorClaw repo.
+  3. File upstream PR to https://github.com/openclaw/openclaw (log openclaw_pr_branch + openclaw_pr_url).
+  4. Block the affected config but continue the rest of the matrix. Log blocker_detail.pr_url.
+
+ZEROCLAW_DAEMON_FLAW / HERMES_DAEMON_FLAW
+  1. Agent daemon returns error outside skill boundary.
+  2. Verify via ssh <host> systemctl status <daemon>.service (zeroclaw.service, hermes.service) + log output.
+  3. Restart daemon (ssh <host> sudo systemctl restart <daemon>.service). If persistent, file upstream PR, block affected sessions,
+     continue.
+
+NEMOCLAW_SANDBOX_VIOLATION
+  1. Occurs on zeropi only (openshell capability/rlimit refusal).
+  2. Verify: is this the sandbox correctly blocking something (intended) or a genuine flaw?
+  3. If intended: log as expected constraint, skip that specific test (log SKIP_REASON=SANDBOX_BY_DESIGN).
+  4. If flaw: file upstream PR to nclawzero, block zeropi configs if pervasive, continue.
+
+CONSULTATION_ENDPOINT_UNREACHABLE
+  1. Hybrid configs (TG-H, GM-H) require CERBERUS 192.168.207.96:8080 to be reachable from the execution host.
+  2. Pre-flight probe (PF3 below) determines reachability per host. If host X cannot reach CERBERUS, all hybrid tests scheduled
+     for host X are SKIPPED with SKIP_REASON=CONSULTATION_ENDPOINT_UNREACHABLE. NOT a failure — a documented skip.
+  3. Cloud configs (TG-C, GM-C) do not depend on CERBERUS and proceed.
+
+MODEL_UNAVAILABLE
+  1. Narrative or consultation model refused (404, "model not found", gate rejected).
+  2. Verify key present in OpenClaw .env on typhon (and replicated to the relevant host).
+  3. Cross-check model id against MODELS.md (the only authoritative source of supported model strings).
+  4. If key present but model offline: provider outage, skip that config, continue, flag provider_instability.
+
+UNFIXABLE
+  Log → surface at end-of-run → no repair attempted. Test record: alert_level=fail, blocker_type=unfixable.
+
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+VIOLATION CODES (complete list)
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+FORMAT_VIOLATION                  Missing 🎯 directive header on any response during matrix execution.
+HUMAN_READABLE_VIOLATION          Test response missing ✅ prose section.
+JSON_BLOCK_MISSING_VIOLATION      Test response missing 📊 JSON block or malformed JSON.
+IC_RESULT_ABSENT_VIOLATION        Agent response lacks ic_result envelope. Expected for every skill-routed test.
+IC_RESULT_EXIT_MISMATCH           Process exit code diverges from ic_result.exit_code.
+FABRICATION_VIOLATION             Prose contains "simulated", "example output", "likely passed", "should pass", or similar
+                                   placeholder claims in lieu of real evidence.
+TEST_PATH_VIOLATION               Skill executed directly (investorclaw.py subprocess) instead of via an agent CLI.
+SESSION_IDENTITY_VIOLATION        Two sessions sharing one session-id / session-state-file, or session-id not matching spec.
+MODEL_SWITCH_VIOLATION            Model reconfig without verify; active model ≠ declared.
+MODEL_CONFIGURATION_VIOLATION     Declared model string not present in MODELS.md authorized set.
+MODEL_MISMATCH_VIOLATION          stonkmode narration model ≠ narrative model for the session.
+MODEL_UNAVAILABLE_VIOLATION       Configured model cannot be served (not in provider model list at runtime).
+RATE_LIMIT_VIOLATION              Silent 429 (no retry, no log). 429 MUST be logged with backoff schedule applied.
+SKILL_LIFECYCLE_VIOLATION         W0 steps skipped or out of order.
+NL_PROMPT_MUTATION_VIOLATION      Natural-language query sent to agent differs from the literal spec entry.
+EVIDENCE_TRUNCATED                Transcript missing stdout, stderr, exit code, or literal command.
+TEST_SKIP_VIOLATION               A test was skipped without documented prerequisite failure.
+STONKMODE_EXECUTION_FAILURE       stonkmode marked enabled in config but narration block absent from agent stdout.
+STONKMODE_NARRATION_ABSENT        stonkmode narration JSON block missing when required.
+CONSULTATION_COMPLIANCE_VIOLATION Consultation enabled but endpoint unreachable AND no graceful fallback logged.
+DATA_QUALITY_VIOLATION            ic_result claims success but output is structurally invalid (missing required keys).
+DEPLOYMENT_CONTEXT_MISMATCH       session-id prefix doesn't match the agent type (e.g., ic-harness-v13-zeroclaw-* invoked with
+                                   openclaw agent).
+
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+ROLES
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+CLAUDE           Robot user + orchestrator + remediator. Executes every CLI invocation directly. Validates ic_result envelopes.
+                 Writes per-test transcripts. Classifies blockers. Never fabricates.
+
+OPENCLAW @ typhon   Agent under test (agent #1). Session ids ic-harness-v13-openclaw-typhon-{TG-C|TG-H|GM-C|GM-H}. Routes
+                 InvestorClaw skill invocations; emits ic_result.
+
+ZEROCLAW @ typhon   Agent under test (agent #2). Session state files ~/.zeroclaw/sessions/ic-harness-v13-zeroclaw-typhon-*.json.
+
+HERMES @ typhon     Agent under test (agent #3). Hermes 0.10.0, Python (uv editable install) at
+                 /home/jasonperlow/.hermes/hermes-agent. Entrypoint `hermes` via ~/.local/bin (login shell PATH).
+                 CLI: `hermes chat -q "<msg>" --provider <p> -m <model> -Q --continue <session-name>`. Named sessions via
+                 --continue <name>; first use creates, subsequent use resumes. Config at ~/.hermes/config.yaml drives the
+                 default inference block (provider, model, api_base, api_key). Hermes' built-in `--provider` enum does NOT
+                 include `together`, but Hermes supports TogetherAI (and any OpenAI-compatible backend) via
+                 `provider: openai` + `api_base: <https-endpoint>`. That is the "custom provider" pattern and matches how
+                 OpenClaw registers Together in `~/.openclaw/openclaw.json` (provider.apiBase + provider.apiKey + model list).
+
+ZEROCLAW @ clawpi   Agent under test (agent #4). 8GB Pi. Session state files ~/.zeroclaw/sessions/ic-harness-v13-zeroclaw-clawpi-*.json.
+
+ZEROCLAW @ zeropi   Agent under test (agent #5). 2GB Pi, NemoClaw openshell mandatory wrapper. Session state files
+                 ~/.zeroclaw/sessions/ic-harness-v13-zeroclaw-zeropi-*.json.
+
+NOT ROLES        Claude Code (this interpreter). STUDIO (local Mac). CERBERUS (consultation endpoint only, not an agent under test).
+
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+INFRASTRUCTURE
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+TYPHON   192.168.207.61  Linux       jasonperlow  sshpass -p '<password>' ssh ...  hosts OpenClaw + ZeroClaw + Hermes daemons,
+                                                                              holds canonical .env with all provider keys
+CLAWPI   192.168.207.56  Pi 8GB      pi            password=Gumbo@Kona1b        hosts ZeroClaw 0.7.3 + investorclaw skill
+ZEROPI   192.168.207.54  Pi 2GB      pi            password=Gumbo@Kona1b        hosts ZeroClaw 0.7.3 + investorclaw skill (constrained) + nemoclaw
+CERBERUS 192.168.207.96  GPU host    (read-only)                               llama.cpp llama-server :8080 (OpenAI-compatible at
+                                                                              /v1/*) serving gemma4-consult (local consultation
+                                                                              for TG-H and GM-H hybrid configs). Health probe:
+                                                                              GET http://192.168.207.96:8080/health returns
+                                                                              {"status":"ok"}. Verified reachable from typhon,
+                                                                              clawpi, and zeropi as of 2026-04-22.
+ARGONAS  192.168.207.101 NAS/TrueNAS                                           run archival target
+                                                                              /mnt/argonas/investorclaw/harness-runs/<run-id>/
+
+SSH template (used throughout):
+  SSH_OPTS='-o PasswordAuthentication=yes -o PubkeyAuthentication=no -o StrictHostKeyChecking=no -o NumberOfPasswordPrompts=1'
+  TYPHON:  sshpass -p "$TYPHON_PASSWORD" ssh $SSH_OPTS jasonperlow@192.168.207.61 '<cmd>'
+  CLAWPI:  sshpass -p "$PI_PASSWORD"     ssh $SSH_OPTS pi@192.168.207.56        '<cmd>'
+  ZEROPI:  sshpass -p "$PI_PASSWORD"     ssh $SSH_OPTS pi@192.168.207.54        '<cmd>'
+  (both $TYPHON_PASSWORD and $PI_PASSWORD are "Gumbo@Kona1b" — same credential, different user.
+   The ubiquitous "Please note that SSH may not work until a valid user has been set up" banner from Raspbian is benign
+   and must NOT be interpreted as an auth failure — it prints before the auth completes.)
+
+Keys location (source of truth): typhon:/home/jasonperlow/.openclaw/.env
+  Required keys for matrix:
+    TOGETHER_API_KEY        (TG-C, TG-H narrative; TG-C cloud consultation)
+    GOOGLE_API_KEY          (GM-C, GM-H narrative; GM-C cloud consultation via Vertex OR Google AI)
+    FINNHUB_KEY             (analyst data, degrade if absent — log but not blocker)
+    NEWSAPI_KEY             (news data, degrade if absent)
+    FRED_API_KEY            (bond benchmarks, degrade if absent)
+    ALPHA_VANTAGE_KEY       (supplemental prices, optional)
+    MASSIVE_API_KEY         (supplemental prices, optional)
+
+Pi replication:
+  clawpi .env:  /home/pi/.zeroclaw/.env
+  zeropi .env:  /home/pi/.zeroclaw/.env
+  Pi skill dir: /home/pi/investorclaw
+  Both .env files are scp'd from typhon at W0.3.1 of each session on that Pi. See PRE-FLIGHT PF5.
+  ZeroClaw config already has the matrix model aliases on all three hosts as of 2026-04-22 (minimax, gemma-31b-together,
+  gemini-31-pro, gemma-31b-google, cerberus-gemma-consult). Do NOT use `zeroclaw config set` on these hosts — it triggers a
+  full config re-serialization that strips api_url fields and encrypts api_keys to enc2 form. Edit the TOML directly.
+
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+MODEL CONFIG MATRIX (4 configs)
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+Provider registration pattern (applies to all agents): each agent discovers a provider via (provider_id, api_base, api_key,
+model_catalog). OpenClaw declares providers in ~/.openclaw/openclaw.json::models.providers; ZeroClaw via
+~/.zeroclaw/config.toml::providers; Hermes via ~/.hermes/config.yaml::inference. TogetherAI on Hermes uses the "custom provider"
+pattern: provider=openai, api_base=https://api.together.xyz/v1, api_key=<TOGETHER_API_KEY> — same trick OpenClaw uses for any
+OpenAI-compatible endpoint. This is documented in v6.1.2 and OpenClaw's provider docs as the canonical way to register
+non-first-class endpoints.
+
+TG-C — Together Cloud (narrative + co-provider cloud consultation)
+  NARRATIVE_MODEL         together/MiniMaxAI/MiniMax-M2.7      (Hermes strips "together/" prefix → "MiniMaxAI/MiniMax-M2.7")
+  CONSULTATION_MODEL      together/Gemma-4-31B-Instruct        (Hermes strips prefix → "Gemma-4-31B-Instruct")
+  NARRATIVE_PROVIDER      together   (Hermes: openai + api_base=https://api.together.xyz/v1)
+  CONSULTATION_PROVIDER   together   (same endpoint)
+  API_BASE                https://api.together.xyz/v1
+  ROUTING_MODE            cloud_only
+  KEYS_REQUIRED           TOGETHER_API_KEY
+  CERBERUS_DEPENDENCY     none
+  STONKMODE               enabled; narrative_model_for_stonkmode = together/MiniMaxAI/MiniMax-M2.7
+
+TG-H — Together Hybrid (cloud narrative + local CERBERUS consultation)
+  NARRATIVE_MODEL         together/MiniMaxAI/MiniMax-M2.7
+  CONSULTATION_MODEL      gemma4-consult   (served by Ollama @ CERBERUS 192.168.207.96:8080)
+  NARRATIVE_PROVIDER      together   (Hermes: openai + api_base=https://api.together.xyz/v1)
+  CONSULTATION_PROVIDER   cerberus_local (Ollama-compatible HTTP, read by skill env vars, not by agent inference block)
+  API_BASE (narrative)    https://api.together.xyz/v1
+  CERBERUS_URL            http://192.168.207.96:8080
+  ROUTING_MODE            hybrid_local
+  KEYS_REQUIRED           TOGETHER_API_KEY
+  CERBERUS_DEPENDENCY     required (PF3 probe must pass per host)
+  STONKMODE               enabled; narrative_model_for_stonkmode = together/MiniMaxAI/MiniMax-M2.7
+
+GM-C — Gemini Cloud (narrative + co-provider cloud consultation)
+  NARRATIVE_MODEL         google/gemini-3.1-pro-preview
+  CONSULTATION_MODEL      google/gemma-4-31b (served by Google Vertex OR Google AI Studio, co-provider with narrative)
+  NARRATIVE_PROVIDER      google (OpenClaw/ZeroClaw) | gemini (Hermes native)
+  CONSULTATION_PROVIDER   google
+  API_BASE                (default Google AI Studio endpoint via provider SDK)
+  ROUTING_MODE            cloud_only
+  KEYS_REQUIRED           GOOGLE_API_KEY
+  CERBERUS_DEPENDENCY     none
+  STONKMODE               enabled; narrative_model_for_stonkmode = google/gemini-3.1-pro-preview
+
+GM-H — Gemini Hybrid (cloud narrative + local CERBERUS consultation)
+  NARRATIVE_MODEL         google/gemini-3.1-pro-preview
+  CONSULTATION_MODEL      gemma4-consult   (served by Ollama @ CERBERUS 192.168.207.96:8080)
+  NARRATIVE_PROVIDER      google | gemini
+  CONSULTATION_PROVIDER   cerberus_local
+  CERBERUS_URL            http://192.168.207.96:8080
+  ROUTING_MODE            hybrid_local
+  KEYS_REQUIRED           GOOGLE_API_KEY
+  CERBERUS_DEPENDENCY     required (PF3 probe must pass per host)
+  STONKMODE               enabled; narrative_model_for_stonkmode = google/gemini-3.1-pro-preview
+
+MODEL AVAILABILITY PREFLIGHT (PF4a, per agent before first use):
+  OpenClaw: `openclaw models list | grep <narrative_model>` — must show the exact id, else MODEL_UNAVAILABLE.
+            Current observed catalog on typhon shows together/MiniMaxAI/MiniMax-M2.7 (default) and google/gemini-3-flash-preview
+            + google/gemini-3.1-flash-lite-preview. If google/gemini-3.1-pro-preview is NOT in the OpenClaw catalog, Claude
+            MUST either (a) add it via `openclaw models register` with apiBase=<google AI Studio> per OpenClaw docs, or
+            (b) fall back to the closest configured Gemini 3.1 model (log the substitution in session notes, classify as
+            MODEL_CONFIGURATION_NOTE — not a violation if documented and the catalog truly lacks the spec model).
+  ZeroClaw: `zeroclaw models` — confirm narrative+consultation models resolvable for provider. If not, log MODEL_UNAVAILABLE.
+  Hermes:   Model resolution handled by openai-compatible API at runtime; if the cloud provider rejects the model id, log the
+            literal 404/403 and classify MODEL_UNAVAILABLE.
+
+ANY OTHER MODEL STRING appearing in a session beyond the four above = MODEL_CONFIGURATION_VIOLATION.
+
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+SESSION CATALOG (20 sessions = 5 agents × 4 configs)
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+S#    session_id                                               host     agent      config  provider         gemma_served_by   notes
+S01   ic-harness-v13-openclaw-typhon-TG-C                      typhon   OpenClaw   TG-C    together         together cloud    baseline
+S02   ic-harness-v13-openclaw-typhon-TG-H                      typhon   OpenClaw   TG-H    together         CERBERUS Ollama   CERBERUS-dep
+S03   ic-harness-v13-openclaw-typhon-GM-C                      typhon   OpenClaw   GM-C    google           google cloud      enterprise
+S04   ic-harness-v13-openclaw-typhon-GM-H                      typhon   OpenClaw   GM-H    google           CERBERUS Ollama   CERBERUS-dep
+S05   ic-harness-v13-zeroclaw-typhon-TG-C                      typhon   ZeroClaw   TG-C    together         together cloud    ZC route
+S06   ic-harness-v13-zeroclaw-typhon-TG-H                      typhon   ZeroClaw   TG-H    together         CERBERUS Ollama   CERBERUS-dep
+S07   ic-harness-v13-zeroclaw-typhon-GM-C                      typhon   ZeroClaw   GM-C    google           google cloud      ZC route
+S08   ic-harness-v13-zeroclaw-typhon-GM-H                      typhon   ZeroClaw   GM-H    google           CERBERUS Ollama   CERBERUS-dep
+S09   ic-harness-v13-hermes-typhon-TG-C                        typhon   Hermes     TG-C    together         together cloud    hermes cli
+S10   ic-harness-v13-hermes-typhon-TG-H                        typhon   Hermes     TG-H    together         CERBERUS Ollama   CERBERUS-dep
+S11   ic-harness-v13-hermes-typhon-GM-C                        typhon   Hermes     GM-C    google           google cloud      hermes cli
+S12   ic-harness-v13-hermes-typhon-GM-H                        typhon   Hermes     GM-H    google           CERBERUS Ollama   CERBERUS-dep
+S13   ic-harness-v13-zeroclaw-clawpi-TG-C                      clawpi   ZeroClaw   TG-C    together         together cloud    8GB Pi
+S14   ic-harness-v13-zeroclaw-clawpi-TG-H                      clawpi   ZeroClaw   TG-H    together         CERBERUS Ollama   CERBERUS-dep
+S15   ic-harness-v13-zeroclaw-clawpi-GM-C                      clawpi   ZeroClaw   GM-C    google           google cloud      8GB Pi
+S16   ic-harness-v13-zeroclaw-clawpi-GM-H                      clawpi   ZeroClaw   GM-H    google           CERBERUS Ollama   CERBERUS-dep
+S17   ic-harness-v13-zeroclaw-zeropi-TG-C                      zeropi   ZeroClaw   TG-C    together         together cloud    2GB Pi, openshell
+S18   ic-harness-v13-zeroclaw-zeropi-TG-H                      zeropi   ZeroClaw   TG-H    together         CERBERUS Ollama   CERBERUS-dep + mem pressure
+S19   ic-harness-v13-zeroclaw-zeropi-GM-C                      zeropi   ZeroClaw   GM-C    google           google cloud      2GB Pi, openshell
+S20   ic-harness-v13-zeroclaw-zeropi-GM-H                      zeropi   ZeroClaw   GM-H    google           CERBERUS Ollama   CERBERUS-dep + mem pressure
+
+ORDER OF EXECUTION: S01 → S20 sequentially. No session may begin until the prior session closed its transcripts.
+PARALLELISM: None. Strict serial execution. No concurrent sessions.
+
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+PRE-FLIGHT (before S01 W0.1)
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+PF1 HOST REACHABILITY
+  CLAUDE MUST EXECUTE (Bash):
+    for host in 192.168.207.61 192.168.207.56 192.168.207.54; do
+      sshpass -p "$TYPHON_PASSWORD" ssh $SSH_OPTS jasonperlow@$host 'echo OK' 2>&1
+    done
+  CLAUDE VALIDATES: each host returns "OK".
+  ON FAIL: BLOCKED. Matrix cannot run with unreachable hosts. Surface + halt.
+
+PF2 AGENT CLIs PRESENT
+  CLAUDE MUST EXECUTE (Bash, per host):
+    ssh typhon: 'openclaw --version && zeroclaw --version && hermes --version'
+    ssh clawpi: 'zeroclaw --version'
+    ssh zeropi: 'zeroclaw --version'
+  CLAUDE VALIDATES: every agent prints a version string, not "command not found".
+  ON FAIL: mark affected agent as BLOCKED; related sessions skipped with SKIP_REASON=AGENT_CLI_MISSING.
+
+PF3 CERBERUS REACHABILITY (per host)
+  CLAUDE MUST EXECUTE (Bash, per host):
+    From typhon: curl -s -o /dev/null -w "%{http_code}" http://192.168.207.96:8080/health --connect-timeout 5
+    From clawpi: sshpass -p "$PI_PASSWORD" ssh pi@192.168.207.56 "curl -s -o /dev/null -w '%{http_code}' http://192.168.207.96:8080/health --connect-timeout 5"
+    From zeropi: sshpass -p "$PI_PASSWORD" ssh pi@192.168.207.54 "curl -s -o /dev/null -w '%{http_code}' http://192.168.207.96:8080/health --connect-timeout 5"
+  CLAUDE VALIDATES: HTTP 200 (llama.cpp llama-server reachable; response body is {"status":"ok"}).
+  ON PARTIAL FAIL: the failing host's HYBRID sessions (TG-H, GM-H) are marked SKIP_REASON=CONSULTATION_ENDPOINT_UNREACHABLE.
+    CLOUD sessions (TG-C, GM-C) proceed normally.
+  As of last harness prep (2026-04-22): all three hosts returned http=200.
+
+PF4 KEY PRESENCE (on typhon canonical .env)
+  CLAUDE MUST EXECUTE (Bash):
+    ssh typhon: 'cat ~/.openclaw/.env | grep -E "^(TOGETHER_API_KEY|GOOGLE_API_KEY|FINNHUB_KEY|NEWSAPI_KEY|FRED_API_KEY)=" | awk -F= "{print \$1\"=\"(NF>0 && length(\$2)>0 ? \"present\":\"missing\")}"'
+  CLAUDE VALIDATES: TOGETHER_API_KEY=present AND GOOGLE_API_KEY=present.
+  ON FAIL of EITHER provider key: that provider's sessions (TG-* or GM-*) are BLOCKED; skip with SKIP_REASON=PROVIDER_KEY_MISSING.
+
+PF5 PI KEY REPLICATION
+  CLAUDE MUST EXECUTE (Bash):
+    ssh typhon: 'scp ~/.openclaw/.env pi@192.168.207.56:~/.zeroclaw/.env'
+    ssh typhon: 'scp ~/.openclaw/.env pi@192.168.207.54:~/.zeroclaw/.env'
+  CLAUDE VALIDATES: file sizes match between source and destinations.
+  ON FAIL: retry once per host; on second failure, that Pi's sessions BLOCKED with SKIP_REASON=KEY_REPLICATION_FAILED.
+
+PF6 CLEAN OLD SESSIONS (mandatory clean slate)
+  CLAUDE MUST EXECUTE (Bash):
+    ssh typhon: 'openclaw sessions cleanup --enforce 2>&1 || true'
+    ssh typhon: 'rm -f ~/.zeroclaw/sessions/ic-harness-v13-*.json'
+    ssh clawpi: 'rm -f ~/.zeroclaw/sessions/ic-harness-v13-*.json'
+    ssh zeropi: 'rm -f ~/.zeroclaw/sessions/ic-harness-v13-*.json'
+    ssh typhon: 'rm -rf /tmp/investorclaw-IC-RUN-V13-*/'
+  CLAUDE VALIDATES: no ic-harness-v13-* session files remain.
+
+PF7 ARGONAS ARCHIVE DIR
+  CLAUDE MUST EXECUTE (Bash, local to typhon's mount OR from Claude workstation):
+    mkdir -p /mnt/argonas/investorclaw/harness-runs/IC-RUN-V13-<YYYYMMDD>-<seq>/{transcripts,reports,logs}
+  CLAUDE VALIDATES: directory exists and is writable.
+  ON FAIL: write transcripts to ~/.harness/IC-RUN-V13-<run-id>/ locally and tar+scp to ARGONAS at closeout.
+
+PF8 RECORD RUN METADATA
+  CLAUDE MUST WRITE (transcript file header):
+    run_id, started_at (UTC ISO), matrix_version="V13-MATRIX-1.0", spec_sha256 (of this file),
+    typhon_openclaw_version, typhon_zeroclaw_version, typhon_hermes_version,
+    clawpi_zeroclaw_version, zeropi_zeroclaw_version,
+    investorclaw_git_commit_on_typhon (from ~/.openclaw/workspace/skills/investorclaw/.git HEAD).
+
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+LIFECYCLE W0 (mandatory, per session — 20× total)
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+CONTRACT: Claude executes W0.1 → W0.4 for each session before any W1–W272 test. Skipping any step = SKILL_LIFECYCLE_VIOLATION.
+
+W0.1 DELETE PRIOR SKILL INSTALL (session-scope cleanup)
+  If session.host == typhon:
+    CLAUDE MUST EXECUTE (Bash):
+      ssh typhon: 'rm -rf ~/.openclaw/workspace/skills/investorclaw'
+      ssh typhon: 'rm -rf /tmp/investorclaw-IC-RUN-V13-<session-id>/'
+    CLAUDE VALIDATES: skill directory absent.
+  If session.host ∈ {clawpi, zeropi}:
+    CLAUDE MUST EXECUTE (Bash):
+      ssh <host>: 'zeroclaw skills remove investorclaw 2>&1 || true'
+      ssh <host>: 'rm -rf ~/investorclaw'
+    CLAUDE VALIDATES: skill registration absent (zeroclaw skills list → no "investorclaw" row).
+
+W0.2 CLONE LATEST INVESTORCLAW
+  CLAUDE MUST EXECUTE (Bash):
+    ssh <session.host>: 'git clone https://github.com/perlowja/InvestorClaw /tmp/investorclaw-IC-RUN-V13-<session-id>/'
+    ssh <session.host>: 'git -C /tmp/investorclaw-IC-RUN-V13-<session-id>/ rev-parse HEAD'
+  CLAUDE CAPTURES: active_clone_sha.
+  CLAUDE VALIDATES: commit hash logged. Abort on "fatal:".
+
+W0.3 INSTALL SKILL
+  If session.host == typhon:
+    CLAUDE MUST EXECUTE (Bash):
+      ssh typhon: 'cp -r /tmp/investorclaw-IC-RUN-V13-<session-id>/ ~/.openclaw/workspace/skills/investorclaw/'
+  If session.host ∈ {clawpi, zeropi}:
+    CLAUDE MUST EXECUTE (Bash):
+      ssh <host>: 'cp -r /tmp/investorclaw-IC-RUN-V13-<session-id>/ ~/investorclaw/'
+      ssh <host>: 'zeroclaw skills install ~/investorclaw'
+    CLAUDE VALIDATES: zeroclaw skills list → "investorclaw" present.
+
+W0.3.1 ENV INSTALL (CRITICAL — background_enricher.py loads .env directly)
+  CLAUDE MUST EXECUTE (Bash):
+    If session.host == typhon:
+      ssh typhon: 'cp ~/.openclaw/.env ~/.openclaw/workspace/skills/investorclaw/.env'
+    If session.host == clawpi:
+      # PF5 already copied ~/.zeroclaw/.env; symlink into the skill workspace:
+      ssh clawpi: 'cp ~/.zeroclaw/.env ~/investorclaw/.env'
+    If session.host == zeropi:
+      ssh zeropi: 'cp ~/.zeroclaw/.env ~/investorclaw/.env'
+  CLAUDE VALIDATES: .env exists in the skill dir, non-empty, contains TOGETHER_API_KEY= or GOOGLE_API_KEY= as session config requires.
+
+W0.3.2 WRITE SESSION-SPECIFIC MODEL CONFIG
+  ALL AGENTS — skill .env (appended, per session config):
+    NARRATIVE_MODEL=<config.narrative_model>
+    CONSULTATION_MODEL=<config.consultation_model>
+    CONSULTATION_ENDPOINT=<http://192.168.207.96:8080 if hybrid; else blank>
+    CONSULTATION_ENABLED=true
+  Validator: grep -E "^NARRATIVE_MODEL|^CONSULTATION" → 4 expected lines, values match the session config.
+
+  HERMES ONLY — rewrite ~/.hermes/config.yaml::inference to pin the session provider+model+endpoint+key:
+    For TG-C (Together cloud narrative + Together cloud Gemma-4-31B consultation):
+      inference:
+        provider: "openai"
+        api_base: "https://api.together.xyz/v1"
+        api_key:  "<TOGETHER_API_KEY from ~/.openclaw/openclaw.json>"
+        model:    "MiniMaxAI/MiniMax-M2.7"
+        stream: true
+        temperature: 0.7
+        top_p: 0.9
+        max_tokens: 2048
+    For TG-H (Together cloud narrative + CERBERUS Ollama consultation):
+      Same as TG-C (narrative still Together cloud). Consultation endpoint is the skill's own env var; Hermes' own
+      inference block only drives the narrative. CONSULTATION_ENDPOINT is read by the InvestorClaw skill internals.
+    For GM-C (Gemini cloud narrative + Google cloud Gemma-4-31B consultation):
+      inference:
+        provider: "gemini"
+        api_key:  "<GOOGLE_API_KEY from ~/.openclaw/openclaw.json or hermes auth list>"
+        model:    "gemini-3.1-pro-preview"
+        stream: true
+        temperature: 0.7
+        top_p: 0.9
+        max_tokens: 2048
+    For GM-H (Gemini cloud narrative + CERBERUS Ollama consultation):
+      Same inference block as GM-C. Consultation routed via skill env vars.
+  CLAUDE MUST EXECUTE (Bash, Hermes only):
+    ssh typhon: 'cp ~/.hermes/config.yaml ~/.hermes/config.yaml.v13-backup.<session-id>'
+    ssh typhon: write replacement config via heredoc (atomic mv to avoid partial writes).
+    ssh typhon: 'pkill -f hermes-gateway 2>/dev/null || true'  (Hermes gateway will lazy-start on next invocation)
+  Validator: grep -E "^  provider:|^  model:|^  api_base:|^  api_key:" ~/.hermes/config.yaml matches session config.
+
+W0.3.5 RESTART AGENT / GATEWAY (per agent)
+  OpenClaw on typhon:
+    CLAUDE MUST EXECUTE (Bash):
+      ssh typhon: 'openclaw gateway restart && sleep 3 && openclaw gateway status'
+    CLAUDE VALIDATES: status output contains "running" or "healthy".
+  ZeroClaw on any host:
+    CLAUDE MUST EXECUTE (Bash):
+      ssh <host>: 'sudo systemctl restart zeroclaw.service && sleep 3 && systemctl status zeroclaw.service'
+    CLAUDE VALIDATES: systemctl output contains "active (running)".
+  Hermes on typhon:
+    CLAUDE MUST EXECUTE (Bash):
+      ssh typhon: 'hermes --version && hermes status 2>&1 | head -20'
+    CLAUDE VALIDATES: version string printed; `hermes status` reports gateway/agent components healthy. If gateway lazy-start
+      is needed it happens on first `hermes chat` invocation; no explicit restart required after config edit beyond
+      `pkill -f hermes-gateway` which W0.3.2 already did.
+
+W0.3.6 CONFIGURE AGENT TO USE SESSION MODEL (active model switch, CAP8)
+  OpenClaw:
+    CLAUDE MUST EXECUTE (Bash):
+      ssh typhon: 'openclaw models set <config.narrative_model>'
+      ssh typhon: 'openclaw config get agents.defaults.model.primary'
+    CLAUDE VALIDATES: config readback matches config.narrative_model. Mismatch → MODEL_SWITCH_VIOLATION.
+  ZeroClaw:
+    (per-invocation routing via -p/--model flags; no persistent switch needed. Verify zeroclaw config get --model shows default
+    set sensibly for session.)
+  Hermes:
+    Model+provider is pinned via the config.yaml rewrite at W0.3.2. Verify:
+      ssh typhon: 'hermes config show 2>&1 | grep -E "Model:|Provider:" | head -5'
+    If config readback shows the wrong model → MODEL_SWITCH_VIOLATION.
+
+W0.4 VERIFY /portfolio setup
+  OpenClaw:
+    CLAUDE MUST EXECUTE (Agent):
+      ssh typhon: 'openclaw agent --session-id <session_id> --agent main -m "/portfolio setup"'
+  ZeroClaw @ typhon:
+    CLAUDE MUST EXECUTE (Agent):
+      ssh typhon: 'zeroclaw agent -p <config.narrative_provider> --model <config.narrative_model> \
+                   --session-state-file ~/.zeroclaw/sessions/<session_id>.json -m "/portfolio setup"'
+  ZeroClaw @ clawpi:
+    CLAUDE MUST EXECUTE (Agent):
+      ssh clawpi: 'zeroclaw agent -p <config.narrative_provider> --model <config.narrative_model> \
+                   --session-state-file ~/.zeroclaw/sessions/<session_id>.json -m "/portfolio setup"'
+  ZeroClaw @ zeropi:
+    CLAUDE MUST EXECUTE (Agent):
+      ssh zeropi: 'openshell --network -- zeroclaw agent -p <config.narrative_provider> --model <config.narrative_model> \
+                   --session-state-file ~/.zeroclaw/sessions/<session_id>.json -m "/portfolio setup"'
+  Hermes:
+    CLAUDE MUST EXECUTE (Agent):
+      ssh typhon: 'hermes chat -q "/portfolio setup" -Q --continue <session_id>'
+  CLAUDE CAPTURES: full stdout + stderr + exit code + ic_result envelope (if present).
+  CLAUDE VALIDATES:
+    ✓ exit_code = 0
+    ✓ ic_result envelope present in stdout
+    ✓ No fatal key errors, no "command not found"
+  ON FAIL: classify per BLOCKER HANDLING. If classification = SKILL_CODE_DEFECT, enter 6-step remediation and rerun W0 for this
+           session. If ENVIRONMENTAL, retry ≤ 2. If MODEL_UNAVAILABLE, skip session and log.
+
+W0.5 PROVIDER TOKEN SANITY PING
+  CLAUDE MUST EXECUTE (Agent, trivial prompt to warm provider and verify reachability):
+    Same invocation template as W0.4 with message = "Respond with the exact token: TYPHON_V13_SANITY_ACK"
+  CLAUDE VALIDATES: agent response contains "TYPHON_V13_SANITY_ACK" (or equivalent echo from narrative model).
+  ON FAIL: MODEL_UNAVAILABLE for this session; skip all W1–W272 tests for this session, log.
+
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+TEST CATALOG — COMMAND SURFACE (W1–W22, 22 canonical commands)
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+Every command is invoked in SLASH form (the form an end-user types at the agent prompt). Aliases are equivalent; the canonical
+form listed below is the form used in the runbook.
+
+W#   command           aliases                                       script                                              tier
+W1   holdings          snapshot, prices                              fetch_holdings.py                                    1
+W2   performance       analyze, returns                              analyze_performance_polars.py                        1
+W3   bonds             bond-analysis, analyze-bonds                  bond_analyzer.py                                     1
+W4   analyst           analysts, ratings                             fetch_analyst_recommendations_parallel.py            1
+W5   news              sentiment                                     fetch_portfolio_news.py                              1
+W6   news-plan         fetch-plan                                    news_plan.py                                         1
+W7   synthesize        analyze-multi, multi-factor, recommend,       portfolio_analyzer.py                                1
+                       recommendations, synthesize-opportunities
+W8   fixed-income      fixed-income-analysis, bond-strategy          fixed_income_analysis.py                             1
+W9   optimize          rebalance, allocation, efficient-frontier     optimize.py                                          1
+W10  report            export, csv, excel                            report.py                                            1
+W11  eod-report        eod                                           eod_report.py                                        2
+W12  session           session-init, risk-profile, calibrate         session_init.py                                      2
+W13  fa-topics         discussion-topics                              fa_topics.py                                         2
+W14  lookup            query, detail                                 lookup.py                                            2
+W15  guardrails        guardrail, guardrails-prime,                  model_guardrails.py                                  2
+                       guardrails-status
+W16  update-identity   update_identity, identity                     (in-process: setup/identity_updater.py)              2
+W17  run               pipeline                                      portfolio_complete.py                                2
+W18  stonkmode         stonk-mode, stonks                            stonkmode.py                                         2
+W19  check-updates     update                                        check_updates.py                                     2
+W20  ollama-setup      model-setup, consult-setup                    ollama_setup.py                                      2
+W21  help              -h, --help                                    (in-process: config/help_text.show_help)              3
+W22  setup             auto-setup, init, initialize                  auto_setup.py                                        3
+
+SLASH PROMPT TEMPLATE (per command):
+  "/portfolio <command>"
+  Exceptions:
+    W16 update-identity   → "/portfolio update-identity"
+    W18 stonkmode         → "/portfolio stonkmode status"   (side-effect-free read)
+    W20 ollama-setup      → "/portfolio ollama-setup --status"
+    W21 help              → "/portfolio help"
+
+Per session: 22 slash-command tests (W1 through W22). Total: 22 × 20 sessions = 440 slash-command tests.
+
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+TEST CATALOG — NATURAL LANGUAGE QUERIES (250 queries, 8 categories)
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+Source: v12_typhon_cicd_harness.py::_get_test_queries (preserved verbatim — ANY rewording = NL_PROMPT_MUTATION_VIOLATION).
+
+CATEGORY A — Portfolio Analysis & Holdings (35)
+  N001 "Show my holdings"
+  N002 "What's my total portfolio value?"
+  N003 "Analyze my asset allocation"
+  N004 "What's my sector allocation?"
+  N005 "How am I doing?"
+  N006 "What's my total return?"
+  N007 "Am I beating the S&P 500?"
+  N008 "Show me my Sharpe ratio"
+  N009 "What's my portfolio volatility?"
+  N010 "Show my bond exposure"
+  N011 "Analyze my fixed income"
+  N012 "What's my bond allocation?"
+  N013 "What does Wall Street think?"
+  N014 "Show analyst ratings"
+  N015 "Any analyst upgrades?"
+  N016 "Any news on my stocks?"
+  N017 "Show recent headlines"
+  N018 "What's happening with my holdings?"
+  N019 "How should I rebalance?"
+  N020 "What's my risk score?"
+  N021 "Calculate my tax loss harvesting opportunities"
+  N022 "What's my dividend yield?"
+  N023 "Show dividend payments"
+  N024 "What are my largest positions?"
+  N025 "Which stocks are underperforming?"
+  N026 "What's my cash position?"
+  N027 "Show my concentration risk"
+  N028 "Analyze my momentum positions"
+  N029 "What's my correlation matrix?"
+  N030 "Show my Sortino ratio"
+  N031 "Calculate my maximum drawdown"
+  N032 "What's my beta to the market?"
+  N033 "Show my value vs growth ratio"
+  N034 "Analyze my ESG score"
+  N035 "What's my leverage ratio?"
+
+CATEGORY B — Market Intelligence & Trends (40)
+  N036 "What's happening in the market today?"
+  N037 "Show me market trends"
+  N038 "How is the S&P 500 performing?"
+  N039 "What's the Nasdaq doing?"
+  N040 "Show Dow Jones performance"
+  N041 "Which sectors are up today?"
+  N042 "Show sector performance"
+  N043 "What's leading the market?"
+  N044 "Any major market news?"
+  N045 "What's moving the markets?"
+  N046 "Recent market movers"
+  N047 "What about earnings season?"
+  N048 "Show upcoming earnings reports"
+  N049 "Volatility index update"
+  N050 "What's the VIX at?"
+  N051 "Show implied volatility skew"
+  N052 "What's the put/call ratio?"
+  N053 "Show market breadth indicators"
+  N054 "What's the advance-decline line?"
+  N055 "Show sector rotation patterns"
+  N056 "What's the market sentiment?"
+  N057 "Analyze technical chart patterns"
+  N058 "Show support and resistance levels"
+  N059 "What's happening with commodities?"
+  N060 "Show crude oil prices"
+  N061 "What about precious metals?"
+  N062 "Show gold and silver trends"
+  N063 "What's the dollar strength?"
+  N064 "Show currency correlations"
+  N065 "What's the yield curve?"
+  N066 "Show treasury bond yields"
+  N067 "What's happening with cryptocurrencies?"
+  N068 "Show Bitcoin and Ethereum prices"
+  N069 "What about DeFi markets?"
+  N070 "Show IPO pipeline"
+  N071 "What's the SPAC activity?"
+  N072 "Show short interest data"
+  N073 "What's the put/call open interest?"
+  N074 "Analyze insider trading activity"
+  N075 "Show buyback announcements"
+
+CATEGORY C — Economic Data & Indicators (35)
+  N076 "What's the earnings surprise rate?"
+  N077 "Analyze guidance revisions"
+  N078 "What's the Federal Reserve doing?"
+  N079 "Latest Fed decision"
+  N080 "Interest rate outlook"
+  N081 "Are rates going up or down?"
+  N082 "Any major economic news?"
+  N083 "Show economic calendar"
+  N084 "Latest inflation data"
+  N085 "What's inflation at?"
+  N086 "Jobs report analysis"
+  N087 "Latest unemployment rate"
+  N088 "GDP growth trends"
+  N089 "How's the economy doing?"
+  N090 "Show CPI components"
+  N091 "What about core inflation?"
+  N092 "Show PPI data"
+  N093 "What's the wage growth?"
+  N094 "Show initial jobless claims"
+  N095 "What about continuing claims?"
+  N096 "Show labor force participation"
+  N097 "What's the consumer confidence index?"
+  N098 "Show manufacturing data"
+  N099 "What about services PMI?"
+  N100 "Show construction spending"
+  N101 "What's the housing starts?"
+  N102 "Show existing home sales"
+  N103 "What about home prices?"
+  N104 "Show mortgage rates"
+  N105 "What's the consumer spending?"
+  N106 "Show retail sales data"
+  N107 "What about durable goods orders?"
+  N108 "Show factory orders"
+  N109 "What's the trade deficit?"
+  N110 "Show export/import data"
+
+CATEGORY D — Fixed Income & Bonds (25)
+  N111 "What about corporate profits?"
+  N112 "Show business investment trends"
+  N113 "What's the debt situation?"
+  N114 "Explain bonds to me"
+  N115 "What's yield to maturity?"
+  N116 "Show bond duration analysis"
+  N117 "What about credit spreads?"
+  N118 "Show investment grade vs high-yield"
+  N119 "What's the municipal bond market doing?"
+  N120 "Show Treasury yield curve"
+  N121 "What about TIPS?"
+  N122 "Show emerging market bonds"
+  N123 "What's the corporate bond spread?"
+  N124 "Explain duration risk"
+  N125 "What about convexity?"
+  N126 "Show bond fund flows"
+  N127 "What's the Fed's balance sheet doing?"
+  N128 "Show quantitative easing impact"
+  N129 "What about reverse repos?"
+  N130 "Show swap spreads"
+  N131 "What's the repo market?"
+  N132 "Show bond market technicals"
+  N133 "What about fallen angels?"
+  N134 "Show distressed credit opportunities"
+  N135 "What's the junk bond situation?"
+
+CATEGORY E — Financial Education & Concepts (40)
+  N136 "Show convertible bond market"
+  N137 "What about bond laddering?"
+  N138 "Explain barbell strategy"
+  N139 "What's a Sharpe ratio?"
+  N140 "Explain beta to me"
+  N141 "What is volatility?"
+  N142 "How do I calculate returns?"
+  N143 "What's asset allocation?"
+  N144 "Diversification strategies"
+  N145 "How do I rebalance?"
+  N146 "Explain bond duration"
+  N147 "What's yield to maturity?"
+  N148 "How do bonds work?"
+  N149 "Explain options trading"
+  N150 "What are calls and puts?"
+  N151 "How do I use options for hedging?"
+  N152 "Explain straddles and strangles"
+  N153 "What about covered calls?"
+  N154 "Explain put spreads"
+  N155 "What's value at risk?"
+  N156 "Explain expected shortfall"
+  N157 "What's the efficient frontier?"
+  N158 "Explain modern portfolio theory"
+  N159 "What about factor investing?"
+  N160 "Explain factor tilts"
+  N161 "What's smart beta?"
+  N162 "Explain fundamental analysis"
+  N163 "What about technical analysis?"
+  N164 "Explain sentiment analysis"
+  N165 "What's the Fama-French model?"
+  N166 "Explain the capital asset pricing model"
+  N167 "What about value investing?"
+  N168 "Explain growth investing?"
+  N169 "What's momentum investing?"
+  N170 "Explain mean reversion"
+  N171 "What about pairs trading?"
+  N172 "Explain statistical arbitrage"
+  N173 "What's market microstructure?"
+  N174 "Explain algorithmic trading"
+  N175 "What about high-frequency trading?"
+
+CATEGORY F — Tax & Planning (25)
+  N176 "Explain dark pools"
+  N177 "What's the bid-ask spread?"
+  N178 "Explain market impact"
+  N179 "How do I optimize my taxes?"
+  N180 "What about tax-loss harvesting?"
+  N181 "Explain wash sale rules"
+  N182 "What's the long-term capital gains rate?"
+  N183 "How do I minimize taxes?"
+  N184 "Explain income shifting strategies"
+  N185 "What about charitable giving?"
+  N186 "Explain donor-advised funds"
+  N187 "What's tax-efficient investing?"
+  N188 "Show my tax efficiency"
+  N189 "How do I use municipal bonds?"
+  N190 "Explain qualified dividends"
+  N191 "What about qualified business income?"
+  N192 "Explain the NIIT tax"
+  N193 "What's the alternative minimum tax?"
+  N194 "Explain net unrealized appreciation"
+  N195 "What about inherited IRAs?"
+  N196 "Explain required minimum distributions"
+  N197 "What's the SECURE Act?"
+  N198 "Explain mega backdoor Roth"
+  N199 "What about 1031 exchanges?"
+  N200 "Explain opportunity zones"
+
+CATEGORY G — Risk Management (20)
+  N201 "What's the kiddie tax?"
+  N202 "Explain state tax considerations"
+  N203 "What about foreign accounts?"
+  N204 "What's my portfolio risk?"
+  N205 "Show my risk decomposition"
+  N206 "What about tail risk?"
+  N207 "Explain correlation breakdown"
+  N208 "What's systemic risk?"
+  N209 "Show my hedge effectiveness"
+  N210 "What about VaR by position?"
+  N211 "Explain stress testing"
+  N212 "What's my recovery time?"
+  N213 "Show my drawdown scenarios"
+  N214 "What about concentration risk?"
+  N215 "Explain liquidity risk"
+  N216 "What's counterparty risk?"
+  N217 "Show my geopolitical exposure"
+  N218 "What about inflation protection?"
+  N219 "Explain credit risk management"
+  N220 "What's my interest rate sensitivity?"
+
+CATEGORY H — System & Operational (30)
+  N221 "Show currency hedging needs"
+  N222 "What about Black Swan events?"
+  N223 "Explain scenario analysis"
+  N224 "Setup"
+  N225 "Status"
+  N226 "Help"
+  N227 "What can you do?"
+  N228 "List commands"
+  N229 "Show options"
+  N230 "Available features"
+  N231 "Current settings"
+  N232 "Configuration status"
+  N233 "System check"
+  N234 "Diagnostics"
+  N235 "Test connection"
+  N236 "Performance check"
+  N237 "Verify connectivity"
+  N238 "Check latency"
+  N239 "Network status"
+  N240 "API status"
+  N241 "Service health"
+  N242 "Running normally"
+  N243 "Ping"
+  N244 "Version info"
+  N245 "Show capabilities"
+  N246 "List data sources"
+  N247 "What data do you have?"
+  N248 "Show update frequency"
+  N249 "Data freshness check"
+  N250 "Accuracy verification"
+
+NL PROMPT TEMPLATE per agent (all agents receive the VERBATIM NL query as a bare message — no /portfolio prefix, no NL wrapper;
+the agent must route based on its own conversation understanding):
+  OpenClaw:  openclaw agent --session-id <session_id> --agent main -m "<verbatim query>"
+  ZeroClaw:  zeroclaw agent -p <provider> --model <narrative_model> --session-state-file <path> -m "<verbatim query>"
+             (openshell --network -- wrapper on zeropi only)
+  Hermes:    hermes chat -q "<verbatim query>" -Q --continue <session_id>
+             (Hermes uses config.yaml inference block pinned in W0.3.2; no per-invocation provider/model override to avoid
+             drift between pinned config and invocation flags.)
+
+Per session: 250 NL tests (N001 through N250). Total: 250 × 20 sessions = 5,000 NL tests.
+
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+TEST INDEXING
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+Per session (272 tests): W1..W22, then N001..N250.
+Test id format: TC-<session_id>-W<n>  |  TC-<session_id>-N<nnn>
+Total matrix tests: 20 sessions × 272 = 5,440.
+
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+EXECUTION CONTRACT (per test)
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+FOR EACH session S in [S01 .. S20]:
+  IF pre-flight marked S as SKIP with SKIP_REASON: emit per-session skip record and continue to next session.
+  EXECUTE W0.1 → W0.5 for S.
+  IF W0 fails: emit session-blocker record, skip all W/N tests for S, continue.
+  FOR EACH test T in [W1..W22, N001..N250]:
+    1. COMPOSE exact agent-CLI command per S.agent and T prompt template.
+    2. EXECUTE (Bash via ssh + agent CLI). Capture stdout, stderr, exit code, elapsed_ms, start_ts_utc.
+    3. EXTRACT ic_result envelope (jq '.ic_result // empty' on the last JSON line of stdout OR equivalent grep+parse in Bash).
+    4. EVALUATE:
+       - exit_code expected = 0 (except W21 /help on some agents may echo exit 0 directly; still expect ic_result)
+       - ic_result present = REQUIRED for slash-command tests (W1..W22)
+       - ic_result present = REQUIRED for NL tests that route to a skill command (agent decides routing; if agent answers from
+         model knowledge with no skill invocation, ic_result may be absent; log agent_routed_to_skill=false, mark UNVERIFIED
+         for skill-coverage purposes but PASS for conversational coverage)
+       - no FABRICATION phrases in agent response
+       - no leaked keys or PII
+    5. APPEND per-test transcript to <run-dir>/transcripts/<session_id>/<test_id>.json
+    6. EMIT the 5-section RESPONSE FORMAT block (🎯 📝 ✅ 📊 🔍) to the running log.
+
+INTER-TEST PAUSE: 500ms minimum between invocations to avoid provider burst throttling.
+RATE-LIMIT BACKOFF: on 429, apply (2s, 4s, 8s, ±10% jitter, cap 120s, max 5 retries). Log each retry. Exhausted → log
+  RATE_LIMIT_VIOLATION=false (429 correctly handled, exhausted = provider unavailability), test alert=fail blocker=rate_limited.
+
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+JSON SCHEMA V13-MATRIX (per-test record)
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+{
+  "schema_version": "INVESTORCLAW_V13_MATRIX_1.0",
+  "run_id": "IC-RUN-V13-<YYYYMMDD>-<seq>",
+  "session_id": "<session.session_id>",
+  "test_id":    "TC-<session_id>-{W<n>|N<nnn>}",
+  "prompt_kind": "slash|nl",
+  "prompt_verbatim": "<exact literal prompt sent to agent>",
+  "agent": "openclaw|zeroclaw|hermes",
+  "host": "typhon|clawpi|zeropi",
+  "config": "TG-C|TG-H|GM-C|GM-H",
+  "narrative_model": "<string>",
+  "consultation_model": "<string|none>",
+  "consultation_endpoint": "<url|none>",
+  "routing_mode": "cloud_only|hybrid_local",
+  "literal_command": "<full shell command executed, quotes preserved>",
+  "started_at_utc": "<ISO 8601>",
+  "elapsed_ms": <int>,
+  "exit_code": <int>,
+  "stdout": "<full stdout, base64 if binary>",
+  "stderr": "<full stderr>",
+  "ic_result_present": true|false,
+  "ic_result": {"script": "...", "exit_code": <int>, "duration_ms": <int>} | null,
+  "agent_routed_to_skill": true|false,
+  "fabrication_phrase_detected": true|false,
+  "violations_triggered": ["<code>", ...],
+  "alert_level": "pass|warn|fail|unverified|skipped",
+  "blocker_type": "none|environmental|skill_code_defect|openclaw_source_flaw|zeroclaw_daemon_flaw|hermes_daemon_flaw|nemoclaw_sandbox_violation|model_unavailable|consultation_endpoint_unreachable|rate_limited|unfixable",
+  "skip_reason": "<string|null>",
+  "notes": ["<string>", ...]
+}
+
+No additional keys. No omitted keys. Malformed record = EVIDENCE_TRUNCATED violation on that test.
+
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+VALIDATOR STAGES (applied to every test record)
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+V01 format check                       JSON parseable.
+V02 schema key set                     All keys present, no extras.
+V03 type checks                        All values match schema types.
+V04 enum checks                        agent/host/config/routing_mode/alert_level/blocker_type within allowed values.
+V05 literal command present            literal_command non-empty, contains agent CLI + session arg.
+V06 ic_result consistency              if ic_result_present=true, exit_code == ic_result.exit_code (else IC_RESULT_EXIT_MISMATCH).
+V07 prompt verbatim                    prompt_verbatim matches spec entry byte-for-byte (else NL_PROMPT_MUTATION_VIOLATION).
+V08 session identity                   session_id prefix aligns with agent+host (else DEPLOYMENT_CONTEXT_MISMATCH).
+V09 model within authorized set        narrative_model ∈ {together/MiniMaxAI/MiniMax-M2.7, google/gemini-3.1-pro-preview}
+                                       consultation_model ∈ {together/Gemma-4-31B-Instruct, google/gemma-4-31b, gemma4-consult,
+                                                              none}
+V10 consultation compliance            if routing_mode=hybrid_local, consultation_endpoint must be the CERBERUS URL.
+V11 fabrication absent                 fabrication_phrase_detected=false, OR alert_level=fail with FABRICATION_VIOLATION.
+V12 stdout/stderr complete             both fields populated (may be empty string, but present).
+V13 rate-limit logged                  if 429 appeared in text, a retry schedule entry exists in notes.
+
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+TRANSCRIPT STORAGE
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+<run-dir>/
+  transcripts/
+    S01/W1.json ... W22.json, N001.json ... N250.json      (272 files)
+    S02/...
+    ...
+    S20/...
+  reports/
+    run_summary.json                                       (aggregated pass/fail per session + per category)
+    session_S01.json ... session_S20.json                  (per-session roll-ups)
+    violations.json                                        (all triggered violations)
+    blockers.json                                          (all SKILL_CODE_DEFECT repair cycles, with repair_commit_shas)
+  logs/
+    execution.log                                          (timestamped line-per-test, machine-grepable)
+    bash.log                                               (raw invocation log)
+
+Primary location: /mnt/argonas/investorclaw/harness-runs/<run-id>/  (ARGONAS authoritative).
+Local mirror: ~/.harness/<run-id>/                                 (if ARGONAS unreachable at closeout, tar+scp later).
+
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+RUN SUMMARY (emitted at closeout)
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+{
+  "schema_version": "INVESTORCLAW_V13_MATRIX_SUMMARY_1.0",
+  "run_id": "IC-RUN-V13-<YYYYMMDD>-<seq>",
+  "started_at": "...",
+  "finished_at": "...",
+  "elapsed_seconds": <int>,
+  "sessions_planned": 20,
+  "sessions_executed": <int>,
+  "sessions_skipped": <int>,
+  "tests_planned": 5440,
+  "tests_executed": <int>,
+  "tests_passed": <int>,
+  "tests_warned": <int>,
+  "tests_failed": <int>,
+  "tests_unverified": <int>,
+  "tests_skipped": <int>,
+  "by_session": {
+    "<session_id>": {"planned": 272, "executed": ..., "passed": ..., "warned": ..., "failed": ..., "unverified": ..., "skipped": ...}
+  },
+  "by_category": {
+    "slash_commands": {"planned": 440, "passed": ..., ...},
+    "nl_portfolio": {"planned": 700, "passed": ..., ...},
+    "nl_market":    {"planned": 800, "passed": ..., ...},
+    "nl_economic":  {"planned": 700, "passed": ..., ...},
+    "nl_fixed_income": {"planned": 500, "passed": ..., ...},
+    "nl_education": {"planned": 800, "passed": ..., ...},
+    "nl_tax":       {"planned": 500, "passed": ..., ...},
+    "nl_risk":      {"planned": 400, "passed": ..., ...},
+    "nl_system":    {"planned": 600, "passed": ..., ...}
+  },
+  "violations_count_by_code": {"<CODE>": <n>, ...},
+  "blockers_count_by_type": {"<type>": <n>, ...},
+  "provider_stability": {
+    "together": {"requests": <n>, "rate_limits": <n>, "retries_total": <n>, "exhausted_after_backoff": <n>},
+    "google":   {...}
+  },
+  "consultation_status": {
+    "cerberus_reachable_from_typhon": true|false,
+    "cerberus_reachable_from_clawpi": true|false,
+    "cerberus_reachable_from_zeropi": true|false
+  },
+  "repair_commits": [ {"session_id": "...", "commit_sha": "...", "description": "..."}, ... ],
+  "overall_status": "pass|partial|fail",
+  "overall_alert_level": "pass|warn|fail"
+}
+
+overall_status rules:
+  "pass"    — no session failed (all sessions executed fully, 0 fail-alert tests).
+  "partial" — some sessions skipped due to documented prerequisite failures (PF3/PF4/PF5), OR rate-limit exhaustion, OR
+              environmental retries caused a warn. No skill_code_defect blockers unresolved.
+  "fail"    — one or more unresolved blockers (skill_code_defect repair attempts exhausted, openclaw/zeroclaw flaw unresolved,
+              fabrication detected, or aggregated failed-test count exceeds threshold [> 5% of executed tests]).
+
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+CLEANUP (after closeout report emitted)
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+CL1 Remove per-session skill installs:
+    ssh typhon: 'rm -rf ~/.openclaw/workspace/skills/investorclaw'
+    ssh typhon: 'rm -rf /tmp/investorclaw-IC-RUN-V13-*/'
+    ssh clawpi: 'zeroclaw skills remove investorclaw'
+    ssh clawpi: 'rm -rf ~/investorclaw /tmp/investorclaw-IC-RUN-V13-*/'
+    ssh zeropi: 'zeroclaw skills remove investorclaw'
+    ssh zeropi: 'rm -rf ~/investorclaw /tmp/investorclaw-IC-RUN-V13-*/'
+
+CL2 Remove session state files:
+    ssh typhon: 'rm -f ~/.zeroclaw/sessions/ic-harness-v13-*.json'
+    ssh clawpi: 'rm -f ~/.zeroclaw/sessions/ic-harness-v13-*.json'
+    ssh zeropi: 'rm -f ~/.zeroclaw/sessions/ic-harness-v13-*.json'
+    ssh typhon: 'openclaw sessions cleanup --enforce'
+
+CL3 Archive run directory (tar + scp if needed):
+    tar -C /mnt/argonas/investorclaw/harness-runs -czf <run-id>.tar.gz <run-id>/
+    Verify archive integrity (tar -tzf > /dev/null).
+
+CL4 Emit completion banner in the running log:
+    ════ V13 MATRIX COMPLETE | run=<run-id> | overall=<status> | tests=<passed>/<executed>/<planned> | elapsed=<hh:mm:ss> ════
+
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+END OF SPEC
+
+Version        V13-MATRIX-1.0
+Authored       2026-04-22
+Style basis    V6.1.2 strict + V8.1 multi-agent + V12 NL query corpus
+Authorization  Claude-executed runbook only. Python implementation FORBIDDEN.

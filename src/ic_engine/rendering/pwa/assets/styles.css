@@ -1,0 +1,1080 @@
+/* InvestorClaw Dashboard - Star Trek Bloomberg Terminal */
+/* Futuristic sci-fi elegance meets data-dense financial visualization */
+
+@import url('https://fonts.googleapis.com/css2?family=Courier+Prime:wght@400;700&family=Michroma&display=swap');
+
+:root {
+    /* Sci-fi color palette: cool teals, electric blues, space blacks */
+    --primary-cyan: #00d9ff;
+    --primary-teal: #00ffcc;
+    --secondary-cyan: #0099cc;
+    --accent-purple: #9d4edd;
+    --accent-magenta: #ff006e;
+    --bg-space: #0a0e27;
+    --bg-panel: #0f1419;
+    --bg-alt: #151b2b;
+    --text-bright: #f0f6fc;
+    --text-muted: #8b949e;
+    --glow-cyan: rgba(0, 217, 255, 0.3);
+    --glow-teal: rgba(0, 255, 204, 0.2);
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+html, body {
+    font-family: 'Courier Prime', monospace;
+    background: linear-gradient(135deg, var(--bg-space) 0%, #0d1117 100%);
+    background-attachment: fixed;
+    color: var(--text-bright);
+    line-height: 1.6;
+    letter-spacing: 0.4px;
+}
+
+body::before {
+    content: '';
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background:
+        repeating-linear-gradient(
+            0deg,
+            rgba(0, 217, 255, 0.02) 0px,
+            rgba(0, 217, 255, 0.02) 1px,
+            transparent 1px,
+            transparent 2px
+        );
+    pointer-events: none;
+    z-index: 1;
+}
+
+#app {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    z-index: 2;
+}
+
+.container {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    max-width: 1800px;
+    margin: 0 auto;
+    width: 100%;
+}
+
+/* ============================================================================
+   NAVIGATION & HEADER - Federation Workstation Style
+   ============================================================================ */
+
+.navbar {
+    background: linear-gradient(90deg, var(--bg-panel) 0%, var(--bg-alt) 100%);
+    border-bottom: 2px solid var(--primary-cyan);
+    padding: 2rem 2.5rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 3rem;
+    flex-wrap: wrap;
+    box-shadow:
+        0 8px 32px rgba(0, 217, 255, 0.12),
+        inset 0 1px 0 rgba(0, 217, 255, 0.1);
+    position: relative;
+}
+
+.navbar::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(90deg,
+        transparent,
+        var(--primary-cyan),
+        transparent);
+}
+
+.navbar-brand {
+    display: flex;
+    align-items: baseline;
+    gap: 1.5rem;
+    position: relative;
+    z-index: 1;
+}
+
+.navbar-brand h1 {
+    font-family: 'Michroma', sans-serif;
+    font-size: 2rem;
+    font-weight: 400;
+    color: var(--primary-cyan);
+    letter-spacing: 2px;
+    text-shadow: 0 0 20px rgba(0, 217, 255, 0.4);
+    text-transform: uppercase;
+}
+
+.navbar-status {
+    display: flex;
+    gap: 3rem;
+    margin-left: auto;
+    padding-left: 2rem;
+    border-left: 1px solid var(--glow-cyan);
+}
+
+.total-value {
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: var(--primary-teal);
+    letter-spacing: -0.3px;
+    text-shadow: 0 0 12px var(--glow-teal);
+}
+
+.last-update {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+}
+
+.freshness-status {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.freshness-status.fresh {
+    color: var(--primary-teal);
+}
+
+.freshness-status.stale {
+    color: var(--accent-magenta);
+}
+
+.refresh-btn {
+    min-height: 40px;
+    padding: 0.6rem 1rem;
+    background: transparent;
+    color: var(--primary-cyan);
+    border: 1px solid var(--primary-cyan);
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    font-family: 'Courier Prime', monospace;
+}
+
+.refresh-btn:hover {
+    color: var(--primary-teal);
+    border-color: var(--primary-teal);
+    box-shadow: 0 0 12px rgba(0, 255, 204, 0.18);
+}
+
+.navbar-version {
+    font-size: 0.7rem;
+    color: var(--secondary-cyan);
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+}
+
+.navbar-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    align-items: stretch;
+    position: relative;
+    z-index: 1;
+    width: 100%;
+}
+
+.primary-tabs,
+.secondary-tabs,
+.subview-tabs {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.primary-tabs {
+    border-bottom: 1px solid rgba(0, 217, 255, 0.25);
+    padding-bottom: 0.75rem;
+}
+
+.secondary-tabs {
+    display: none;
+    padding-top: 0.25rem;
+}
+
+.secondary-tabs.active {
+    display: flex;
+}
+
+.nav-tab {
+    padding: 0.75rem 1.5rem;
+    background: transparent;
+    color: var(--text-bright);
+    border: 1px solid var(--secondary-cyan);
+    cursor: pointer;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    font-size: 0.85rem;
+    font-weight: 400;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    font-family: 'Courier Prime', monospace;
+    position: relative;
+    overflow: hidden;
+}
+
+.primary-tab {
+    min-height: 48px;
+    font-family: 'Michroma', sans-serif;
+    font-size: 0.78rem;
+}
+
+.secondary-tab {
+    min-height: 44px;
+    border-color: rgba(0, 153, 204, 0.75);
+    color: var(--text-bright);
+}
+
+.subview-tabs {
+    margin: -1rem 0 2rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid rgba(0, 217, 255, 0.18);
+}
+
+.subview-tab {
+    min-height: 40px;
+    padding: 0.65rem 1rem;
+    background: rgba(0, 217, 255, 0.04);
+    color: var(--text-bright);
+    border: 1px solid rgba(0, 153, 204, 0.6);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    font-family: 'Courier Prime', monospace;
+}
+
+.subview-tab:hover,
+.subview-tab.active {
+    color: var(--primary-teal);
+    border-color: var(--primary-teal);
+    background: rgba(0, 255, 204, 0.08);
+    box-shadow: 0 0 14px rgba(0, 255, 204, 0.16);
+}
+
+.nav-tab::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg,
+        transparent,
+        rgba(0, 217, 255, 0.1),
+        transparent);
+    transition: left 0.5s ease;
+}
+
+.nav-tab:hover {
+    border-color: var(--primary-cyan);
+    color: var(--primary-cyan);
+    box-shadow:
+        0 0 12px rgba(0, 217, 255, 0.3),
+        inset 0 0 12px rgba(0, 217, 255, 0.05);
+    transform: translateY(-1px);
+}
+
+.nav-tab:hover::before {
+    left: 100%;
+}
+
+.nav-tab.active {
+    background: linear-gradient(135deg,
+        rgba(0, 217, 255, 0.1) 0%,
+        rgba(0, 255, 204, 0.05) 100%);
+    color: var(--primary-teal);
+    border-color: var(--primary-teal);
+    font-weight: 700;
+    box-shadow:
+        0 0 20px rgba(0, 255, 204, 0.25),
+        inset 0 0 16px rgba(0, 255, 204, 0.08);
+    text-shadow: 0 0 10px rgba(0, 255, 204, 0.3);
+}
+
+.nav-tab:focus {
+    outline: 2px solid var(--primary-cyan);
+    outline-offset: 2px;
+}
+
+/* ============================================================================
+   MAIN CONTENT AREA
+   ============================================================================ */
+
+.main-content {
+    flex: 1;
+    padding: 3rem 2.5rem;
+    overflow-y: auto;
+    background: linear-gradient(135deg, var(--bg-space) 0%, var(--bg-panel) 100%);
+}
+
+.tab-content {
+    display: none;
+    animation: slideIn 0.5s cubic-bezier(0.4, 0, 0.2, 1) 0.1s both;
+}
+
+.tab-content.active {
+    display: block;
+}
+
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateY(16px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes glowPulse {
+    0%, 100% { box-shadow: 0 0 12px rgba(0, 217, 255, 0.3); }
+    50% { box-shadow: 0 0 24px rgba(0, 217, 255, 0.5); }
+}
+
+@keyframes dataFlow {
+    from { transform: translateX(-100%); }
+    to { transform: translateX(100%); }
+}
+
+/* ============================================================================
+   SECTION HEADERS
+   ============================================================================ */
+
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 2.5rem;
+    padding-bottom: 1.5rem;
+    border-bottom: 2px solid var(--primary-cyan);
+    gap: 2rem;
+    position: relative;
+}
+
+.section-header::after {
+    content: '';
+    position: absolute;
+    bottom: -2px;
+    left: 0;
+    width: 100%;
+    height: 1px;
+    background: linear-gradient(90deg,
+        var(--primary-cyan) 0%,
+        transparent 50%,
+        var(--primary-teal) 100%);
+}
+
+.section-header h2 {
+    font-family: 'Michroma', sans-serif;
+    font-size: 1.8rem;
+    font-weight: 400;
+    color: var(--primary-cyan);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    text-shadow: 0 0 12px rgba(0, 217, 255, 0.3);
+    flex-shrink: 0;
+}
+
+.as-of-date {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+}
+
+/* ============================================================================
+   SUMMARY CARDS - Bloomberg-style Data Panels
+   ============================================================================ */
+
+.holdings-summary,
+.performance-metrics,
+.bonds-summary,
+.analyst-summary,
+.cashflow-summary,
+.attribution-summary,
+.tax-summary,
+.active-share {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 1.5rem;
+    margin-bottom: 3rem;
+}
+
+.summary-card {
+    background: linear-gradient(135deg, var(--bg-alt) 0%, var(--bg-panel) 100%);
+    border: 1px solid var(--secondary-cyan);
+    padding: 1.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+    overflow: hidden;
+}
+
+.summary-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 2px;
+    background: linear-gradient(90deg,
+        var(--primary-cyan),
+        var(--primary-teal),
+        transparent);
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: transform 0.3s ease;
+}
+
+.summary-card::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    right: 0;
+    width: 100%;
+    height: 1px;
+    background: linear-gradient(90deg,
+        transparent,
+        rgba(0, 217, 255, 0.3));
+}
+
+.summary-card:hover {
+    border-color: var(--primary-cyan);
+    background: linear-gradient(135deg,
+        rgba(0, 217, 255, 0.05) 0%,
+        rgba(0, 255, 204, 0.03) 100%);
+    transform: translateY(-3px);
+    box-shadow:
+        0 12px 32px rgba(0, 217, 255, 0.15),
+        inset 0 1px 0 rgba(0, 217, 255, 0.1);
+}
+
+.summary-card:hover::before {
+    transform: scaleX(1);
+}
+
+.summary-card-label {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    font-weight: 400;
+}
+
+.summary-card-value {
+    font-size: 1.8rem;
+    font-weight: 700;
+    color: var(--primary-teal);
+    letter-spacing: -0.3px;
+    text-shadow: 0 0 12px var(--glow-teal);
+}
+
+.summary-card-detail {
+    font-size: 0.8rem;
+    color: #2ecc71;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+}
+
+.summary-card-detail.negative {
+    color: #ff6b6b;
+}
+
+/* ============================================================================
+   CHARTS & DATA VISUALIZATION
+   ============================================================================ */
+
+.charts-grid,
+.efficient-frontier,
+.rebalance-trades,
+.factor-breakdown,
+.news-sentiment-chart,
+.beta-matrix {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(540px, 1fr));
+    gap: 2rem;
+    margin-bottom: 3rem;
+}
+
+.chart-container,
+#asset-allocation-chart,
+#sector-breakdown-chart,
+#returns-chart,
+#bond-ladder-chart,
+#sentiment-timeline,
+#efficient-frontier,
+#attribution-waterfall,
+#scenario-outcomes,
+#beta-matrix,
+.efficient-frontier,
+.factor-breakdown,
+.news-sentiment-chart,
+.beta-matrix {
+    background: linear-gradient(135deg, var(--bg-alt) 0%, var(--bg-panel) 100%);
+    border: 1px solid var(--secondary-cyan);
+    padding: 2rem;
+    min-height: 420px;
+    transition: all 0.3s ease;
+    position: relative;
+}
+
+.chart-container::before,
+#asset-allocation-chart::before,
+#sector-breakdown-chart::before,
+#returns-chart::before,
+#bond-ladder-chart::before,
+#sentiment-timeline::before,
+#efficient-frontier::before,
+#attribution-waterfall::before,
+#scenario-outcomes::before,
+#beta-matrix::before,
+.efficient-frontier::before,
+.factor-breakdown::before,
+.news-sentiment-chart::before,
+.beta-matrix::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(90deg,
+        transparent,
+        var(--primary-cyan),
+        transparent);
+}
+
+.chart-container:hover,
+#asset-allocation-chart:hover,
+#sector-breakdown-chart:hover,
+#returns-chart:hover,
+#bond-ladder-chart:hover,
+#sentiment-timeline:hover,
+#efficient-frontier:hover,
+#attribution-waterfall:hover,
+#scenario-outcomes:hover,
+#beta-matrix:hover,
+.efficient-frontier:hover,
+.factor-breakdown:hover,
+.news-sentiment-chart:hover,
+.beta-matrix:hover {
+    border-color: var(--primary-teal);
+    background: linear-gradient(135deg,
+        rgba(0, 255, 204, 0.05) 0%,
+        rgba(0, 217, 255, 0.03) 100%);
+    box-shadow:
+        0 16px 48px rgba(0, 217, 255, 0.15),
+        inset 0 1px 0 rgba(0, 217, 255, 0.1);
+    transform: translateY(-2px);
+}
+
+/* ============================================================================
+   TABLES - Bloomberg-style Data Grids
+   ============================================================================ */
+
+.data-table,
+.holdings-table,
+.performance-table,
+.bonds-table,
+.analyst-ratings-table,
+.trade-list,
+.wash-sale-flags {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--bg-alt);
+    border: 1px solid var(--secondary-cyan);
+    overflow: hidden;
+    margin: 2rem 0;
+    font-size: 0.9rem;
+    box-shadow: inset 0 1px 0 rgba(0, 217, 255, 0.05);
+}
+
+.data-table thead,
+.holdings-table thead,
+.performance-table thead,
+.bonds-table thead,
+.analyst-ratings-table thead {
+    background: linear-gradient(90deg, var(--bg-space) 0%, var(--bg-alt) 100%);
+    border-bottom: 2px solid var(--primary-cyan);
+}
+
+.data-table th,
+.holdings-table th,
+.performance-table th,
+.bonds-table th,
+.analyst-ratings-table th {
+    padding: 1.25rem 1.5rem;
+    text-align: left;
+    color: var(--primary-teal);
+    font-weight: 700;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    text-shadow: 0 0 8px var(--glow-teal);
+    border-right: 1px solid var(--secondary-cyan);
+}
+
+.data-table th:last-child,
+.holdings-table th:last-child,
+.performance-table th:last-child,
+.bonds-table th:last-child,
+.analyst-ratings-table th:last-child {
+    border-right: none;
+}
+
+.data-table td,
+.holdings-table td,
+.performance-table td,
+.bonds-table td,
+.analyst-ratings-table td {
+    padding: 1rem 1.5rem;
+    border-bottom: 1px solid rgba(0, 217, 255, 0.1);
+    border-right: 1px solid rgba(0, 217, 255, 0.05);
+}
+
+.data-table td:last-child,
+.holdings-table td:last-child,
+.performance-table td:last-child,
+.bonds-table td:last-child,
+.analyst-ratings-table td:last-child {
+    border-right: none;
+}
+
+.data-table tbody tr,
+.holdings-table tbody tr,
+.performance-table tbody tr,
+.bonds-table tbody tr,
+.analyst-ratings-table tbody tr {
+    transition: all 0.2s ease;
+    position: relative;
+}
+
+.data-table tbody tr:hover,
+.holdings-table tbody tr:hover,
+.performance-table tbody tr:hover,
+.bonds-table tbody tr:hover,
+.analyst-ratings-table tbody tr:hover {
+    background: rgba(0, 217, 255, 0.08);
+    border-left: 3px solid var(--primary-teal);
+    padding-left: 12px;
+}
+
+.data-table tbody tr:hover::after,
+.holdings-table tbody tr:hover::after,
+.performance-table tbody tr:hover::after,
+.bonds-table tbody tr:hover::after,
+.analyst-ratings-table tbody tr:hover::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(90deg,
+        var(--primary-teal),
+        transparent);
+}
+
+/* ============================================================================
+   BUTTONS & CONTROLS
+   ============================================================================ */
+
+.export-btn,
+.export-controls button,
+.scenario-btn {
+    padding: 0.85rem 2rem;
+    background: transparent;
+    border: 1px solid var(--primary-cyan);
+    color: var(--primary-cyan);
+    border-radius: 0;
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    font-family: 'Courier Prime', monospace;
+    position: relative;
+    overflow: hidden;
+}
+
+.export-btn::before,
+.export-controls button::before,
+.scenario-btn::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 217, 255, 0.1);
+    transition: left 0.4s ease;
+    z-index: -1;
+}
+
+.export-btn:hover,
+.export-controls button:hover,
+.scenario-btn:hover {
+    border-color: var(--primary-teal);
+    color: var(--primary-teal);
+    transform: translateY(-2px);
+    box-shadow:
+        0 8px 20px rgba(0, 217, 255, 0.2),
+        inset 0 0 12px rgba(0, 217, 255, 0.05);
+    text-shadow: 0 0 8px rgba(0, 217, 255, 0.3);
+}
+
+.export-btn:hover::before,
+.export-controls button:hover::before,
+.scenario-btn:hover::before {
+    left: 100%;
+}
+
+.export-btn.active,
+.scenario-btn.active {
+    background: linear-gradient(135deg,
+        rgba(0, 255, 204, 0.15) 0%,
+        rgba(0, 217, 255, 0.1) 100%);
+    border-color: var(--primary-teal);
+    color: var(--primary-teal);
+    box-shadow:
+        0 0 20px rgba(0, 255, 204, 0.3),
+        inset 0 0 16px rgba(0, 255, 204, 0.08);
+    text-shadow: 0 0 12px var(--glow-teal);
+}
+
+button:focus {
+    outline: 2px solid var(--primary-cyan);
+    outline-offset: 2px;
+}
+
+/* ============================================================================
+   CONTENT AREAS
+   ============================================================================ */
+
+.synthesis-brief,
+.key-insights,
+.insight-item,
+.priority-recommendations,
+.about-content {
+    background: linear-gradient(135deg, var(--bg-alt) 0%, var(--bg-panel) 100%);
+    border: 1px solid var(--secondary-cyan);
+    padding: 2rem;
+    line-height: 1.8;
+    color: var(--text-bright);
+}
+
+.synthesis-brief {
+    margin-bottom: 2rem;
+    font-size: 1rem;
+    box-shadow: inset 0 1px 0 rgba(0, 217, 255, 0.1);
+    position: relative;
+}
+
+.synthesis-brief::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg,
+        var(--primary-cyan),
+        var(--primary-teal),
+        transparent);
+}
+
+.key-insights {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+
+.insight-item {
+    display: flex;
+    gap: 1.5rem;
+    align-items: flex-start;
+    border-left: 2px solid var(--primary-cyan);
+    padding-left: 1.5rem;
+    transition: all 0.3s ease;
+}
+
+.insight-item:hover {
+    border-left-color: var(--primary-teal);
+    box-shadow: inset 8px 0 16px rgba(0, 217, 255, 0.05);
+}
+
+.insight-bullet {
+    color: var(--primary-teal);
+    font-size: 1.2rem;
+    flex-shrink: 0;
+    line-height: 1;
+    text-shadow: 0 0 8px var(--glow-teal);
+}
+
+.priority-recommendations {
+    display: grid;
+    gap: 1rem;
+}
+
+.priority-high {
+    border-left-color: var(--accent-magenta);
+}
+
+.priority-medium {
+    border-left-color: var(--primary-cyan);
+}
+
+/* ============================================================================
+   FOOTER
+   ============================================================================ */
+
+.footer {
+    background: linear-gradient(90deg, var(--bg-panel) 0%, var(--bg-alt) 100%);
+    border-top: 2px solid var(--primary-cyan);
+    padding: 2rem;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    position: relative;
+}
+
+.footer::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(90deg,
+        transparent,
+        var(--primary-cyan),
+        transparent);
+}
+
+.footer a {
+    color: var(--primary-cyan);
+    text-decoration: none;
+    transition: all 0.2s ease;
+}
+
+.footer a:hover {
+    color: var(--primary-teal);
+    text-shadow: 0 0 8px rgba(0, 217, 255, 0.3);
+}
+
+/* ============================================================================
+   STATES
+   ============================================================================ */
+
+.no-data {
+    text-align: center;
+    padding: 4rem 2rem;
+    color: var(--text-muted);
+    font-size: 1rem;
+    background: var(--bg-alt);
+    border: 1px dashed var(--secondary-cyan);
+    border-radius: 0;
+}
+
+.error {
+    background: linear-gradient(135deg,
+        rgba(255, 107, 107, 0.08) 0%,
+        rgba(157, 78, 221, 0.05) 100%);
+    border: 1px solid #ff6b6b;
+    padding: 1.5rem;
+    color: #ff6b6b;
+    margin: 1rem 0;
+    box-shadow: inset 0 1px 0 rgba(255, 107, 107, 0.1);
+}
+
+.loading {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 200px;
+    color: var(--primary-cyan);
+    font-size: 1rem;
+    text-shadow: 0 0 12px rgba(0, 217, 255, 0.3);
+}
+
+/* ============================================================================
+   RESPONSIVE DESIGN
+   ============================================================================ */
+
+@media (max-width: 1200px) {
+    .navbar {
+        flex-direction: column;
+        align-items: flex-start;
+        padding: 1.5rem 2rem;
+    }
+
+    .navbar-status {
+        margin-left: 0;
+        padding-left: 0;
+        border-left: none;
+        border-top: 1px solid var(--secondary-cyan);
+        padding-top: 1.5rem;
+        margin-top: 1.5rem;
+        width: 100%;
+    }
+
+    .navbar-nav {
+        width: 100%;
+        gap: 0.5rem;
+    }
+
+    .primary-tabs,
+    .secondary-tabs.active {
+        width: 100%;
+    }
+
+    .charts-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .section-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+}
+
+@media (max-width: 768px) {
+    .navbar-brand h1 {
+        font-size: 1.5rem;
+        letter-spacing: 1.2px;
+    }
+
+    .main-content {
+        padding: 2rem 1.5rem;
+    }
+
+    .section-header h2 {
+        font-size: 1.4rem;
+    }
+
+    .summary-card {
+        padding: 1.5rem;
+    }
+
+    .holdings-summary,
+    .performance-metrics {
+        grid-template-columns: 1fr;
+    }
+
+    .data-table {
+        font-size: 0.8rem;
+    }
+
+    .data-table th,
+    .data-table td {
+        padding: 0.75rem 1rem;
+    }
+
+    .nav-tab {
+        padding: 0.6rem 1rem;
+        font-size: 0.75rem;
+        letter-spacing: 0.4px;
+    }
+
+    .primary-tabs,
+    .secondary-tabs.active,
+    .subview-tabs {
+        display: grid;
+        grid-template-columns: 1fr;
+    }
+
+    .primary-tab,
+    .secondary-tab,
+    .subview-tab {
+        width: 100%;
+        min-height: 48px;
+        text-align: left;
+    }
+}
+
+@media (max-width: 480px) {
+    .navbar {
+        padding: 1rem 1.5rem;
+        gap: 1.5rem;
+    }
+
+    .navbar-brand h1 {
+        font-size: 1.2rem;
+        letter-spacing: 0.8px;
+    }
+
+    .main-content {
+        padding: 1.5rem 1rem;
+    }
+
+    .section-header h2 {
+        font-size: 1.1rem;
+    }
+
+    .summary-card {
+        padding: 1rem;
+    }
+
+    .nav-tab {
+        padding: 0.5rem 0.8rem;
+        font-size: 0.7rem;
+        letter-spacing: 0.3px;
+    }
+
+    .total-value {
+        font-size: 1.1rem;
+    }
+}
+
+/* ============================================================================
+   ACCESSIBILITY & PRINT
+   ============================================================================ */
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+}
+
+@media print {
+    .navbar,
+    .footer {
+        display: none;
+    }
+
+    .main-content {
+        padding: 0;
+    }
+}
