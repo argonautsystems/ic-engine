@@ -167,7 +167,12 @@ class ContractReport:
         path: Path | None = None,
         detail: str | None = None,
     ) -> None:
-        self.status = "fail"
+        # Only critical/error severities flip the report status to fail.
+        # Informational severities (e.g. CONTEXT_MISSING when running this
+        # harness against a repo that lacks InvestorClaw-shaped manifests)
+        # are recorded but don't gate the pipeline.
+        if severity not in {"info", "informational"}:
+            self.status = "fail"
         self.findings.append(
             ContractFinding(
                 code=code,
@@ -185,6 +190,26 @@ def _load_json(path: Path) -> dict[str, Any]:
 
 def _load_toml(path: Path) -> dict[str, Any]:
     return tomllib.loads(path.read_text(encoding="utf-8"))
+
+
+def _missing_required_files(report: ContractReport, paths: list[Path]) -> bool:
+    """Return True if any required file is absent, after recording one
+    `CONTEXT_MISSING` finding per missing path. Lets repos that are
+    missing InvestorClaw-shaped manifests (e.g. ic-engine, which has no
+    package.json / openclaw.plugin.json) skip the InvestorClaw-specific
+    check rather than crash with FileNotFoundError. The harness's
+    allow_failure stance in CI then sees a graceful informational
+    finding instead of an uncaught exception.
+    """
+    missing = [p for p in paths if not p.exists()]
+    for path in missing:
+        report.add(
+            "CONTEXT_MISSING",
+            f"{path.name} not present; skipping InvestorClaw-specific check",
+            severity="info",
+            path=path,
+        )
+    return bool(missing)
 
 
 def _read_version_from_entrypoint(path: Path) -> str:
@@ -221,6 +246,11 @@ def _iter_scan_files(root: Path) -> list[Path]:
 
 
 def _check_version_consistency(report: ContractReport) -> None:
+    if _missing_required_files(
+        report,
+        [PYPROJECT_PATH, PACKAGE_JSON_PATH, PLUGIN_JSON_PATH, SKILL_TOML_PATH, ENTRYPOINT_PATH],
+    ):
+        return
     pyproject = _load_toml(PYPROJECT_PATH)
     package_json = _load_json(PACKAGE_JSON_PATH)
     plugin_json = _load_json(PLUGIN_JSON_PATH)
@@ -244,6 +274,10 @@ def _check_version_consistency(report: ContractReport) -> None:
 
 
 def _check_plugin_contract(report: ContractReport) -> None:
+    if _missing_required_files(
+        report, [PACKAGE_JSON_PATH, PLUGIN_JSON_PATH, SKILL_TOML_PATH]
+    ):
+        return
     package_json = _load_json(PACKAGE_JSON_PATH)
     plugin_json = _load_json(PLUGIN_JSON_PATH)
     skill_toml = _load_toml(SKILL_TOML_PATH)
@@ -290,6 +324,8 @@ def _check_plugin_contract(report: ContractReport) -> None:
 
 
 def _check_command_surface(report: ContractReport) -> None:
+    if _missing_required_files(report, [SKILL_TOML_PATH]):
+        return
     skill_toml = _load_toml(SKILL_TOML_PATH)
     skill_commands = set()
     for tool in skill_toml.get("tools", []):
@@ -383,7 +419,19 @@ def _check_routing_rules_parity(report: ContractReport) -> None:
     the same routing discipline.  Drift between the two is a shipped
     bug — a contaminated NL-pilot test caught one such drift in v2.2.1
     after the rule had landed only on the OpenClaw side.
+
+    When NEITHER SKILL.md exists the harness is running on a repo that
+    has no skill surface to police (e.g. ic-engine itself), so we record
+    that as informational rather than as a contract failure. When at
+    least one SKILL.md exists, real drift gating applies to all of them.
     """
+    if not any(path.exists() for path in _ROUTING_RULE_FILES):
+        report.add(
+            "CONTEXT_MISSING",
+            "no SKILL.md surfaces present; skipping InvestorClaw routing-rule check",
+            severity="info",
+        )
+        return
     for path in _ROUTING_RULE_FILES:
         if not path.exists():
             report.add(
