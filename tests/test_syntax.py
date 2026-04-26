@@ -23,12 +23,18 @@ import ast
 import glob
 import os
 
-SKILL_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+import ic_engine
+
+# Phase 1 of IC_DECOMPOSITION moved engine source from <repo>/<pkg>/*.py
+# to src/ic_engine/<pkg>/*.py. SKILL_ROOT now points at the engine package
+# itself (where the modules live), not the repo top-level.
+SKILL_ROOT = os.path.dirname(os.path.abspath(ic_engine.__file__))
 
 SOURCE_GLOBS = [
     "*.py",
     "runtime/*.py",
     "commands/*.py",
+    "commands/stages/*.py",
     "internal/*.py",
     "rendering/*.py",
     "providers/*.py",

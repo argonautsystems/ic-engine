@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Baron Von Cashflow avatar</title>
+  <desc id="desc">Stonkmode avatar for Baron Von Cashflow: cash-flow obsession.</desc>
+  <defs>
+    <linearGradient id="bg" x1="48" y1="40" x2="464" y2="472" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#16a34a"/>
+      <stop offset="1" stop-color="#facc15"/>
+    </linearGradient>
+    <clipPath id="avatarClip"><circle cx="256" cy="256" r="240"/></clipPath>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="14" stdDeviation="16" flood-color="#000" flood-opacity=".28"/>
+    </filter>
+  </defs>
+  <circle cx="256" cy="256" r="248" fill="#0f172a"/>
+  <g clip-path="url(#avatarClip)">
+    <rect width="512" height="512" fill="url(#bg)"/>
+    <path d="M50 398c88-64 164-64 228 0s128 64 192 0v114H50z" fill="#0f172a" opacity=".18"/>
+    
+    <g opacity=".2" transform="translate(256 256) rotate(-2) translate(-256 -256)">
+      <rect stroke="#ffffff" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" fill="none" x="126" y="170" width="260" height="172" rx="18"/><circle stroke="#ffffff" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" fill="none" cx="256" cy="256" r="44"/><path stroke="#ffffff" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" fill="none" d="M162 206h42M308 306h42"/>
+    </g>
+    <g filter="url(#shadow)">
+      <path d="M120 512c18-118 78-184 136-184s118 66 136 184z" fill="#14532d"/>
+      <path d="M204 356h104l-52 76z" fill="#ffffff"/>
+      <circle cx="154" cy="250" r="28" fill="#d79a6b"/><circle cx="358" cy="250" r="28" fill="#d79a6b"/>
+      <path d="M168 240c0-72 42-126 88-126s88 54 88 126v44c0 74-44 120-88 120s-88-46-88-120z" fill="#d79a6b"/>
+      
+      <path d="M166 222c14-76 62-118 120-104 44 10 70 48 70 104-50-20-110-24-190 0z" fill="#3f2a1d"/>
+      <circle cx="218" cy="246" r="10" fill="#0f172a"/>
+      <circle cx="294" cy="246" r="10" fill="#0f172a"/>
+      
+      <path d="M228 320c18 14 38 14 56 0" fill="none" stroke="#5c2e20" stroke-width="9" stroke-linecap="round"/>
+      <path d="M220 286c22-18 50-18 72 0 22-18 48-18 70 0-24 28-56 28-70 8-14 20-46 20-72-8z" fill="#31251d" opacity=".9"/>
+      
+    <g transform="translate(356 352)">
+      <circle cx="0" cy="0" r="66" fill="#0f172a" opacity=".9"/>
+      <circle cx="0" cy="0" r="56" fill="#ffffff" opacity=".95"/>
+      <g transform="translate(-256 -256) scale(.22) translate(256 256)">
+        <rect stroke="#0f172a" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" fill="none" x="126" y="170" width="260" height="172" rx="18"/><circle stroke="#0f172a" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" fill="none" cx="256" cy="256" r="44"/><path stroke="#0f172a" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" fill="none" d="M162 206h42M308 306h42"/>
+      </g>
+    </g>
+    </g>
+    
+    <g>
+      <rect x="40" y="396" width="170" height="72" rx="8" fill="#0f172a" opacity=".86"/>
+      <text x="64" y="447" fill="#ffffff" font-family="Arial, Helvetica, sans-serif" font-size="42" font-weight="700" letter-spacing="0">BV</text>
+    </g>
+  </g>
+</svg>

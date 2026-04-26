@@ -168,9 +168,12 @@ class ContractReport:
         detail: str | None = None,
     ) -> None:
         # Only critical/error severities flip the report status to fail.
-        # Informational severities (e.g. CONTEXT_MISSING when running this
-        # harness against a repo that lacks InvestorClaw-shaped manifests)
-        # are recorded but don't gate the pipeline.
+        # Informational severities are recorded but don't gate the
+        # pipeline. Used by `_missing_required_files` for the
+        # "harness ran against a non-InvestorClaw repo" case
+        # (ic-engine, clio, etc. legitimately lack package.json /
+        # openclaw.plugin.json) — the InvestorClaw-specific checks
+        # are skipped rather than failed.
         if severity not in {"info", "informational"}:
             self.status = "fail"
         self.findings.append(
@@ -193,23 +196,47 @@ def _load_toml(path: Path) -> dict[str, Any]:
 
 
 def _missing_required_files(report: ContractReport, paths: list[Path]) -> bool:
-    """Return True if any required file is absent, after recording one
-    `CONTEXT_MISSING` finding per missing path. Lets repos that are
-    missing InvestorClaw-shaped manifests (e.g. ic-engine, which has no
-    package.json / openclaw.plugin.json) skip the InvestorClaw-specific
-    check rather than crash with FileNotFoundError. The harness's
-    allow_failure stance in CI then sees a graceful informational
-    finding instead of an uncaught exception.
+    """Return True if any required file is absent, after recording one finding
+    per missing path. Distinguishes two cases:
+
+    * Repo has NONE of the InvestorClaw release surfaces (i.e., it's a
+      different project type — ic-engine, clio, etc.). Treat as
+      informational — the InvestorClaw-specific checks don't apply.
+    * Repo HAS an InvestorClaw context (at least one of the canonical
+      manifests is present) but a required file has been deleted by
+      mistake. That's a real regression — fail the gate.
+
+    The presence-vector is the union of all paths in `paths`: if every
+    path is missing, the repo lacks the context entirely. If some are
+    present and some missing, the missing ones are real regressions.
     """
     missing = [p for p in paths if not p.exists()]
+    if not missing:
+        return False
+
+    # No-context case: nothing in this list exists. Skip with informational
+    # finding so harnesses against non-InvestorClaw repos (ic-engine, clio)
+    # don't crash.
+    if len(missing) == len(paths):
+        for path in missing:
+            report.add(
+                "CONTEXT_MISSING",
+                f"{path.name} not present; skipping InvestorClaw-specific check",
+                severity="info",
+                path=path,
+            )
+        return True
+
+    # Partial-context case: this looks like an InvestorClaw repo with a
+    # missing required surface. Real regression — fail the gate.
     for path in missing:
         report.add(
-            "CONTEXT_MISSING",
-            f"{path.name} not present; skipping InvestorClaw-specific check",
-            severity="info",
+            "REQUIRED_FILE_MISSING",
+            f"{path.name} required but not present in InvestorClaw-shaped repo",
+            severity="error",
             path=path,
         )
-    return bool(missing)
+    return True
 
 
 def _read_version_from_entrypoint(path: Path) -> str:
@@ -274,9 +301,7 @@ def _check_version_consistency(report: ContractReport) -> None:
 
 
 def _check_plugin_contract(report: ContractReport) -> None:
-    if _missing_required_files(
-        report, [PACKAGE_JSON_PATH, PLUGIN_JSON_PATH, SKILL_TOML_PATH]
-    ):
+    if _missing_required_files(report, [PACKAGE_JSON_PATH, PLUGIN_JSON_PATH, SKILL_TOML_PATH]):
         return
     package_json = _load_json(PACKAGE_JSON_PATH)
     plugin_json = _load_json(PLUGIN_JSON_PATH)

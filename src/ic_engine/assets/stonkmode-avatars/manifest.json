@@ -1,0 +1,188 @@
+{
+  "blitz_thunderbuy": {
+    "name": "Blitz Thunderbuy",
+    "archetype": "high_energy",
+    "asset": "assets/stonkmode-avatars/blitz_thunderbuy.svg",
+    "cue": "lightning desk-slap energy"
+  },
+  "brick_stonksworth": {
+    "name": "Brick \"Diamond Hands\" Stonksworth",
+    "archetype": "high_energy",
+    "asset": "assets/stonkmode-avatars/brick_stonksworth.svg",
+    "cue": "diamond hands conviction"
+  },
+  "sal_decibelli": {
+    "name": "Sal \"The Pit\" Decibelli",
+    "archetype": "high_energy",
+    "asset": "assets/stonkmode-avatars/sal_decibelli.svg",
+    "cue": "trading pit volume"
+  },
+  "aldrich_whisperdeal": {
+    "name": "Aldrich Whisperdeal",
+    "archetype": "serious",
+    "asset": "assets/stonkmode-avatars/aldrich_whisperdeal.svg",
+    "cue": "quiet deal sources"
+  },
+  "prescott_pennington_smythe": {
+    "name": "Prescott Pennington-Smythe",
+    "archetype": "serious",
+    "asset": "assets/stonkmode-avatars/prescott_pennington_smythe.svg",
+    "cue": "macro interview gravitas"
+  },
+  "dominique_valcourt": {
+    "name": "Dominique \"Closing Bell\" Valcourt",
+    "archetype": "serious",
+    "asset": "assets/stonkmode-avatars/dominique_valcourt.svg",
+    "cue": "closing bell authority"
+  },
+  "big_jim_cashonly": {
+    "name": "Big Jim Cashonly",
+    "archetype": "mentors",
+    "asset": "assets/stonkmode-avatars/big_jim_cashonly.svg",
+    "cue": "coach-like tough love"
+  },
+  "sunny_rainyday_fund": {
+    "name": "Sunny Rainyday-Fund",
+    "archetype": "mentors",
+    "asset": "assets/stonkmode-avatars/sunny_rainyday_fund.svg",
+    "cue": "rainy day fund calm"
+  },
+  "baron_von_cashflow": {
+    "name": "Baron Von Cashflow",
+    "archetype": "mentors",
+    "asset": "assets/stonkmode-avatars/baron_von_cashflow.svg",
+    "cue": "cash-flow obsession"
+  },
+  "biff_chadsworth_iii": {
+    "name": "Biff Chadsworth III",
+    "archetype": "policy_veterans",
+    "asset": "assets/stonkmode-avatars/biff_chadsworth_iii.svg",
+    "cue": "policy optimism"
+  },
+  "skip_contrarian": {
+    "name": "Skip \"Well, Actually\" Contrarian",
+    "archetype": "policy_veterans",
+    "asset": "assets/stonkmode-avatars/skip_contrarian.svg",
+    "cue": "well-actually skepticism"
+  },
+  "dorin_goleli": {
+    "name": "Dorin Goleli, Keeper of the Eternal Ledger",
+    "archetype": "wildcards",
+    "asset": "assets/stonkmode-avatars/dorin_goleli.svg",
+    "cue": "eternal ledger magic"
+  },
+  "aria_7": {
+    "name": "ARIA-7",
+    "archetype": "wildcards",
+    "asset": "assets/stonkmode-avatars/aria_7.svg",
+    "cue": "sentient analysis unit"
+  },
+  "professor_goldbug": {
+    "name": "Professor Digby Goldbug",
+    "archetype": "wildcards",
+    "asset": "assets/stonkmode-avatars/professor_goldbug.svg",
+    "cue": "goldbug scholarship"
+  },
+  "chaz_leveridge": {
+    "name": "Chaz \"The Razor\" Leveridge",
+    "archetype": "wildcards",
+    "asset": "assets/stonkmode-avatars/chaz_leveridge.svg",
+    "cue": "leveraged razor edge"
+  },
+  "lafayette_beaumont": {
+    "name": "Lafayette \"$tacks\" Beaumont, MBA",
+    "archetype": "wildcards",
+    "asset": "assets/stonkmode-avatars/lafayette_beaumont.svg",
+    "cue": "MBA stacks"
+  },
+  "glorb": {
+    "name": "Glorb, Senior Ledger-Keeper of the Seventh Vault",
+    "archetype": "wildcards",
+    "asset": "assets/stonkmode-avatars/glorb.svg",
+    "cue": "seventh vault ledger"
+  },
+  "king_donny": {
+    "name": "King Donny (The Deal Whisperer)",
+    "archetype": "wildcards",
+    "asset": "assets/stonkmode-avatars/king_donny.svg",
+    "cue": "deal-whispering monarch"
+  },
+  "zsa_zsa_von_portfolio": {
+    "name": "Zsa Zsa Von Portfolio",
+    "archetype": "wildcards",
+    "asset": "assets/stonkmode-avatars/zsa_zsa_von_portfolio.svg",
+    "cue": "glamorous portfolio theater"
+  },
+  "wendell_the_pattern": {
+    "name": "Wendell \"The Pattern\" Pruitt",
+    "archetype": "wildcards",
+    "asset": "assets/stonkmode-avatars/wendell_the_pattern.svg",
+    "cue": "hidden pattern hunter"
+  },
+  "professor_what": {
+    "name": "Professor What?",
+    "archetype": "wildcards",
+    "asset": "assets/stonkmode-avatars/professor_what.svg",
+    "cue": "temporal market confusion"
+  },
+  "chico_reyes": {
+    "name": "Chico \"The Vibe\" Reyes",
+    "archetype": "cosmic",
+    "asset": "assets/stonkmode-avatars/chico_reyes.svg",
+    "cue": "market vibe reader"
+  },
+  "farout_farley": {
+    "name": "\"Far Out\" Farley McGee",
+    "archetype": "cosmic",
+    "asset": "assets/stonkmode-avatars/farout_farley.svg",
+    "cue": "cosmic market drift"
+  },
+  "krystal_kash": {
+    "name": "Krystal \"The Receipt\" Kash",
+    "archetype": "digital",
+    "asset": "assets/stonkmode-avatars/krystal_kash.svg",
+    "cue": "receipt-driven social proof"
+  },
+  "zara_zhao": {
+    "name": "Zara \"Viral\" Zhao",
+    "archetype": "digital",
+    "asset": "assets/stonkmode-avatars/zara_zhao.svg",
+    "cue": "viral algorithm energy"
+  },
+  "priya_hodl": {
+    "name": "Priya \"HODL\" Sharma",
+    "archetype": "digital",
+    "asset": "assets/stonkmode-avatars/priya_hodl.svg",
+    "cue": "HODL conviction"
+  },
+  "victor_voss": {
+    "name": "Victor \"The Vulture\" Voss",
+    "archetype": "bears",
+    "asset": "assets/stonkmode-avatars/victor_voss.svg",
+    "cue": "vulture bear thesis"
+  },
+  "hans_dieter_braun": {
+    "name": "Hans-Dieter Braun",
+    "archetype": "bears",
+    "asset": "assets/stonkmode-avatars/hans_dieter_braun.svg",
+    "cue": "disciplined doom spiral"
+  },
+  "amara_osei": {
+    "name": "Dr. Amara Osei-Bonsu",
+    "archetype": "serious",
+    "asset": "assets/stonkmode-avatars/amara_osei.svg",
+    "cue": "risk-control authority"
+  },
+  "carmen_torres": {
+    "name": "Carmen \"Fib\" Torres",
+    "archetype": "serious",
+    "asset": "assets/stonkmode-avatars/carmen_torres.svg",
+    "cue": "technical pattern analysis"
+  },
+  "dr_stonk": {
+    "name": "Dr. Stonk",
+    "archetype": "educators",
+    "asset": "assets/stonkmode-avatars/dr_stonk.svg",
+    "cue": "logical financial education"
+  }
+}
