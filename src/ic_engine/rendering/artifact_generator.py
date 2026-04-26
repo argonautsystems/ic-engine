@@ -154,10 +154,64 @@ def _resolve_avatar_path(persona_name: str) -> Optional[Path]:
     return None
 
 
+def _prefix_svg_ids(svg: str, prefix: str) -> str:
+    """Prefix every `id="..."` declaration AND its references with `prefix-`.
+
+    Avatars share a small set of ids by convention (`title`, `desc`, `bg`,
+    `shadow`, `avatarClip`, etc.) so that the source SVGs are simple and
+    self-documenting. When two are inlined into the same HTML document
+    (the lead/foil pair on `_render_persona_pair`, or any future
+    multi-avatar layout), `url(#bg)` resolves to the first SVG's
+    definition, leaving the second rendered with the wrong gradient or
+    missing clip path. Prefixing all declarations + references with the
+    per-persona slug eliminates the collision.
+
+    Handles:
+        * Declarations:        id="X"               -> id="prefix-X"
+        * URL refs:            url(#X)              -> url(#prefix-X)
+        * Anchor refs:         href="#X"            -> href="#prefix-X"
+        * Old-style refs:      xlink:href="#X"      -> xlink:href="#prefix-X"
+        * ARIA token lists:    aria-labelledby="A B C" -> "prefix-A prefix-B prefix-C"
+                               (only the tokens that ARE declared ids)
+    """
+    if not prefix:
+        return svg
+
+    declared_ids = re.findall(r'\bid="([^"]+)"', svg)
+    if not declared_ids:
+        return svg
+
+    declared_set = set(declared_ids)
+
+    # Replace per-id occurrences. Sort longest-first so a longer id like
+    # "avatarClip" isn't partially clobbered by the prefix-pass for "avatar".
+    for orig_id in sorted(declared_set, key=len, reverse=True):
+        new_id = f"{prefix}-{orig_id}"
+        esc = re.escape(orig_id)
+        svg = re.sub(rf'\bid="{esc}"', f'id="{new_id}"', svg)
+        svg = re.sub(rf"url\(#{esc}\)", f"url(#{new_id})", svg)
+        svg = re.sub(rf'href="#{esc}"', f'href="#{new_id}"', svg)
+        svg = re.sub(rf'xlink:href="#{esc}"', f'xlink:href="#{new_id}"', svg)
+
+    # ARIA references are space-separated token lists; replace each token
+    # individually so unrelated tokens (if ever present) survive untouched.
+    def _rewrite_aria(match: "re.Match[str]") -> str:
+        attr_name = match.group(1)
+        tokens = match.group(2).split()
+        rewritten = [f"{prefix}-{t}" if t in declared_set else t for t in tokens]
+        return f'{attr_name}="{" ".join(rewritten)}"'
+
+    svg = re.sub(r'(aria-labelledby|aria-describedby)="([^"]+)"', _rewrite_aria, svg)
+
+    return svg
+
+
 def _load_avatar_image(persona_name: str) -> Optional[str]:
     """Return inlineable avatar HTML for a persona, or None if unavailable.
 
-    SVG files: returned as inline markup.
+    SVG files: returned as inline markup with per-persona id prefixing
+    (see `_prefix_svg_ids`) so multiple avatars in the same document don't
+    collide on shared ids like `bg`, `shadow`, `avatarClip`.
     PNG/JPEG files: returned as <img> with GitHub CDN URL reference.
     """
     if not persona_name:
@@ -208,6 +262,11 @@ def _load_avatar_image(persona_name: str) -> Optional[str]:
             )
         else:
             svg = svg.replace("<svg", '<svg class="avatar"', 1)
+
+    # Prefix all SVG ids + their references with the persona slug so two
+    # avatars rendered in the same document don't share id="bg" /
+    # id="avatarClip" / etc. and break each other's gradients/clip paths.
+    svg = _prefix_svg_ids(svg, slug)
     return svg
 
 

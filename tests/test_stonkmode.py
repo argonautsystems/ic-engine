@@ -177,6 +177,41 @@ def test_all_stonkmode_avatar_assets_exist_and_are_svg():
         assert root.attrib["viewBox"] == "0 0 512 512"
 
 
+def test_inlined_avatars_use_unique_ids_per_persona():
+    """v2.4.5 fix: source SVGs share generic ids (`title`, `desc`, `bg`,
+    `shadow`, `avatarClip`). _load_avatar_image() must prefix them with
+    the persona slug so two avatars in one HTML document don't clobber
+    each other's gradients/clip paths via shared id="bg" etc.
+    """
+    import re
+
+    from ic_engine.rendering.artifact_generator import _load_avatar_image
+
+    svg_a = _load_avatar_image("Blitz Thunderbuy")
+    svg_b = _load_avatar_image("Aria 7")
+    assert svg_a is not None and svg_b is not None
+
+    ids_a = set(re.findall(r'\bid="([^"]+)"', svg_a))
+    ids_b = set(re.findall(r'\bid="([^"]+)"', svg_b))
+    assert ids_a, "no ids found in avatar SVG"
+    assert ids_b, "no ids found in second avatar SVG"
+
+    # No id should appear in both — that's the collision the fix prevents.
+    assert not (ids_a & ids_b), f"shared ids leak collisions: {sorted(ids_a & ids_b)}"
+
+    # Every id should carry the persona-slug prefix.
+    for ident in ids_a:
+        assert ident.startswith("blitz_thunderbuy-"), f"unprefixed id in avatar A: {ident}"
+    for ident in ids_b:
+        assert ident.startswith("aria_7-"), f"unprefixed id in avatar B: {ident}"
+
+    # Every url(#...) reference inside each avatar should resolve to that
+    # avatar's prefixed id, not a bare id.
+    for label, svg in (("blitz_thunderbuy", svg_a), ("aria_7", svg_b)):
+        unprefixed = re.findall(rf"url\(#(?!{label}-)[^)]+\)", svg)
+        assert not unprefixed, f"unprefixed url() refs in {label}: {unprefixed}"
+
+
 # ---------------------------------------------------------------------------
 # Pairing system tests
 # ---------------------------------------------------------------------------
