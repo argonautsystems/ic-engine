@@ -29,14 +29,19 @@ if str(_skill_root) not in sys.path:
     sys.path.insert(0, str(_skill_root))
 
 import pytest
-from runtime.router import (
+
+import ic_engine
+from ic_engine.runtime.router import (
     _DISPATCH_SENTINEL,
     COMMANDS,
     SECTION_DISPATCH,
     should_prime_guardrails,
 )
 
-COMMANDS_DIR = _skill_root / "commands"
+# Engine-bundled command scripts live under the ic_engine package, not at
+# the repo root. After Phase 2.5+ of IC_DECOMPOSITION, COMMANDS_DIR points
+# at the package's commands/ rather than the legacy <repo>/commands.
+COMMANDS_DIR = Path(ic_engine.__file__).resolve().parent / "commands"
 
 # v2.2 (RFC §3.7.6): SECTION_DISPATCH may reference scripts that have not
 # landed yet. Allowlist them so the existing script-existence gate doesn't

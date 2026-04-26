@@ -28,7 +28,7 @@ _SKILL_ROOT = Path(__file__).parent.parent
 if str(_SKILL_ROOT) not in sys.path:
     sys.path.insert(0, str(_SKILL_ROOT))
 
-from setup.setup_wizard import SetupWizard
+from ic_engine.setup.setup_wizard import SetupWizard
 
 
 class TestDetectExistingKeys:

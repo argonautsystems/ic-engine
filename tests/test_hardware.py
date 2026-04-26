@@ -19,7 +19,7 @@ import json
 import unittest
 from unittest.mock import MagicMock, patch
 
-from setup.hardware import (
+from ic_engine.setup.hardware import (
     GPUDevice,
     GPUInfo,
     HardwareProfile,

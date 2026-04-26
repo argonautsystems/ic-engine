@@ -29,7 +29,8 @@ if str(_skill_root) not in sys.path:
     sys.path.insert(0, str(_skill_root))
 
 import pytest
-from services.consultation_policy import (
+
+from ic_engine.services.consultation_policy import (
     CONSULTATION_SYMBOL_LIMIT,
     get_consultation_endpoint,
     get_consultation_limit,
@@ -79,7 +80,7 @@ def test_tier3_not_injected_when_disabled(monkeypatch, command):
     # the env var fail on hosts that CAN reach a consultation endpoint
     # (e.g. WSL on TYPHON sees PYTHIA at 192.168.207.67:5002). Mock the probe
     # so the test asserts the env-var path in isolation.
-    from services import consultation_policy
+    from ic_engine.services import consultation_policy
 
     monkeypatch.setattr(consultation_policy, "_probe_endpoint", lambda *a, **kw: False)
     assert should_inject_tier3(command) is False

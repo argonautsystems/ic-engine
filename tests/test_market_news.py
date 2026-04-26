@@ -68,7 +68,7 @@ def _fake_ticker(articles=None):
 @pytest.mark.parametrize("topic", ["general", "forex", "crypto", "merger"])
 def test_all_topics_dispatch(topic):
     """fetch_market_news returns a dict with 'topic', 'headlines', 'summary'."""
-    from commands.fetch_market_news import fetch_market_news
+    from ic_engine.commands.fetch_market_news import fetch_market_news
 
     fake_article = {
         "title": f"{topic} headline",
@@ -86,8 +86,13 @@ def test_all_topics_dispatch(topic):
     finnhub_articles = [fake_article] if topic == "merger" else []
 
     with (
-        patch("commands.fetch_market_news._fetch_yahoo_news", return_value=yahoo_articles),
-        patch("commands.fetch_market_news._fetch_finnhub_news", return_value=finnhub_articles),
+        patch(
+            "ic_engine.commands.fetch_market_news._fetch_yahoo_news", return_value=yahoo_articles
+        ),
+        patch(
+            "ic_engine.commands.fetch_market_news._fetch_finnhub_news",
+            return_value=finnhub_articles,
+        ),
     ):
         result = fetch_market_news(topic=topic)
 
@@ -104,7 +109,7 @@ def test_all_topics_dispatch(topic):
 
 def test_free_first_yahoo_present_finnhub_not_called():
     """When Yahoo returns articles, Finnhub is not called (quota preserved)."""
-    from commands.fetch_market_news import fetch_market_news
+    from ic_engine.commands.fetch_market_news import fetch_market_news
 
     yahoo_articles = [
         {
@@ -121,9 +126,11 @@ def test_free_first_yahoo_present_finnhub_not_called():
 
     with (
         patch(
-            "commands.fetch_market_news._fetch_yahoo_news", return_value=yahoo_articles
+            "ic_engine.commands.fetch_market_news._fetch_yahoo_news", return_value=yahoo_articles
         ) as mock_yahoo,
-        patch("commands.fetch_market_news._fetch_finnhub_news", return_value=[]) as mock_finnhub,
+        patch(
+            "ic_engine.commands.fetch_market_news._fetch_finnhub_news", return_value=[]
+        ) as mock_finnhub,
     ):
         result = fetch_market_news(topic="general")
 
@@ -139,7 +146,7 @@ def test_free_first_yahoo_present_finnhub_not_called():
 
 def test_free_first_fallback_finnhub_called_when_yahoo_empty():
     """When Yahoo returns empty list, Finnhub is called as fallback."""
-    from commands.fetch_market_news import fetch_market_news
+    from ic_engine.commands.fetch_market_news import fetch_market_news
 
     finnhub_articles = [
         {
@@ -155,9 +162,12 @@ def test_free_first_fallback_finnhub_called_when_yahoo_empty():
     ]
 
     with (
-        patch("commands.fetch_market_news._fetch_yahoo_news", return_value=[]) as mock_yahoo,
         patch(
-            "commands.fetch_market_news._fetch_finnhub_news", return_value=finnhub_articles
+            "ic_engine.commands.fetch_market_news._fetch_yahoo_news", return_value=[]
+        ) as mock_yahoo,
+        patch(
+            "ic_engine.commands.fetch_market_news._fetch_finnhub_news",
+            return_value=finnhub_articles,
         ) as mock_finnhub,
     ):
         result = fetch_market_news(topic="forex")
@@ -169,7 +179,7 @@ def test_free_first_fallback_finnhub_called_when_yahoo_empty():
 
 def test_merger_topic_uses_finnhub_primary_no_yahoo_symbols():
     """merger topic has no Yahoo symbols; Finnhub is called directly."""
-    from commands.fetch_market_news import _YAHOO_SOURCES, fetch_market_news
+    from ic_engine.commands.fetch_market_news import _YAHOO_SOURCES, fetch_market_news
 
     assert _YAHOO_SOURCES.get("merger", []) == [], "merger should have no Yahoo sources"
 
@@ -187,8 +197,11 @@ def test_merger_topic_uses_finnhub_primary_no_yahoo_symbols():
     ]
 
     with (
-        patch("commands.fetch_market_news._fetch_yahoo_news") as mock_yahoo,
-        patch("commands.fetch_market_news._fetch_finnhub_news", return_value=finnhub_articles),
+        patch("ic_engine.commands.fetch_market_news._fetch_yahoo_news") as mock_yahoo,
+        patch(
+            "ic_engine.commands.fetch_market_news._fetch_finnhub_news",
+            return_value=finnhub_articles,
+        ),
     ):
         result = fetch_market_news(topic="merger")
 
@@ -205,7 +218,7 @@ def test_ic_result_envelope_present():
     """Result from main() includes ic_result with required fields."""
     import io
 
-    from commands.fetch_market_news import main as market_news_main
+    from ic_engine.commands.fetch_market_news import main as market_news_main
 
     fake_articles = [
         {
@@ -222,8 +235,8 @@ def test_ic_result_envelope_present():
 
     with (
         patch("sys.argv", ["fetch_market_news.py", "--topic", "crypto"]),
-        patch("commands.fetch_market_news._fetch_yahoo_news", return_value=fake_articles),
-        patch("commands.fetch_market_news._fetch_finnhub_news", return_value=[]),
+        patch("ic_engine.commands.fetch_market_news._fetch_yahoo_news", return_value=fake_articles),
+        patch("ic_engine.commands.fetch_market_news._fetch_finnhub_news", return_value=[]),
         patch("sys.stdout", new_callable=io.StringIO) as mock_stdout,
     ):
         import json as _json
@@ -242,11 +255,11 @@ def test_ic_result_envelope_present():
 
 def test_ic_result_exit_code_zero_on_success():
     """Successful fetch produces exit_code=0."""
-    from commands.fetch_market_news import fetch_market_news
+    from ic_engine.commands.fetch_market_news import fetch_market_news
 
     with (
         patch(
-            "commands.fetch_market_news._fetch_yahoo_news",
+            "ic_engine.commands.fetch_market_news._fetch_yahoo_news",
             return_value=[
                 {
                     "title": "OK",
@@ -260,7 +273,7 @@ def test_ic_result_exit_code_zero_on_success():
                 }
             ],
         ),
-        patch("commands.fetch_market_news._fetch_finnhub_news", return_value=[]),
+        patch("ic_engine.commands.fetch_market_news._fetch_finnhub_news", return_value=[]),
     ):
         result = fetch_market_news(topic="general")
 
@@ -275,11 +288,11 @@ def test_ic_result_exit_code_zero_on_success():
 
 def test_default_topic_is_general():
     """Calling fetch_market_news() with no topic arg uses 'general'."""
-    from commands.fetch_market_news import fetch_market_news
+    from ic_engine.commands.fetch_market_news import fetch_market_news
 
     with (
         patch(
-            "commands.fetch_market_news._fetch_yahoo_news",
+            "ic_engine.commands.fetch_market_news._fetch_yahoo_news",
             return_value=[
                 {
                     "title": "Market update",
@@ -293,7 +306,7 @@ def test_default_topic_is_general():
                 }
             ],
         ),
-        patch("commands.fetch_market_news._fetch_finnhub_news", return_value=[]),
+        patch("ic_engine.commands.fetch_market_news._fetch_finnhub_news", return_value=[]),
     ):
         result = fetch_market_news()
 
@@ -307,7 +320,7 @@ def test_default_topic_is_general():
 
 def test_invalid_topic_returns_error_and_allowed_topics():
     """An unknown topic returns an error dict with allowed_topics list."""
-    from commands.fetch_market_news import VALID_TOPICS, fetch_market_news
+    from ic_engine.commands.fetch_market_news import VALID_TOPICS, fetch_market_news
 
     result = fetch_market_news(topic="astrology")
     assert "error" in result
@@ -320,13 +333,13 @@ def test_invalid_topic_exit_code_one_in_main():
     import io
     import json as _json
 
-    from commands.fetch_market_news import main as market_news_main
+    from ic_engine.commands.fetch_market_news import main as market_news_main
 
     with (
         patch("sys.argv", ["fetch_market_news.py", "--topic", "general"]),
         # Inject error by patching fetch_market_news to return error dict
         patch(
-            "commands.fetch_market_news.fetch_market_news",
+            "ic_engine.commands.fetch_market_news.fetch_market_news",
             return_value={
                 "topic": "bad",
                 "headlines": [],

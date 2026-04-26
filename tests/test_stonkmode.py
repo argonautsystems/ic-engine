@@ -42,13 +42,13 @@ import pytest
 # ---------------------------------------------------------------------------
 # Persona roster tests
 # ---------------------------------------------------------------------------
-from rendering.stonkmode_avatars import (
+from ic_engine.rendering.stonkmode_avatars import (
     EDUCATOR_AVATAR_IDS,
     avatar_manifest,
     get_avatar_asset,
     get_avatar_path,
 )
-from rendering.stonkmode_personas import (
+from ic_engine.rendering.stonkmode_personas import (
     PERSONAS,
     get_persona,
     get_personas_by_archetype,
@@ -181,7 +181,7 @@ def test_all_stonkmode_avatar_assets_exist_and_are_svg():
 # Pairing system tests
 # ---------------------------------------------------------------------------
 
-from rendering.stonkmode_pairings import (
+from ic_engine.rendering.stonkmode_pairings import (
     _DEFAULT_DYNAMIC,
     ARCHETYPE_POOLS,
     FOIL_POOLS,
@@ -300,17 +300,17 @@ def test_pairing_dynamic_fallback():
 # State management tests
 # ---------------------------------------------------------------------------
 
-from rendering.stonkmode import is_enabled, load_state, save_state
+from ic_engine.rendering.stonkmode import is_enabled, load_state, save_state
 
 
 def test_load_state_returns_none_when_missing(tmp_path, monkeypatch):
-    monkeypatch.setattr("rendering.stonkmode.STATE_FILE", tmp_path / "missing.json")
+    monkeypatch.setattr("ic_engine.rendering.stonkmode.STATE_FILE", tmp_path / "missing.json")
     assert load_state() is None
 
 
 def test_save_and_load_roundtrip(tmp_path, monkeypatch):
     state_path = tmp_path / "stonkmode.json"
-    monkeypatch.setattr("rendering.stonkmode.STATE_FILE", state_path)
+    monkeypatch.setattr("ic_engine.rendering.stonkmode.STATE_FILE", state_path)
     state = {
         "enabled": True,
         "lead_id": "blitz_thunderbuy",
@@ -323,27 +323,27 @@ def test_save_and_load_roundtrip(tmp_path, monkeypatch):
 
 
 def test_is_enabled_false_when_no_state(tmp_path, monkeypatch):
-    monkeypatch.setattr("rendering.stonkmode.STATE_FILE", tmp_path / "missing.json")
+    monkeypatch.setattr("ic_engine.rendering.stonkmode.STATE_FILE", tmp_path / "missing.json")
     assert is_enabled() is False
 
 
 def test_is_enabled_true_when_state_present(tmp_path, monkeypatch):
     state_path = tmp_path / "stonkmode.json"
-    monkeypatch.setattr("rendering.stonkmode.STATE_FILE", state_path)
+    monkeypatch.setattr("ic_engine.rendering.stonkmode.STATE_FILE", state_path)
     save_state({"enabled": True, "lead_id": "blitz_thunderbuy", "foil_id": "victor_voss"})
     assert is_enabled() is True
 
 
 def test_is_enabled_false_when_disabled_in_state(tmp_path, monkeypatch):
     state_path = tmp_path / "stonkmode.json"
-    monkeypatch.setattr("rendering.stonkmode.STATE_FILE", state_path)
+    monkeypatch.setattr("ic_engine.rendering.stonkmode.STATE_FILE", state_path)
     save_state({"enabled": False})
     assert is_enabled() is False
 
 
 def test_state_file_parent_created(tmp_path, monkeypatch):
     nested = tmp_path / "deep" / "dir" / "stonkmode.json"
-    monkeypatch.setattr("rendering.stonkmode.STATE_FILE", nested)
+    monkeypatch.setattr("ic_engine.rendering.stonkmode.STATE_FILE", nested)
     save_state({"enabled": True})
     assert nested.exists()
 
@@ -352,7 +352,7 @@ def test_state_file_parent_created(tmp_path, monkeypatch):
 # Narration JSON envelope schema (offline — stubs out Ollama)
 # ---------------------------------------------------------------------------
 
-from rendering.stonkmode import maybe_narrate
+from ic_engine.rendering.stonkmode import maybe_narrate
 
 
 def _make_state(tmp_path, lead_id="blitz_thunderbuy", foil_id="victor_voss"):
@@ -370,13 +370,13 @@ def _make_state(tmp_path, lead_id="blitz_thunderbuy", foil_id="victor_voss"):
     }
 
 
-@patch("rendering.stonkmode.generate_narration", return_value="Mocked commentary.")
+@patch("ic_engine.rendering.stonkmode.generate_narration", return_value="Mocked commentary.")
 @patch(
-    "rendering.stonkmode.summarize_for_narration",
+    "ic_engine.rendering.stonkmode.summarize_for_narration",
     return_value="Test portfolio summary with TOP 10 HOLDINGS (comment on EACH one by name): MSFT $100K 5% +3%",
 )
-@patch("rendering.stonkmode.load_state")
-@patch("rendering.stonkmode.save_state")
+@patch("ic_engine.rendering.stonkmode.load_state")
+@patch("ic_engine.rendering.stonkmode.save_state")
 def test_maybe_narrate_emits_valid_json(
     mock_save, mock_load, mock_summarize, mock_generate, tmp_path, capsys
 ):
@@ -419,10 +419,10 @@ def test_maybe_narrate_emits_valid_json(
     assert "foil" in block["narration"]
 
 
-@patch("rendering.stonkmode.generate_narration", return_value="Commentary.")
-@patch("rendering.stonkmode.summarize_for_narration", return_value="Summary.")
-@patch("rendering.stonkmode.load_state")
-@patch("rendering.stonkmode.save_state")
+@patch("ic_engine.rendering.stonkmode.generate_narration", return_value="Commentary.")
+@patch("ic_engine.rendering.stonkmode.summarize_for_narration", return_value="Summary.")
+@patch("ic_engine.rendering.stonkmode.load_state")
+@patch("ic_engine.rendering.stonkmode.save_state")
 def test_maybe_narrate_consultation_mode_deactivated(
     mock_save, mock_load, mock_summarize, mock_generate, tmp_path, capsys
 ):
@@ -439,10 +439,10 @@ def test_maybe_narrate_consultation_mode_deactivated(
     # If no narration emitted (command not in map), that's OK — no assertion needed
 
 
-@patch("rendering.stonkmode.generate_narration", return_value="Commentary.")
-@patch("rendering.stonkmode.summarize_for_narration", return_value="Summary.")
-@patch("rendering.stonkmode.load_state")
-@patch("rendering.stonkmode.save_state")
+@patch("ic_engine.rendering.stonkmode.generate_narration", return_value="Commentary.")
+@patch("ic_engine.rendering.stonkmode.summarize_for_narration", return_value="Summary.")
+@patch("ic_engine.rendering.stonkmode.load_state")
+@patch("ic_engine.rendering.stonkmode.save_state")
 def test_maybe_narrate_updates_segment_count(
     mock_save, mock_load, mock_summarize, mock_generate, tmp_path, capsys
 ):
@@ -485,7 +485,7 @@ def test_excluded_commands_contains_stonkmode_aliases():
 
 
 def test_stonkmode_routes_resolve():
-    from runtime.router import COMMANDS
+    from ic_engine.runtime.router import COMMANDS
 
     for alias in ("stonkmode", "stonk-mode", "stonks"):
         assert alias in COMMANDS, f"Alias {alias!r} missing from router COMMANDS"
@@ -531,7 +531,7 @@ def test_no_persona_description_gives_advice():
 
 def test_satire_disclaimer_present_in_build():
     """The stonkmode output block must always include the satire disclaimer string."""
-    import rendering.stonkmode as sm
+    import ic_engine.rendering.stonkmode as sm
 
     src = Path(sm.__file__).read_text()
     assert "satire_disclaimer" in src

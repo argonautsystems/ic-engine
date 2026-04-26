@@ -22,7 +22,7 @@ Covers:
 - serialize_news_compact   — empty, minimal, and full payloads
 """
 
-from rendering.compact_serializers import (
+from ic_engine.rendering.compact_serializers import (
     _strip_none,
     _top_n,
     _truncate,
