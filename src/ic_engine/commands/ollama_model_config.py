@@ -45,7 +45,7 @@ Usage:
   python3 commands/ollama_model_config.py --model all --endpoint http://localhost:11434
 
   # From Python
-  from commands.ollama_model_config import setup_model, get_best_available_model
+  from ic_engine.commands.ollama_model_config import setup_model, get_best_available_model
   setup_model("gemma4-consult", endpoint="http://localhost:11434")
   model = get_best_available_model("http://localhost:11434")
 """

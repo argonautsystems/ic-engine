@@ -36,12 +36,12 @@ def run_bootstrap(skill_dir: Path) -> None:
     Imports are deferred so this module is importable before sys.path is fully
     resolved (though in practice investorclaw.py sets sys.path first).
     """
-    from config.config_loader import get_deployment_type
-    from config.config_loader import initialize as initialize_config
-    from config.env_loader import load_env_file
-    from services.context_window_monitor import warn_if_low_context
-    from setup.first_run_check import check_and_offer
-    from setup.update_checker import check_for_updates as _fetch_update_message
+    from ic_engine.config.config_loader import get_deployment_type
+    from ic_engine.config.config_loader import initialize as initialize_config
+    from ic_engine.config.env_loader import load_env_file
+    from ic_engine.services.context_window_monitor import warn_if_low_context
+    from ic_engine.setup.first_run_check import check_and_offer
+    from ic_engine.setup.update_checker import check_for_updates as _fetch_update_message
 
     check_and_offer()
     initialize_config()  # loads setup_config.json; applies via setdefault

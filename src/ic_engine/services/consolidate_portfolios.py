@@ -34,10 +34,10 @@ from ic_engine.services.fuzzy_deduplication import FuzzyDeduplicator
 
 # Phase 9: Mode and feature enforcement
 try:
-    from config.config_loader import get_deployment_mode
-    from config.deployment_modes import DeploymentMode, Feature
-    from config.feature_manager import FeatureManager, FeatureNotAvailableError
-    from config.guardrail_enforcer import GuardrailEnforcer  # noqa: F401
+    from ic_engine.config.config_loader import get_deployment_mode
+    from ic_engine.config.deployment_modes import DeploymentMode, Feature
+    from ic_engine.config.feature_manager import FeatureManager, FeatureNotAvailableError
+    from ic_engine.config.guardrail_enforcer import GuardrailEnforcer  # noqa: F401
 
     _features_available = True
 except ImportError:

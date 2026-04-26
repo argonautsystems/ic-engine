@@ -60,10 +60,10 @@ from ic_engine.services.portfolio_utils import fetch_benchmark_returns
 
 # Phase 9: Mode and feature enforcement
 try:
-    from config.config_loader import get_deployment_mode
-    from config.deployment_modes import DeploymentMode, Feature
-    from config.feature_manager import FeatureManager, FeatureNotAvailableError
-    from config.guardrail_enforcer import GuardrailEnforcer
+    from ic_engine.config.config_loader import get_deployment_mode
+    from ic_engine.config.deployment_modes import DeploymentMode, Feature
+    from ic_engine.config.feature_manager import FeatureManager, FeatureNotAvailableError
+    from ic_engine.config.guardrail_enforcer import GuardrailEnforcer
 
     _features_available = True
 except ImportError:
@@ -763,8 +763,8 @@ class PerformanceAnalyzer:
                     logger.error(f"Performance analysis not available: {e}")
                     raise
 
-            from config.schema import normalize_portfolio, validate_portfolio
-            from services.portfolio_utils import load_holdings_list
+            from ic_engine.config.schema import normalize_portfolio, validate_portfolio
+            from ic_engine.services.portfolio_utils import load_holdings_list
 
             raw = json.load(open(holdings_file))
             raw = normalize_portfolio(raw)
@@ -968,7 +968,7 @@ if __name__ == "__main__":
     _project_root = str(Path(__file__).resolve().parent.parent)
     if _project_root not in sys.path:
         sys.path.insert(0, _project_root)
-    from commands._artifact_helpers import pop_artifact_flags
+    from ic_engine.commands._artifact_helpers import pop_artifact_flags
 
     _argv = list(sys.argv)
     _artifact_path, _stonkmode = pop_artifact_flags(_argv)
@@ -992,8 +992,8 @@ if __name__ == "__main__":
     analyzer = PerformanceAnalyzer()
 
     # Run analysis — full data saved to output_file, compact summary to stdout
-    from config.schema import normalize_portfolio
-    from services.portfolio_utils import load_holdings_list
+    from ic_engine.config.schema import normalize_portfolio
+    from ic_engine.services.portfolio_utils import load_holdings_list
 
     raw = json.load(open(holdings_file))
     raw = normalize_portfolio(raw)
@@ -1038,7 +1038,7 @@ if __name__ == "__main__":
     # fall back to compact if the full file isn't readable.
     if _artifact_path:
         try:
-            from commands._artifact_helpers import build_performance_artifact
+            from ic_engine.commands._artifact_helpers import build_performance_artifact
 
             _payload: dict = compact
             if output_file:

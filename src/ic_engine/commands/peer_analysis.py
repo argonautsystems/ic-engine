@@ -769,7 +769,7 @@ def _parse_argv(argv: List[str]):
 
 if __name__ == "__main__":
     # Artifact flags (consistent with other commands)
-    from commands._artifact_helpers import pop_artifact_flags  # noqa: E402
+    from ic_engine.commands._artifact_helpers import pop_artifact_flags  # noqa: E402
 
     _argv = list(sys.argv)
     _artifact_path, _stonkmode = pop_artifact_flags(_argv)

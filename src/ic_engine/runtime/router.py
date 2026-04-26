@@ -547,7 +547,7 @@ def _auto_bootstrap_holdings(command: str, skill_dir: Path, reports_dir: Path) -
     Failures are logged and swallowed; the caller's own error path will surface
     the missing-data message to the user.
     """
-    from config.path_resolver import find_portfolio_file
+    from ic_engine.config.path_resolver import find_portfolio_file
 
     if command in {"holdings", "snapshot", "prices"}:
         return
@@ -564,13 +564,19 @@ def _auto_bootstrap_holdings(command: str, skill_dir: Path, reports_dir: Path) -
     if not portfolio_file:
         return
 
-    fetch_script = skill_dir / "commands" / "fetch_holdings.py"
+    # fetch_holdings.py lives in the engine package, not in the adapter's
+    # user-data root. Resolve via SCRIPTS_DIR (cli.py's single source of
+    # truth) so adapter installs find the engine-bundled script even when
+    # skill_dir is overridden to the adapter checkout.
+    from ic_engine.cli import SCRIPTS_DIR
+
+    fetch_script = SCRIPTS_DIR / "fetch_holdings.py"
     if not fetch_script.exists():
         return
 
     raw_holdings.parent.mkdir(parents=True, exist_ok=True)
     try:
-        from runtime.environment import build_env
+        from ic_engine.runtime.environment import build_env
 
         # Prefer the project's venv Python (has deps like `ratelimit`); fall back to current interpreter.
         venv_python = sys.executable
@@ -620,8 +626,8 @@ def synthesize_args(
     influences CSV-strip + auto-bootstrap behavior so wrapper-resolved
     scripts get the same treatment their legacy CLI counterparts received.
     """
-    from config.path_resolver import find_portfolio_file, get_reports_dir
-    from services.consultation_policy import (
+    from ic_engine.config.path_resolver import find_portfolio_file, get_reports_dir
+    from ic_engine.services.consultation_policy import (
         get_consultation_limit,
         get_dynamic_consultation_limit,
         should_inject_tier3,
@@ -739,7 +745,7 @@ def synthesize_args(
 
     # General argument synthesis for all other auto-synthesize commands
     if effective_command in _AUTO_SYNTHESIZE and not args:
-        from config.command_builders import synthesize_command_args
+        from ic_engine.config.command_builders import synthesize_command_args
 
         args, error_code = synthesize_command_args(effective_command, args, reports_dir)
         if error_code != 0:

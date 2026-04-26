@@ -24,7 +24,7 @@ Automatically:
 - All transparent to the user
 
 Usage:
-  from config.venv_manager import ensure_venv, get_venv_python
+  from ic_engine.config.venv_manager import ensure_venv, get_venv_python
 
   # Auto-setup venv (transparent)
   ensure_venv()

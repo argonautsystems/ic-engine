@@ -219,8 +219,8 @@ def _assemble_report(reports_dir: Path, run_duration_s: float = 0) -> str:
 
     Returns HTML string.
     """
-    from commands.fa_discussion import extract_fa_topics
-    from rendering.eod_email_template import render_eod_email
+    from ic_engine.commands.fa_discussion import extract_fa_topics
+    from ic_engine.rendering.eod_email_template import render_eod_email
 
     raw_data = _load_report_data(reports_dir)
     fa_topics = extract_fa_topics(reports_dir, preloaded=raw_data)
@@ -478,7 +478,7 @@ def main() -> int:
             pass
 
     # ── Resolve directories ───────────────────────────────────────────────
-    from config.path_resolver import get_reports_dir
+    from ic_engine.config.path_resolver import get_reports_dir
 
     reports_dir = Path(args.reports_dir).expanduser() if args.reports_dir else get_reports_dir()
     reports_dir.mkdir(parents=True, exist_ok=True)

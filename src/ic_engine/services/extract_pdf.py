@@ -139,7 +139,7 @@ class PDFExtractor:
                         continue
 
                 # Get broker-optimized extraction strategy order
-                from providers.broker_detector import BrokerDetector
+                from ic_engine.providers.broker_detector import BrokerDetector
 
                 detector = BrokerDetector(self.pdf_path)
                 _, _, details = detector.detect()

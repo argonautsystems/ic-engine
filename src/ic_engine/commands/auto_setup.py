@@ -40,13 +40,20 @@ from ic_engine.services.extract_pdf import PDFExtractor
 logging.basicConfig(level=logging.WARNING, format="[%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-SKILL_DIR = Path(__file__).parent.parent
+# SKILL_DIR is the user-data root: where `.env`, `portfolios/`, and adapter
+# scaffolding live. Adapters (post-Phase-2 split) set INVESTORCLAW_SKILL_DIR
+# to their checkout; absent the override we fall back to the engine package
+# parent (kept for self-hosted ic-engine usage).
+_SKILL_DIR_OVERRIDE = os.environ.get("INVESTORCLAW_SKILL_DIR", "").strip()
+SKILL_DIR = (
+    Path(_SKILL_DIR_OVERRIDE).resolve() if _SKILL_DIR_OVERRIDE else Path(__file__).parent.parent
+)
 
 # Portfolio directory: delegate to the single source-of-truth resolver so env
 # var naming, home-directory probing, and skill-dir fallback stay consistent
 # across auto_setup.py, path_resolver.py, and the rest of the skill.
 try:
-    from config.path_resolver import get_portfolio_dir as _resolve_portfolio_dir
+    from ic_engine.config.path_resolver import get_portfolio_dir as _resolve_portfolio_dir
 
     PORTFOLIO_DIR = _resolve_portfolio_dir(SKILL_DIR)
 except Exception:

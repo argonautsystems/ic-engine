@@ -43,10 +43,10 @@ from ic_engine.rendering.compact_serializers import serialize_news_compact
 
 # Phase 9: Mode and feature enforcement
 try:
-    from config.config_loader import get_deployment_mode
-    from config.deployment_modes import DeploymentMode, Feature
-    from config.feature_manager import FeatureManager, FeatureNotAvailableError
-    from config.guardrail_enforcer import GuardrailEnforcer
+    from ic_engine.config.config_loader import get_deployment_mode
+    from ic_engine.config.deployment_modes import DeploymentMode, Feature
+    from ic_engine.config.feature_manager import FeatureManager, FeatureNotAvailableError
+    from ic_engine.config.guardrail_enforcer import GuardrailEnforcer
 
     _features_available = True
 except ImportError:
@@ -1021,7 +1021,7 @@ if __name__ == "__main__":
     compact_news = serialize_news_compact(report)
 
     # Output format depends on terminal context
-    from rendering.interactive_output import Colors, format_header, is_interactive
+    from ic_engine.rendering.interactive_output import Colors, format_header, is_interactive
 
     if is_interactive():
         # Render formatted summary for interactive terminals
@@ -1056,13 +1056,13 @@ if __name__ == "__main__":
             _project_root = str(Path(__file__).resolve().parent.parent)
             if _project_root not in sys.path:
                 sys.path.insert(0, _project_root)
-            from commands._artifact_helpers import build_news_artifact
+            from ic_engine.commands._artifact_helpers import build_news_artifact
 
             # Respect state-file stonkmode toggle in addition to --stonkmode flag
             _stonk = bool(args.stonkmode)
             if not _stonk:
                 try:
-                    from rendering.stonkmode import is_enabled
+                    from ic_engine.rendering.stonkmode import is_enabled
 
                     _stonk = bool(is_enabled())
                 except Exception:

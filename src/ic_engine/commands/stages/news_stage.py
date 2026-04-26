@@ -63,7 +63,7 @@ class NewsStage(PipelineStage):
     def _fetch_portfolio_news(self, portfolio, symbols, cdm_version: str) -> StageResult:
         """Fetch portfolio news using existing infrastructure."""
         try:
-            from commands.fetch_portfolio_news import PortfolioNewsAnalyzer
+            from ic_engine.commands.fetch_portfolio_news import PortfolioNewsAnalyzer
 
             # Create temporary holdings file in CDM format
             with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:

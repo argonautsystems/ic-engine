@@ -162,7 +162,7 @@ def build_session_profile(
     }
     # FA mode: add audit trail flag for compliance logging
     try:
-        from config.config_loader import is_fa_mode
+        from ic_engine.config.config_loader import is_fa_mode
 
         if is_fa_mode():
             profile["audit_trail"] = True

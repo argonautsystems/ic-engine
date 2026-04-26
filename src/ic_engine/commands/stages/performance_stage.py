@@ -66,7 +66,7 @@ class PerformanceStage(PipelineStage):
         """Run the actual performance analysis using existing infrastructure."""
         try:
             # Import here to avoid circular dependencies
-            from commands.analyze_performance_polars import PerformanceAnalyzer
+            from ic_engine.commands.analyze_performance_polars import PerformanceAnalyzer
 
             # Run analyzer
             analyzer = PerformanceAnalyzer()

@@ -78,7 +78,7 @@ except ImportError:  # pragma: no cover
     _DEP_YFINANCE_AVAILABLE = False
 
 try:
-    from commands.analyze_performance_polars import PerformanceAnalyzer  # noqa: F401
+    from ic_engine.commands.analyze_performance_polars import PerformanceAnalyzer  # noqa: F401
 
     _DEP_ANALYZER_AVAILABLE = True
 except ImportError:  # pragma: no cover
@@ -585,7 +585,7 @@ def _parse_argv(argv: List[str]):
 
 if __name__ == "__main__":
     # Artifact flags must be popped before positional parsing
-    from commands._artifact_helpers import pop_artifact_flags  # noqa: E402
+    from ic_engine.commands._artifact_helpers import pop_artifact_flags  # noqa: E402
 
     _argv = list(sys.argv)
     _artifact_path, _stonkmode = pop_artifact_flags(_argv)
@@ -623,10 +623,10 @@ if __name__ == "__main__":
     # Optional HTML artifact
     if _artifact_path:
         try:
-            from commands._artifact_helpers import (  # noqa: E402
+            from ic_engine.commands._artifact_helpers import (  # noqa: E402
                 _attach_narrative_and_terms,
             )
-            from rendering.artifact_generator import (  # noqa: E402
+            from ic_engine.rendering.artifact_generator import (  # noqa: E402
                 PALETTE,
                 ArtifactGenerator,
             )

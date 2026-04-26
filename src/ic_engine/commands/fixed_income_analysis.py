@@ -30,10 +30,10 @@ from ic_engine.rendering.disclaimer_wrapper import DisclaimerWrapper
 
 # Phase 9: Mode and feature enforcement
 try:
-    from config.config_loader import get_deployment_mode
-    from config.deployment_modes import DeploymentMode, Feature
-    from config.feature_manager import FeatureManager, FeatureNotAvailableError
-    from config.guardrail_enforcer import GuardrailEnforcer
+    from ic_engine.config.config_loader import get_deployment_mode
+    from ic_engine.config.deployment_modes import DeploymentMode, Feature
+    from ic_engine.config.feature_manager import FeatureManager, FeatureNotAvailableError
+    from ic_engine.config.guardrail_enforcer import GuardrailEnforcer
 
     _features_available = True
 except ImportError:
@@ -100,7 +100,7 @@ class FixedIncomeAnalyzer:
             # If no bonds found, try holdings.json format (CDM schema)
             if not self.bonds:
                 try:
-                    from config.schema import normalize_portfolio
+                    from ic_engine.config.schema import normalize_portfolio
 
                     data = normalize_portfolio(data)
 

@@ -84,7 +84,7 @@ _YAHOO_SOURCES: Dict[str, List[str]] = {
 # ---------------------------------------------------------------------------
 
 try:
-    from commands.fetch_portfolio_news import PortfolioNewsAnalyzer as _PNA
+    from ic_engine.commands.fetch_portfolio_news import PortfolioNewsAnalyzer as _PNA
 
     _POSITIVE_KEYWORDS = _PNA.POSITIVE_KEYWORDS
     _NEGATIVE_KEYWORDS = _PNA.NEGATIVE_KEYWORDS
@@ -232,7 +232,7 @@ def _fetch_finnhub_news(category: str, max_articles: int) -> List[Dict]:
     Requires FINNHUB_KEY / FINNHUB_API_KEY environment variable.
     """
     try:
-        from providers.price_provider import FinnhubProvider
+        from ic_engine.providers.price_provider import FinnhubProvider
 
         provider = FinnhubProvider()
     except (ImportError, ValueError) as e:

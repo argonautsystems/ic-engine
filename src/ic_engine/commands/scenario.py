@@ -568,8 +568,8 @@ def build_scenario_artifact(
     plus a raw HTML block with three range sliders that reprice live via
     vanilla JS using aggregated portfolio sensitivities.
     """
-    from commands._artifact_helpers import _attach_narrative_and_terms
-    from rendering.artifact_generator import PALETTE, ArtifactGenerator
+    from ic_engine.commands._artifact_helpers import _attach_narrative_and_terms
+    from ic_engine.rendering.artifact_generator import PALETTE, ArtifactGenerator
 
     scenarios = result.get("scenarios", []) or []
     total_value = float(holdings_snapshot.get("total_value", 0.0))
@@ -892,7 +892,7 @@ def _build_holdings_snapshot(
 
 def main() -> int:
     # Pull --artifact / --stonkmode first so positional parsing isn't confused.
-    from commands._artifact_helpers import pop_artifact_flags
+    from ic_engine.commands._artifact_helpers import pop_artifact_flags
 
     argv = list(sys.argv[1:])
     artifact_path, stonkmode = pop_artifact_flags(argv)

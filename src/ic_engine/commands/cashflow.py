@@ -797,7 +797,7 @@ def _build_cashflow_artifact(
     """Render an HTML calendar artifact for the cashflow projection."""
     from html import escape as _h
 
-    from rendering.artifact_generator import (
+    from ic_engine.rendering.artifact_generator import (
         PALETTE,
         ArtifactGenerator,
         detect_terms_in_text,
@@ -1048,7 +1048,7 @@ def _parse_argv(argv: List[str]) -> Tuple[str, Optional[str], int, float, Option
 # ─── Entrypoint ─────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    from commands._artifact_helpers import pop_artifact_flags  # noqa: E402
+    from ic_engine.commands._artifact_helpers import pop_artifact_flags  # noqa: E402
 
     _argv = list(sys.argv)
     _artifact_path, _stonkmode = pop_artifact_flags(_argv)

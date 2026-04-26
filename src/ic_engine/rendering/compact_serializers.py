@@ -22,7 +22,7 @@ instead of the full enriched payload.  They are used exclusively for *stdout*
 emission — full JSON artifacts are always written to disk separately.
 
 Usage:
-    from rendering.compact_serializers import serialize_analyst_compact, serialize_news_compact
+    from ic_engine.rendering.compact_serializers import serialize_analyst_compact, serialize_news_compact
 """
 
 from __future__ import annotations
@@ -167,7 +167,7 @@ def _build_enrichment_status(analyst_payload: dict, reports_dir: Optional[Path] 
 
     if reports_dir is not None:
         try:
-            from services.consultation_policy import get_enrichment_status
+            from ic_engine.services.consultation_policy import get_enrichment_status
 
             live = get_enrichment_status(reports_dir)
             in_progress = live.get("in_progress", False)

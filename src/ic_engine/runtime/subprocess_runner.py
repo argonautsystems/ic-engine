@@ -56,8 +56,8 @@ def _maybe_auto_dashboard(command: str, skill_dir: Path) -> None:
 
         # Build args via the same synthesizer used by investorclaw.py
         # Use the actual reports_dir, not skill_dir
-        from config.command_builders import synthesize_command_args
-        from config.path_resolver import get_reports_dir
+        from ic_engine.config.command_builders import synthesize_command_args
+        from ic_engine.config.path_resolver import get_reports_dir
 
         reports_dir = get_reports_dir()
         dash_args, error_code = synthesize_command_args("dashboard", [], reports_dir)
@@ -189,7 +189,7 @@ def run_script(
                 _skill_root = str(cwd)
                 if _skill_root not in _sys.path:
                     _sys.path.insert(0, _skill_root)
-                from rendering.stonkmode import maybe_narrate
+                from ic_engine.rendering.stonkmode import maybe_narrate
 
                 maybe_narrate(command, cwd)
             except Exception:

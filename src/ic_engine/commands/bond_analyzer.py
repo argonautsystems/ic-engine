@@ -46,10 +46,10 @@ from ic_engine.rendering.disclaimer_wrapper import DisclaimerWrapper
 
 # Phase 9: Mode and feature enforcement
 try:
-    from config.config_loader import get_deployment_mode
-    from config.deployment_modes import DeploymentMode, Feature
-    from config.feature_manager import FeatureManager, FeatureNotAvailableError
-    from config.guardrail_enforcer import GuardrailEnforcer
+    from ic_engine.config.config_loader import get_deployment_mode
+    from ic_engine.config.deployment_modes import DeploymentMode, Feature
+    from ic_engine.config.feature_manager import FeatureManager, FeatureNotAvailableError
+    from ic_engine.config.guardrail_enforcer import GuardrailEnforcer
 
     _features_available = True
 except ImportError:
@@ -1126,7 +1126,7 @@ class BondAnalyzer:
 
             # Wrap with compliance disclaimers (mode-aware: FA Dangerous Mode gets expanded disclaimer)
             try:
-                from config.config_loader import get_deployment_mode as _get_mode
+                from ic_engine.config.config_loader import get_deployment_mode as _get_mode
 
                 _dep_mode = _get_mode()
             except Exception:
@@ -1201,7 +1201,7 @@ def main():
     _project_root = str(Path(__file__).resolve().parent.parent)
     if _project_root not in sys.path:
         sys.path.insert(0, _project_root)
-    from commands._artifact_helpers import pop_artifact_flags
+    from ic_engine.commands._artifact_helpers import pop_artifact_flags
 
     _argv = list(sys.argv)
     _artifact_path, _stonkmode = pop_artifact_flags(_argv)
@@ -1327,7 +1327,7 @@ def main():
         _compact_bond["_degradation_note"] = _fred_note
 
     # Output format depends on terminal context
-    from rendering.interactive_output import (
+    from ic_engine.rendering.interactive_output import (
         Colors,
         format_currency,
         format_header,
@@ -1380,7 +1380,7 @@ def main():
     # Optional HTML artifact
     if _artifact_path:
         try:
-            from commands._artifact_helpers import build_bonds_artifact
+            from ic_engine.commands._artifact_helpers import build_bonds_artifact
 
             _out = build_bonds_artifact(_compact_bond, _artifact_path, stonkmode=_stonkmode)
             print(f"Artifact: {_out}")

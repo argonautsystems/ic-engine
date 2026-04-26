@@ -44,11 +44,19 @@ def build_env(skill_dir: Path) -> Dict[str, str]:
 
     # Build PYTHONPATH so scripts can import without per-file sys.path surgery:
     # Include:
-    #   <skill/>              — allows from config.*, from internal.*, from rendering.*, etc.
-    #   <skill/commands/>     — allows direct execution of command scripts
+    #   <ic_engine package parent>  — so scripts can `import ic_engine.X.Y` after
+    #                                  the v2.4.1 sweep (matters for source-checkout
+    #                                  runs; installed wheels already have ic_engine
+    #                                  on sys.path via site-packages)
+    #   <skill/>              — adapter user-data root (config, env, etc.)
+    #   <skill/commands/>     — direct execution of command scripts
     # Use os.pathsep so PYTHONPATH works on both POSIX (":") and Windows (";")
+    import ic_engine
+
+    _engine_parent = Path(ic_engine.__file__).resolve().parent.parent
     path_entries = [
-        skill_dir,  # <skill/> — root allows from internal.*, from config.*, etc.
+        _engine_parent,  # parent of ic_engine/ — so subprocess can `import ic_engine`
+        skill_dir,  # adapter checkout / engine root for self-hosted use
         skill_dir / "commands",  # router-mapped command scripts (so they can run directly)
     ]
     pythonpath = os.pathsep.join(str(p.absolute()) for p in path_entries)
@@ -58,7 +66,7 @@ def build_env(skill_dir: Path) -> Dict[str, str]:
         env["PYTHONPATH"] = pythonpath
 
     # Apply .env a second time for keys that scripts need but bootstrap didn't set
-    from config.env_loader import load_env_file
+    from ic_engine.config.env_loader import load_env_file
 
     for k, v in load_env_file(skill_dir / ".env").items():
         env.setdefault(k, v)

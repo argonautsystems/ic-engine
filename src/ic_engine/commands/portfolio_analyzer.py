@@ -76,10 +76,10 @@ def _gl_fmt(pct: Optional[float]) -> str:
 
 # Phase 9: Mode and feature enforcement
 try:
-    from config.config_loader import get_deployment_mode
-    from config.deployment_modes import DeploymentMode, Feature
-    from config.feature_manager import FeatureManager, FeatureNotAvailableError
-    from config.guardrail_enforcer import GuardrailEnforcer
+    from ic_engine.config.config_loader import get_deployment_mode
+    from ic_engine.config.deployment_modes import DeploymentMode, Feature
+    from ic_engine.config.feature_manager import FeatureManager, FeatureNotAvailableError
+    from ic_engine.config.guardrail_enforcer import GuardrailEnforcer
 
     _features_available = True
 except ImportError as e:
@@ -392,7 +392,7 @@ class PortfolioAnalyzer:
         # Phase 9: Exclude ESPP holdings from concentration analysis
         # ESPP shares are forced holdings and not a diversification choice
         try:
-            from config.config_loader import get_espp_symbols
+            from ic_engine.config.config_loader import get_espp_symbols
 
             espp_symbols = [s.upper() for s in get_espp_symbols()]
             is_espp = self.portfolio_df["symbol"].str.to_uppercase().is_in(espp_symbols)
@@ -444,7 +444,10 @@ class PortfolioAnalyzer:
         weights_dict = {
             row["symbol"]: row["portfolio_pct"] for row in portfolio_for_analysis.to_dicts()
         }
-        from services.portfolio_utils import calculate_herfindahl, classify_diversification
+        from ic_engine.services.portfolio_utils import (
+            calculate_herfindahl,
+            classify_diversification,
+        )
 
         herfindahl_index = calculate_herfindahl(weights_dict) if weights_dict else 0.0
         diversification_classification = classify_diversification(herfindahl_index)
@@ -952,7 +955,7 @@ if __name__ == "__main__":
         # Cross-step context injection: load key figures from earlier pipeline steps
         # so the operational LLM has specific data to cite in its synthesis response.
         try:
-            from config.path_resolver import get_reports_dir as _get_reports_dir
+            from ic_engine.config.path_resolver import get_reports_dir as _get_reports_dir
 
             _rdir = _get_reports_dir()
 

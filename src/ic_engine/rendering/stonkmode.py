@@ -312,7 +312,7 @@ def stonkmode_tip(always: bool = False) -> Optional[str]:
 
 def get_persona(persona_id: str) -> dict:
     """Return persona dict from stonkmode_personas.py."""
-    from rendering.stonkmode_personas import PERSONAS
+    from ic_engine.rendering.stonkmode_personas import PERSONAS
 
     return PERSONAS[persona_id]
 

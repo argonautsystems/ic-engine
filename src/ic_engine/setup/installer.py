@@ -184,7 +184,7 @@ class QueryHandlerPatcher:
     HOOK_CODE = """
 # InvestorClaw Financial Query Router Hook
 try:
-    from models.financial_query_router import FinancialQueryRouter
+    from ic_engine.models.financial_query_router import FinancialQueryRouter
 
     router_result = FinancialQueryRouter.route_query(user_input)
     if router_result.get('is_financial'):

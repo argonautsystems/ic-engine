@@ -30,7 +30,7 @@ Design notes:
 
 Typical command usage:
 
-    from rendering.artifact_generator import ArtifactGenerator
+    from ic_engine.rendering.artifact_generator import ArtifactGenerator
 
     artifact = ArtifactGenerator(
         title="Portfolio Holdings Analysis",
@@ -1043,7 +1043,7 @@ def parse_artifact_flags(argv: Sequence[str]) -> Tuple[Optional[str], bool]:
     stonk = "--stonkmode" in argv
     if not stonk:
         try:
-            from rendering.stonkmode import is_enabled
+            from ic_engine.rendering.stonkmode import is_enabled
 
             stonk = bool(is_enabled())
         except Exception:
@@ -1057,7 +1057,7 @@ def extract_dr_stonk_definitions(terms: Iterable[str]) -> Dict[str, str]:
     Unknown terms are silently dropped.
     """
     try:
-        from rendering.dr_stonk import TERM_EXPLANATIONS
+        from ic_engine.rendering.dr_stonk import TERM_EXPLANATIONS
     except Exception:
         return {}
     out: Dict[str, str] = {}
@@ -1075,7 +1075,7 @@ def detect_terms_in_text(text: str) -> List[str]:
     Case-insensitive substring match, deduplicated, preserves insertion order.
     """
     try:
-        from rendering.dr_stonk import TERM_EXPLANATIONS
+        from ic_engine.rendering.dr_stonk import TERM_EXPLANATIONS
     except Exception:
         return []
     if not text:
@@ -1104,7 +1104,7 @@ def get_stonkmode_narrative(
     or None if stonkmode state is unavailable or LLM offline.
     """
     try:
-        from rendering.stonkmode import (
+        from ic_engine.rendering.stonkmode import (
             build_foil_system_prompt,
             build_foil_user_prompt,
             build_lead_system_prompt,
