@@ -7,4 +7,4 @@ This package is consumed by two adapters:
 The canonical agent-skill contract template lives in `contract/` (sibling to src/).
 """
 
-__version__ = "2.4.4"
+__version__ = "2.4.5"
