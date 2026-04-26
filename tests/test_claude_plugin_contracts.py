@@ -180,10 +180,9 @@ def test_claude_install_docs_use_marketplace_flow():
 
     for doc in docs:
         content = doc.read_text(encoding="utf-8")
-        assert (
-            "/plugin marketplace add https://gitlab.com/perlowja/InvestorClaw.git"
-            in content
-        ), f"{doc.name}: Claude Code install docs must add the InvestorClaw marketplace"
+        assert "/plugin marketplace add https://gitlab.com/perlowja/InvestorClaw.git" in content, (
+            f"{doc.name}: Claude Code install docs must add the InvestorClaw marketplace"
+        )
         assert "/plugin install investorclaw@investorclaw" in content, (
             f"{doc.name}: Claude Code install docs must install from the InvestorClaw marketplace"
         )

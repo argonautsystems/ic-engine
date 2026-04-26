@@ -55,9 +55,7 @@ def _say(msg: str) -> None:
     print(msg)
 
 
-PLUGIN_JSON_URL = (
-    "https://gitlab.com/perlowja/InvestorClaw/-/raw/main/.claude-plugin/plugin.json"
-)
+PLUGIN_JSON_URL = "https://gitlab.com/perlowja/InvestorClaw/-/raw/main/.claude-plugin/plugin.json"
 
 CHANGELOG_ANCHOR = "https://gitlab.com/perlowja/InvestorClaw/-/blob/main/RELEASE_NOTES.md"
 INSTALLER_BASE = "https://gitlab.com/perlowja/InvestorClaw/-/raw/main"

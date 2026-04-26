@@ -79,7 +79,10 @@ sys.path.insert(0, str(_SKILL_ROOT / "setup"))
 # ---------------------------------------------------------------------------
 # Step 3: Now safe to import investorclaw internals.
 # ---------------------------------------------------------------------------
-from ic_engine.internal.tier3_enrichment import ConsultationClient, _compute_fingerprint  # noqa: E402
+from ic_engine.internal.tier3_enrichment import (  # noqa: E402
+    ConsultationClient,
+    _compute_fingerprint,
+)
 from ic_engine.services.consultation_policy import update_session_fingerprint  # noqa: E402
 
 # ---------------------------------------------------------------------------
