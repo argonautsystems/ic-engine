@@ -77,8 +77,8 @@ except ImportError as e:
 # --- Feature gating --------------------------------------------------------
 _features_available = False
 try:
-    from config.config_loader import get_deployment_mode
-    from config.deployment_modes import DeploymentMode
+    from ic_engine.config.config_loader import get_deployment_mode
+    from ic_engine.config.deployment_modes import DeploymentMode
 
     _features_available = True
 except ImportError as e:
@@ -86,7 +86,7 @@ except ImportError as e:
 
 # --- Disclaimer wrapper ----------------------------------------------------
 try:
-    from rendering.disclaimer_wrapper import DisclaimerWrapper
+    from ic_engine.rendering.disclaimer_wrapper import DisclaimerWrapper
 
     _DISCLAIMER_AVAILABLE = True
 except ImportError as e:

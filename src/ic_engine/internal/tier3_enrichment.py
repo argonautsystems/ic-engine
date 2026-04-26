@@ -74,7 +74,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Optional: Use LiteLLM client for automatic backend detection (fallback to custom ConsultationClient)
 try:
-    from internal.litellm_consultation import LiteLLMConsultationClient as _LiteLLMClient
+    from ic_engine.internal.litellm_consultation import LiteLLMConsultationClient as _LiteLLMClient
 
     _LITELLM_AVAILABLE = True
 except ImportError:
@@ -581,7 +581,7 @@ class Tier3Enricher:
                     _rdir = os.environ.get("INVESTOR_CLAW_REPORTS_DIR", "")
                     if _rdir:
                         try:
-                            from rendering.render_consultation_card import render_card
+                            from ic_engine.rendering.render_consultation_card import render_card
 
                             card_path = str(
                                 render_card(

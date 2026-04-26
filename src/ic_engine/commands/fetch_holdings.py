@@ -439,7 +439,7 @@ def _build_compact_holdings(
 
     # Check for concentration threshold breaches (sector_weights is in percent, 0-100)
     try:
-        from commands.portfolio_analyzer import PortfolioAnalyzer
+        from ic_engine.commands.portfolio_analyzer import PortfolioAnalyzer
 
         thresholds = PortfolioAnalyzer.THRESHOLDS
         # Use a 25% warning floor (ahead of the 30% hard limit)
@@ -1073,7 +1073,7 @@ class PortfolioFetcher:
         - On first run: Displays detected symbols and accounts (for user to identify ESPP)
         - On subsequent runs: Loads ESPP symbol+account mapping from ESPP_HOLDINGS env var
         """
-        from providers.price_provider import PriceProvider
+        from ic_engine.providers.price_provider import PriceProvider
 
         # Load ESPP symbol+account configuration from environment (if set during discovery)
         espp_holdings = _load_espp_holdings_from_env()
@@ -1093,7 +1093,7 @@ class PortfolioFetcher:
         # In single_investor mode: sum across all accounts → one aggregate position per ticker.
         # In fa_professional mode: keep per-account positions so the FA sees each account separately.
         try:
-            from config.config_loader import is_single_investor_mode as _is_single_inv
+            from ic_engine.config.config_loader import is_single_investor_mode as _is_single_inv
 
             _collapse_by_symbol = _is_single_inv()
         except Exception:
@@ -2224,7 +2224,7 @@ class PortfolioFetcher:
             compact_json = json.dumps(compact, separators=(",", ":"))
 
             # Output format depends on terminal context
-            from rendering.interactive_output import (
+            from ic_engine.rendering.interactive_output import (
                 Colors,
                 format_currency,
                 format_header,
@@ -2290,7 +2290,7 @@ if __name__ == "__main__":
     _project_root = str(Path(__file__).resolve().parent.parent)
     if _project_root not in sys.path:
         sys.path.insert(0, _project_root)
-    from commands._artifact_helpers import (
+    from ic_engine.commands._artifact_helpers import (
         build_holdings_artifact,
         pop_argv_flag,
         pop_artifact_flags,

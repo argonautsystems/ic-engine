@@ -421,7 +421,7 @@ def main() -> int:
                 _project_root = str(Path(__file__).resolve().parent.parent)
                 if _project_root not in sys.path:
                     sys.path.insert(0, _project_root)
-                from commands._artifact_helpers import (
+                from ic_engine.commands._artifact_helpers import (
                     build_lookup_artifact,
                     pop_artifact_flags,
                 )

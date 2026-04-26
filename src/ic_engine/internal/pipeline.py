@@ -256,7 +256,7 @@ class PortfolioPipeline:
         # Load portfolio data into context for downstream stages
         # (In real implementation, would restore from p0_result.data)
         try:
-            from internal.holdings_loader import HoldingsLoader
+            from ic_engine.internal.holdings_loader import HoldingsLoader
 
             loader = HoldingsLoader()
             context.portfolio_data = loader.load(holdings_file)

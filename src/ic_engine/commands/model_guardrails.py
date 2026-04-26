@@ -517,7 +517,7 @@ def cmd_status():
     # Check FA deployment mode
     _is_fa = False
     try:
-        from config.config_loader import is_fa_mode
+        from ic_engine.config.config_loader import is_fa_mode
 
         _is_fa = is_fa_mode()
     except Exception:

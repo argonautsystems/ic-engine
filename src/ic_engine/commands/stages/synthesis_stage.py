@@ -54,7 +54,7 @@ class SynthesisStage(PipelineStage):
     def _synthesize(self, portfolio, p1_results, cdm_version: str) -> StageResult:
         """Generate portfolio synthesis report."""
         try:
-            from commands.portfolio_analyzer import PortfolioAnalyzer
+            from ic_engine.commands.portfolio_analyzer import PortfolioAnalyzer
 
             # Create temporary holdings file in CDM format
             with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:

@@ -54,7 +54,7 @@ class BondsStage(PipelineStage):
     def _run_bond_analysis(self, bonds: list) -> StageResult:
         """Run bond analyzer on portfolio bonds."""
         try:
-            from commands.bond_analyzer import BondAnalyzer
+            from ic_engine.commands.bond_analyzer import BondAnalyzer
 
             # Convert positions to bond format
             bond_list = []

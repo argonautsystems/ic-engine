@@ -57,10 +57,10 @@ from ic_engine.rendering.compact_serializers import serialize_analyst_compact
 
 # Phase 9: Mode and feature enforcement
 try:
-    from config.config_loader import get_deployment_mode
-    from config.deployment_modes import DeploymentMode, Feature
-    from config.feature_manager import FeatureManager, FeatureNotAvailableError
-    from config.guardrail_enforcer import GuardrailEnforcer
+    from ic_engine.config.config_loader import get_deployment_mode
+    from ic_engine.config.deployment_modes import DeploymentMode, Feature
+    from ic_engine.config.feature_manager import FeatureManager, FeatureNotAvailableError
+    from ic_engine.config.guardrail_enforcer import GuardrailEnforcer
 
     _features_available = True
 except ImportError:
@@ -730,7 +730,7 @@ def fetch_analyst_for_holdings(
 
     # Resolve dated output directory (same as other commands)
     try:
-        from config.path_resolver import get_reports_dir as _get_reports_dir
+        from ic_engine.config.path_resolver import get_reports_dir as _get_reports_dir
 
         _fetcher_output_dir = _get_reports_dir()
     except Exception:
@@ -762,7 +762,7 @@ if __name__ == "__main__":
     _project_root = str(Path(__file__).resolve().parent.parent)
     if _project_root not in sys.path:
         sys.path.insert(0, _project_root)
-    from commands._artifact_helpers import pop_artifact_flags
+    from ic_engine.commands._artifact_helpers import pop_artifact_flags
 
     _argv = list(sys.argv)
     _artifact_path, _stonkmode = pop_artifact_flags(_argv)
@@ -794,7 +794,7 @@ if __name__ == "__main__":
 
     # Resolve output paths — use dated subdirectory (same as other commands)
     try:
-        from config.path_resolver import get_reports_dir as _get_reports_dir
+        from ic_engine.config.path_resolver import get_reports_dir as _get_reports_dir
 
         _reports_dir = _get_reports_dir()
     except Exception:
@@ -842,7 +842,7 @@ if __name__ == "__main__":
         try:
             _deploy_mode = get_deployment_mode()
             if _deploy_mode == "fa_professional":
-                from rendering.disclaimer_wrapper import DisclaimerWrapper
+                from ic_engine.rendering.disclaimer_wrapper import DisclaimerWrapper
 
                 analyst_payload["disclaimer"] = DisclaimerWrapper.FA_DISCLAIMER
                 analyst_payload["deployment_mode"] = "fa_professional"
@@ -911,7 +911,7 @@ if __name__ == "__main__":
 
                 # Write enrichment_progress.json with fingerprint chain
                 try:
-                    from services.consultation_policy import (
+                    from ic_engine.services.consultation_policy import (
                         is_consultation_enabled,
                         update_session_fingerprint,
                     )
@@ -1020,7 +1020,7 @@ if __name__ == "__main__":
     compact_analyst = serialize_analyst_compact(analyst_payload, _reports_dir)
 
     # Output format depends on terminal context
-    from rendering.interactive_output import Colors, format_header, is_interactive
+    from ic_engine.rendering.interactive_output import Colors, format_header, is_interactive
 
     if is_interactive():
         # Render formatted summary for interactive terminals
@@ -1065,7 +1065,7 @@ if __name__ == "__main__":
     # Optional HTML artifact
     if _artifact_path:
         try:
-            from commands._artifact_helpers import build_analyst_artifact
+            from ic_engine.commands._artifact_helpers import build_analyst_artifact
 
             _out = build_analyst_artifact(analyst_payload, _artifact_path, stonkmode=_stonkmode)
             print(f"Artifact: {_out}")

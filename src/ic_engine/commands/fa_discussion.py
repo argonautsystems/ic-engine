@@ -714,7 +714,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     sys.path.insert(0, str(Path(__file__).parent.parent))
-    from config.path_resolver import get_reports_dir
+    from ic_engine.config.path_resolver import get_reports_dir
 
     reports_dir = Path(args.reports_dir) if args.reports_dir else get_reports_dir()
 

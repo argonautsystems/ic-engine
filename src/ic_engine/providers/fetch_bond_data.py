@@ -355,7 +355,7 @@ class BondDataFetcher:
             if output_file:
                 # Wrap with disclaimer and save (mode-aware: FA Dangerous Mode gets expanded disclaimer)
                 try:
-                    from config.config_loader import get_deployment_mode as _get_mode
+                    from ic_engine.config.config_loader import get_deployment_mode as _get_mode
 
                     _dep_mode = _get_mode()
                 except Exception:

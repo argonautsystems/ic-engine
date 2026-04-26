@@ -48,7 +48,7 @@ class PeerAnalysisStage(PipelineStage):
     def _run_peer_analysis(self, portfolio, cdm_version: str) -> StageResult:
         """Run peer and factor analysis."""
         try:
-            from commands.peer_analysis import run_peer_analysis
+            from ic_engine.commands.peer_analysis import run_peer_analysis
 
             # Create temporary holdings file in CDM format
             with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:

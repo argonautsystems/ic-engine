@@ -179,6 +179,6 @@ def example_usage():
 
 if __name__ == "__main__":
     # For testing
-    from config.deployment_modes import DeploymentMode
+    from ic_engine.config.deployment_modes import DeploymentMode
 
     example_usage()

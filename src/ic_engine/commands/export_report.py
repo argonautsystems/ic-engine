@@ -104,14 +104,14 @@ class ReportExporter:
             raise
 
         # Normalize schema
-        from config.schema import normalize_portfolio
+        from ic_engine.config.schema import normalize_portfolio
 
         if "data" in self.holdings_data and isinstance(self.holdings_data["data"], dict):
             self.holdings_data = self.holdings_data["data"]
         if "data" in self.performance_data and isinstance(self.performance_data["data"], dict):
             self.performance_data = self.performance_data["data"]
 
-        from config.schema import validate_portfolio
+        from ic_engine.config.schema import validate_portfolio
 
         self.holdings_data = normalize_portfolio(self.holdings_data)
         validate_portfolio(self.holdings_data)

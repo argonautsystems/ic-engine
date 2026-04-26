@@ -34,7 +34,7 @@ if str(_SKILL_ROOT) not in sys.path:
     sys.path.insert(0, str(_SKILL_ROOT))
 
 try:
-    from rendering.stonkmode import stonkmode_tip as _stonkmode_tip
+    from ic_engine.rendering.stonkmode import stonkmode_tip as _stonkmode_tip
 except Exception:
 
     def _stonkmode_tip(always: bool = False) -> str:  # type: ignore[misc]
@@ -69,14 +69,14 @@ def _log_fa_professional_activation() -> None:
 
 # Import portfolio analyzer
 try:
-    from config.portfolio_sizer import analyze_portfolio, print_analysis
+    from ic_engine.config.portfolio_sizer import analyze_portfolio, print_analysis
 except ImportError:
     analyze_portfolio = None
     print_analysis = None
 
 # Import mode definitions
 try:
-    from config.deployment_modes import DeploymentMode
+    from ic_engine.config.deployment_modes import DeploymentMode
 except ImportError:
     DeploymentMode = None
 

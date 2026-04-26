@@ -48,7 +48,7 @@ class OptimizationStage(PipelineStage):
     def _run_optimization(self, portfolio, cdm_version: str) -> StageResult:
         """Run portfolio optimization via optimize.py functions."""
         try:
-            from commands.optimize import (
+            from ic_engine.commands.optimize import (
                 fetch_historical_returns,
                 load_holdings,
                 optimize_sharpe_ratio,

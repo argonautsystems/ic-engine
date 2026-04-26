@@ -775,7 +775,7 @@ def pop_artifact_flags(argv_list: List[str]) -> tuple[Optional[str], bool]:
     # avoid silently running LLM calls for non-artifact command invocations)
     if artifact_path and not stonk:
         try:
-            from rendering.stonkmode import is_enabled
+            from ic_engine.rendering.stonkmode import is_enabled
 
             stonk = bool(is_enabled())
         except Exception:

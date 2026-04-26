@@ -224,7 +224,7 @@ def main() -> int:
         _cards_output_dir = Path(_rdir) / ".raw" if _rdir else None
         _quote_dir = Path.home() / ".investorclaw" / "quotes"
         try:
-            from rendering.render_consultation_card import render_card as _render_card
+            from ic_engine.rendering.render_consultation_card import render_card as _render_card
 
             _render_available = True
         except ImportError:

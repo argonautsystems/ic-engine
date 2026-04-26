@@ -127,8 +127,18 @@ def _auto_prime_guardrails(scripts_dir: Path) -> None:
         pass  # Non-fatal
 
 
-SKILL_DIR = ROOT_DIR
-SCRIPTS_DIR = SKILL_DIR / "commands"
+# SKILL_DIR is the user-data root: where `.env`, `portfolios/`, and
+# adapter scaffolding live. SCRIPTS_DIR is the engine-code root: where the
+# command Python scripts live. Pre-Phase-2-split these were the same dir;
+# after the split they diverge and must be tracked separately:
+#
+#   * Self-hosted ic-engine usage (no adapter): both equal ROOT_DIR.
+#   * Adapter (InvestorClaw post-v2.3.0) usage: SKILL_DIR is the adapter
+#     checkout (set via INVESTORCLAW_SKILL_DIR by the shim), SCRIPTS_DIR
+#     stays at ROOT_DIR/commands inside the engine package.
+_SKILL_DIR_OVERRIDE = os.environ.get("INVESTORCLAW_SKILL_DIR", "").strip()
+SKILL_DIR = Path(_SKILL_DIR_OVERRIDE).resolve() if _SKILL_DIR_OVERRIDE else ROOT_DIR
+SCRIPTS_DIR = ROOT_DIR / "commands"
 
 # Commands that must never trigger stonkmode narration (would recurse or be
 # meaningless — stonkmode narrating itself, setup, or guardrails).
@@ -195,7 +205,7 @@ def main() -> int:
 
     # Auto-manage virtual environment (transparent to user)
     try:
-        from config.venv_manager import ensure_venv, is_venv_active
+        from ic_engine.config.venv_manager import ensure_venv, is_venv_active
 
         if not is_venv_active():
             ensure_venv()

@@ -78,7 +78,7 @@ This wizard takes ~2-3 minutes.
 
     if response == "y":
         # Import here to avoid circular dependency
-        from setup.setup_wizard import SetupWizard
+        from ic_engine.setup.setup_wizard import SetupWizard
 
         wizard = SetupWizard()
         wizard.run()

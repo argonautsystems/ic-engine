@@ -66,7 +66,9 @@ class AnalystStage(PipelineStage):
     def _fetch_analyst_recommendations(self, portfolio, symbols, cdm_version: str) -> StageResult:
         """Fetch analyst recommendations using existing infrastructure."""
         try:
-            from commands.fetch_analyst_recommendations_parallel import fetch_analyst_for_holdings
+            from ic_engine.commands.fetch_analyst_recommendations_parallel import (
+                fetch_analyst_for_holdings,
+            )
 
             # Create temporary holdings file in CDM format
             with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:

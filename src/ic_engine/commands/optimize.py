@@ -92,9 +92,12 @@ except ImportError:
 
 # Feature gates (OPT-06)
 try:
-    from config.config_loader import get_deployment_mode
-    from config.deployment_modes import DeploymentMode, Feature  # noqa: F401
-    from config.feature_manager import FeatureManager, FeatureNotAvailableError  # noqa: F401
+    from ic_engine.config.config_loader import get_deployment_mode
+    from ic_engine.config.deployment_modes import DeploymentMode, Feature  # noqa: F401
+    from ic_engine.config.feature_manager import (  # noqa: F401
+        FeatureManager,
+        FeatureNotAvailableError,
+    )
 
     _features_available = True
 except ImportError:
