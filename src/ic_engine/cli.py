@@ -35,6 +35,10 @@ ROOT_DIR = Path(__file__).resolve().parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
+# ---------------------------------------------------------------------------
+# Version management — single source of truth (previously investorclaw/version.py)
+# ---------------------------------------------------------------------------
+from ic_engine import __version__ as VERSION
 from ic_engine.config.help_text import show_help
 from ic_engine.runtime.bootstrap import run_bootstrap
 from ic_engine.runtime.environment import build_env
@@ -47,11 +51,6 @@ from ic_engine.runtime.router import (
 from ic_engine.runtime.subprocess_runner import run_script
 from ic_engine.setup.identity_updater import update_identity
 
-# ---------------------------------------------------------------------------
-# Version management — single source of truth (previously investorclaw/version.py)
-# ---------------------------------------------------------------------------
-
-from ic_engine import __version__ as VERSION
 VERSION_OVERRIDE = os.environ.get("INVESTORCLAW_VERSION")
 __version__ = VERSION_OVERRIDE or VERSION
 

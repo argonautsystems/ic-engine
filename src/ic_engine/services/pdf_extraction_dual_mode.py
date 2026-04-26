@@ -1,154 +1,55 @@
-#!/usr/bin/env python3
-"""
-Dual-mode PDF extraction: vision API for Claude Code, regex fallback for other platforms.
+# Copyright 2026 InvestorClaw Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
-Automatically detects deployment mode and uses the best available extraction method:
-1. Claude vision API (Claude Code only) - highest accuracy for complex/scanned PDFs
-2. Regex-based extraction (all platforms) - reliable fallback using existing patterns
+"""Dual-mode PDF extraction: vision LLM (via clio) for high accuracy on complex
+or scanned PDFs, regex fallback (via the bundled PDFExtractor) for everywhere else.
 
-This module wraps the existing extract_pdf.py and provides intelligent mode selection.
+Prior to ic-engine v2.4.0 this module embedded a hardcoded Anthropic vision
+client and a portfolio-specific extraction prompt. Phase 2.5 of the
+InvestorClaw decomposition (per IC_DECOMPOSITION_SPEC.md) lifted the
+structural primitive into clio.extract.vision; this module is now a thin
+adapter that supplies the portfolio-domain prompt and aggregates clio's
+parameterized result into the legacy (holdings, broker) tuple shape that
+downstream callers (InvestorClaw, InvestorClaude) expect.
+
+Mode selection:
+    IC_ENGINE_VISION env var has priority. Values:
+        "vision"  → force vision mode (raise if clio or API key missing)
+        "regex"   → force regex mode (skip vision entirely)
+        "auto"    → autodetect (default if env unset)
+    In auto mode, vision is enabled if clio.extract.vision is importable AND
+    at least one supported litellm provider key is set in the environment.
+
+The legacy `INVESTORCLAW_DEPLOYMENT_MODE=claude_code` knob is still honored
+for back-compat with callers that haven't migrated to IC_ENGINE_VISION yet.
 """
+
+from __future__ import annotations
 
 import logging
 import os
 from enum import Enum
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
 
-class ExtractionMode(Enum):
-    """PDF extraction strategy."""
-
-    CLAUDE_VISION = "claude_vision"  # Claude Code with vision API
-    REGEX = "regex"  # Universal regex-based fallback
-
-
-def detect_extraction_mode() -> ExtractionMode:
-    """
-    Detect optimal PDF extraction mode based on deployment context.
-
-    Returns CLAUDE_VISION if:
-    - Running in Claude Code environment (INVESTORCLAW_DEPLOYMENT_MODE=claude_code)
-    - Claude SDK is available (anthropic package installed)
-    - API key available (ANTHROPIC_API_KEY)
-
-    Falls back to REGEX for OpenClaw, Hermes, ZeroClaw, or standalone.
-    """
-    # Check explicit deployment mode env var
-    deployment_mode = os.getenv("INVESTORCLAW_DEPLOYMENT_MODE", "").lower()
-
-    if deployment_mode == "claude_code":
-        try:
-            import anthropic  # noqa: F401
-
-            api_key = os.getenv("ANTHROPIC_API_KEY")
-            if api_key:
-                logger.info("PDF extraction: using Claude vision API (Claude Code mode)")
-                return ExtractionMode.CLAUDE_VISION
-        except ImportError:
-            logger.debug("Claude SDK not available; falling back to regex extraction")
-
-    # Default fallback
-    logger.info("PDF extraction: using regex-based extraction (fallback mode)")
-    return ExtractionMode.REGEX
-
-
-class DualModePDFExtractor:
-    """
-    Intelligent PDF extractor that chooses extraction strategy based on environment.
-
-    Public methods mirror existing extract_pdf.PDFExtractor for drop-in compatibility.
-    """
-
-    def __init__(self):
-        self.mode = detect_extraction_mode()
-        self._vision_client = None
-        self._regex_extractor = None
-
-        if self.mode == ExtractionMode.CLAUDE_VISION:
-            try:
-                import anthropic
-
-                self._vision_client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-            except Exception as e:
-                logger.warning(
-                    f"Could not initialize Claude vision client: {e}. Falling back to regex."
-                )
-                self.mode = ExtractionMode.REGEX
-
-        # Always have regex extractor as fallback
-        if self.mode == ExtractionMode.REGEX:
-            try:
-                from services.extract_pdf import PDFExtractor
-
-                self._regex_extractor = PDFExtractor()
-            except ImportError:
-                logger.error("Could not import PDFExtractor; PDF extraction will fail")
-
-    def extract_holdings(self, pdf_path: str) -> Tuple[List[Dict], str]:
-        """
-        Extract portfolio holdings from PDF statement.
-
-        Returns: (holdings_list, broker_platform) tuple
-        Raises: ValueError if extraction fails
-        """
-        if self.mode == ExtractionMode.CLAUDE_VISION:
-            try:
-                return self._extract_holdings_vision(pdf_path)
-            except Exception as e:
-                logger.warning(f"Vision extraction failed: {e}. Falling back to regex.")
-                self.mode = ExtractionMode.REGEX
-
-        # Regex fallback
-        if self._regex_extractor is None:
-            raise RuntimeError("No PDF extraction method available")
-
-        return self._regex_extractor.extract_holdings(pdf_path)
-
-    def _extract_holdings_vision(self, pdf_path: str) -> Tuple[List[Dict], str]:
-        """
-        Extract holdings using Claude vision API.
-
-        Sends PDF pages to Claude for analysis with a specialized prompt,
-        returns structured portfolio data and detected broker platform.
-        """
-        import base64
-        import json
-
-        # Read PDF and convert to base64 for API
-        try:
-            import fitz  # PyMuPDF (already in requirements as pdfplumber dep)
-
-            doc = fitz.open(pdf_path)
-        except ImportError:
-            logger.warning("PyMuPDF not available; cannot use vision extraction")
-            raise
-
-        # Send first 5 pages to Claude for analysis
-        vision_results = []
-        for page_num in range(min(5, len(doc))):
-            pix = doc[page_num].get_pixmap(matrix=fitz.Matrix(2, 2))  # 2x resolution
-            img_data = base64.standard_b64encode(pix.tobytes("png")).decode()
-
-            response = self._vision_client.messages.create(
-                model="claude-3-5-sonnet-20241022",
-                max_tokens=2048,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "image",
-                                "source": {
-                                    "type": "base64",
-                                    "media_type": "image/png",
-                                    "data": img_data,
-                                },
-                            },
-                            {
-                                "type": "text",
-                                "text": """Analyze this financial statement page and extract:
+# Domain-specific prompt for portfolio extraction. Lives here (ic-engine,
+# domain substrate), not in clio (foundation). When the prompt evolves —
+# additional asset types, better disambiguation rules, broker-specific
+# hints — that work happens in this file.
+PORTFOLIO_VISION_PROMPT = """Analyze this financial statement page and extract:
 1. Broker/platform name (e.g., Fidelity, Schwab, Vanguard)
 2. All securities holdings with: symbol, quantity, price, current_value
 3. Account type (brokerage, IRA, 401k, etc.)
@@ -160,66 +61,216 @@ Return ONLY valid JSON with structure:
   "account_type": "..."
 }
 
-If no holdings on this page, return empty array for holdings.""",
-                            },
-                        ],
-                    }
-                ],
+If no holdings on this page, return empty array for holdings."""
+
+
+# Default vision model. litellm-routed; any vision-capable model string works
+# (claude-sonnet-4-6, openai/gpt-4o, vertex_ai/gemini-2.5-pro, etc.).
+DEFAULT_VISION_MODEL = "claude-sonnet-4-6"
+
+
+# Provider keys litellm picks up for vision-capable models. Used by the
+# autodetect path to decide whether vision mode is achievable.
+_VISION_API_KEY_ENVS = (
+    "ANTHROPIC_API_KEY",
+    "OPENAI_API_KEY",
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+    "VERTEXAI_PROJECT",
+    "AZURE_API_KEY",
+)
+
+
+class ExtractionMode(Enum):
+    """PDF extraction strategy."""
+
+    VISION = "vision"  # clio.extract.vision via litellm
+    REGEX = "regex"  # bundled PDFExtractor with rule-based strategies
+
+
+def _has_vision_api_key() -> bool:
+    """Return True iff at least one supported vision-LLM provider key is set."""
+    return any(os.getenv(name) for name in _VISION_API_KEY_ENVS)
+
+
+def _is_clio_vision_importable() -> bool:
+    """Best-effort import probe; doesn't raise."""
+    try:
+        from clio.extract import vision  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
+def detect_extraction_mode() -> ExtractionMode:
+    """Decide which extraction mode to run for this process.
+
+    Resolution order:
+        1. IC_ENGINE_VISION env (vision | regex | auto). Takes precedence.
+        2. Legacy INVESTORCLAW_DEPLOYMENT_MODE=claude_code → vision (back-compat).
+        3. Auto: vision if clio is importable AND any supported provider key
+           is set; regex otherwise.
+    """
+    explicit = os.getenv("IC_ENGINE_VISION", "").strip().lower()
+    if explicit == "vision":
+        return ExtractionMode.VISION
+    if explicit == "regex":
+        return ExtractionMode.REGEX
+
+    if os.getenv("INVESTORCLAW_DEPLOYMENT_MODE", "").lower() == "claude_code":
+        if _is_clio_vision_importable() and _has_vision_api_key():
+            logger.info(
+                "PDF extraction: vision mode (legacy INVESTORCLAW_DEPLOYMENT_MODE=claude_code)"
             )
+            return ExtractionMode.VISION
+        logger.warning(
+            "INVESTORCLAW_DEPLOYMENT_MODE=claude_code set but clio or API key missing; "
+            "falling back to regex"
+        )
+        return ExtractionMode.REGEX
 
+    if _is_clio_vision_importable() and _has_vision_api_key():
+        logger.info("PDF extraction: vision mode (auto-detected)")
+        return ExtractionMode.VISION
+
+    logger.info("PDF extraction: regex mode (auto-detected)")
+    return ExtractionMode.REGEX
+
+
+class DualModePDFExtractor:
+    """Portfolio-aware PDF extractor that routes between vision and regex.
+
+    Public surface (extract_holdings, detect_broker) is preserved from the
+    pre-v2.4.0 dual-mode wrapper for drop-in compatibility with InvestorClaw
+    and InvestorClaude adapters.
+    """
+
+    def __init__(
+        self,
+        model: str = DEFAULT_VISION_MODEL,
+        api_key: Optional[str] = None,
+        max_pages: int = 5,
+    ):
+        self.mode = detect_extraction_mode()
+        self.model = model
+        self.api_key = api_key
+        self.max_pages = max_pages
+        self._vision_extractor = None
+        self._regex_extractor: Optional[object] = None
+
+        if self.mode == ExtractionMode.VISION:
             try:
-                text = response.content[0].text
-                # Extract JSON from response (Claude may wrap it in markdown)
-                if "```json" in text:
-                    text = text.split("```json")[1].split("```")[0]
-                elif "```" in text:
-                    text = text.split("```")[1].split("```")[0]
+                from clio.extract.vision import VisionExtractor
 
-                data = json.loads(text)
-                if data.get("holdings"):
-                    vision_results.append(data)
-            except (json.JSONDecodeError, IndexError) as e:
-                logger.debug(f"Could not parse Claude response for page {page_num}: {e}")
+                self._vision_extractor = VisionExtractor(
+                    model=self.model, api_key=self.api_key, max_pages=self.max_pages
+                )
+            except Exception as e:  # litellm/PyMuPDF setup failures
+                logger.warning("Could not initialize clio vision extractor: %s; falling back", e)
+                self.mode = ExtractionMode.REGEX
+
+        if self.mode == ExtractionMode.REGEX:
+            try:
+                from ic_engine.services.extract_pdf import PDFExtractor
+
+                self._regex_extractor_cls = PDFExtractor
+            except ImportError as e:
+                logger.error("Could not import PDFExtractor; PDF extraction will fail: %s", e)
+                self._regex_extractor_cls = None
+
+    def extract_holdings(self, pdf_path: str) -> Tuple[List[Dict], str]:
+        """Extract portfolio holdings from a PDF statement.
+
+        Returns:
+            Tuple of (holdings_list, broker_platform). holdings_list is a list
+            of dicts with at least 'symbol' set; downstream Holding construction
+            happens in the caller.
+
+        Raises:
+            ValueError: if no holdings could be extracted.
+            RuntimeError: if no extraction method is available at all.
+        """
+        if self.mode == ExtractionMode.VISION:
+            try:
+                return self._extract_holdings_vision(pdf_path)
+            except Exception as e:
+                logger.warning("Vision extraction failed: %s; falling back to regex", e)
+                self.mode = ExtractionMode.REGEX
+
+        if self._regex_extractor_cls is None:
+            raise RuntimeError("No PDF extraction method available")
+
+        # Regex extractor requires a per-PDF construction (tracks broker detection).
+        from pathlib import Path
+
+        regex = self._regex_extractor_cls(Path(pdf_path), timeout=30)
+        result = regex.extract()
+        holdings = result.get("holdings", []) if isinstance(result, dict) else []
+        broker = regex.detected_broker or "Unknown"
+        if not holdings:
+            raise ValueError(f"No holdings extracted from {pdf_path}")
+        return (holdings, broker)
+
+    def _extract_holdings_vision(self, pdf_path: str) -> Tuple[List[Dict], str]:
+        """Extract via clio.extract.vision and aggregate to (holdings, broker)."""
+        if self._vision_extractor is None:
+            raise RuntimeError("Vision extractor not initialized")
+
+        result = self._vision_extractor.extract(
+            pdf_path, prompt=PORTFOLIO_VISION_PROMPT, schema=None
+        )
+
+        if result.error or not result.data:
+            raise ValueError(f"Vision extraction returned no data: {result.error}")
+
+        # clio aggregates per-page parses. Two shapes possible:
+        #   * Single dict (one page parsed, or list-merge degenerate case)
+        #   * List of dicts (multiple pages each returned a payload)
+        page_payloads = result.data if isinstance(result.data, list) else [result.data]
+
+        broker = "Unknown"
+        all_holdings: List[Dict] = []
+        for payload in page_payloads:
+            if not isinstance(payload, dict):
                 continue
+            if broker == "Unknown" and payload.get("broker"):
+                broker = str(payload["broker"])
+            page_holdings = payload.get("holdings") or []
+            if isinstance(page_holdings, list):
+                all_holdings.extend(h for h in page_holdings if isinstance(h, dict))
 
-        doc.close()
-
-        # Consolidate results from all pages
-        if not vision_results:
-            raise ValueError("No holdings extracted from PDF")
-
-        broker = vision_results[0].get("broker", "Unknown")
-        all_holdings = []
-
-        for result in vision_results:
-            all_holdings.extend(result.get("holdings", []))
+        if not all_holdings:
+            raise ValueError(f"No holdings extracted from {pdf_path} (vision returned empty)")
 
         return (all_holdings, broker)
 
     def detect_broker(self, pdf_path: str) -> str:
-        """Detect broker platform from PDF."""
-        if self.mode == ExtractionMode.CLAUDE_VISION:
+        """Detect broker platform from a PDF."""
+        if self.mode == ExtractionMode.VISION:
             try:
                 _, broker = self._extract_holdings_vision(pdf_path)
                 return broker
             except Exception as e:
-                logger.warning(f"Vision broker detection failed: {e}. Falling back to regex.")
+                logger.warning("Vision broker detection failed: %s; falling back", e)
                 self.mode = ExtractionMode.REGEX
 
-        if self._regex_extractor is None:
+        if self._regex_extractor_cls is None:
             raise RuntimeError("No PDF extraction method available")
 
-        return self._regex_extractor.detect_broker(pdf_path)
+        from pathlib import Path
+
+        regex = self._regex_extractor_cls(Path(pdf_path), timeout=30)
+        return regex.detected_broker or "Unknown"
 
 
-# Convenience function for drop-in replacement
 def extract_holdings(pdf_path: str) -> Tuple[List[Dict], str]:
-    """Extract holdings from PDF using appropriate method for deployment."""
+    """Convenience wrapper: instantiate a default-config extractor and extract."""
     extractor = DualModePDFExtractor()
     return extractor.extract_holdings(pdf_path)
 
 
 def detect_broker(pdf_path: str) -> str:
-    """Detect broker platform using appropriate method for deployment."""
+    """Convenience wrapper: instantiate a default-config extractor and detect."""
     extractor = DualModePDFExtractor()
     return extractor.detect_broker(pdf_path)

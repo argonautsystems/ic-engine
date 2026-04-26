@@ -29,7 +29,6 @@ if str(_skill_root) not in sys.path:
     sys.path.insert(0, str(_skill_root))
 
 import pytest
-
 from services.consultation_policy import (
     CONSULTATION_SYMBOL_LIMIT,
     get_consultation_endpoint,

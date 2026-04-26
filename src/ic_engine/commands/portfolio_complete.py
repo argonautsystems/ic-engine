@@ -29,11 +29,10 @@ _project_root = str(Path(__file__).resolve().parent.parent)
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
-from ic_engine.runtime.portfolio_arg_parser import extract_portfolio_slug, resolve_portfolio_file
-
 from ic_engine.config.path_resolver import get_reports_dir
 from ic_engine.internal.performance_timer import get_timer
 from ic_engine.internal.pipeline import PortfolioPipeline
+from ic_engine.runtime.portfolio_arg_parser import extract_portfolio_slug, resolve_portfolio_file
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
