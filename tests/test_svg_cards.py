@@ -35,7 +35,8 @@ import re
 from pathlib import Path
 
 import pytest
-from rendering.render_consultation_card import render_card
+
+from ic_engine.rendering.render_consultation_card import render_card
 
 # ---------------------------------------------------------------------------
 # Fixtures

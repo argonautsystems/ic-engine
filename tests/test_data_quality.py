@@ -37,7 +37,7 @@ import pytest
 # ---------------------------------------------------------------------------
 # WF28 / WF29: Holding.cost_basis  (bond vs equity)
 # ---------------------------------------------------------------------------
-from models.holdings import Holding
+from ic_engine.models.holdings import Holding
 
 
 def _make_holding(asset_type: str, shares: float, purchase_price: float) -> Holding:
@@ -112,7 +112,7 @@ def test_cost_basis_cash_not_divided():
 # WF30: AnalystConsensus.recommendation_mean default is None (not 2.5)
 # ---------------------------------------------------------------------------
 
-from commands.fetch_analyst_recommendations_parallel import AnalystConsensus
+from ic_engine.commands.fetch_analyst_recommendations_parallel import AnalystConsensus
 
 
 def test_analyst_consensus_recommendation_mean_defaults_none():
@@ -150,14 +150,14 @@ def test_analyst_consensus_recommendation_mean_set_explicitly():
 # WF31: Ticker normalisation (_yf_ticker)
 # ---------------------------------------------------------------------------
 
-from commands.fetch_analyst_recommendations_parallel import (
+from ic_engine.commands.fetch_analyst_recommendations_parallel import (
     ParallelAnalystFetcher,
     _extract_symbols_weighted_from_holdings,
 )
-from commands.fetch_portfolio_news import PortfolioNewsAnalyzer
+from ic_engine.commands.fetch_portfolio_news import PortfolioNewsAnalyzer
 
 try:
-    from providers.price_provider import PriceProvider
+    from ic_engine.providers.price_provider import PriceProvider
 except ModuleNotFoundError:
     PriceProvider = None
 
@@ -395,7 +395,7 @@ def test_news_dedup_same_title_normalised():
 # WF35: _backfill_holdings_summary writes ytm/duration to top_bonds
 # ---------------------------------------------------------------------------
 
-from commands.bond_analyzer import _backfill_holdings_summary
+from ic_engine.commands.bond_analyzer import _backfill_holdings_summary
 
 
 class _FakeBond:

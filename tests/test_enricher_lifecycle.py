@@ -37,7 +37,8 @@ import os
 from pathlib import Path
 
 import pytest
-from services.consultation_policy import get_enrichment_status, update_session_fingerprint
+
+from ic_engine.services.consultation_policy import get_enrichment_status, update_session_fingerprint
 
 # ---------------------------------------------------------------------------
 # Helpers

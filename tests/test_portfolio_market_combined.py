@@ -79,13 +79,14 @@ class TestMarketSectionNews:
 
     def test_news_result_has_required_fields(self):
         """ic_result + topic + headlines fields must be present."""
-        from commands.fetch_market_news import fetch_market_news
+        from ic_engine.commands.fetch_market_news import fetch_market_news
 
         with (
             patch(
-                "commands.fetch_market_news._fetch_yahoo_news", return_value=[_FAKE_NEWS_ARTICLE]
+                "ic_engine.commands.fetch_market_news._fetch_yahoo_news",
+                return_value=[_FAKE_NEWS_ARTICLE],
             ),
-            patch("commands.fetch_market_news._fetch_finnhub_news", return_value=[]),
+            patch("ic_engine.commands.fetch_market_news._fetch_finnhub_news", return_value=[]),
         ):
             result = fetch_market_news(topic="general", max_articles=5)
 
@@ -96,13 +97,14 @@ class TestMarketSectionNews:
 
     def test_news_headlines_list(self):
         """headlines must be a list (possibly empty but typed)."""
-        from commands.fetch_market_news import fetch_market_news
+        from ic_engine.commands.fetch_market_news import fetch_market_news
 
         with (
             patch(
-                "commands.fetch_market_news._fetch_yahoo_news", return_value=[_FAKE_NEWS_ARTICLE]
+                "ic_engine.commands.fetch_market_news._fetch_yahoo_news",
+                return_value=[_FAKE_NEWS_ARTICLE],
             ),
-            patch("commands.fetch_market_news._fetch_finnhub_news", return_value=[]),
+            patch("ic_engine.commands.fetch_market_news._fetch_finnhub_news", return_value=[]),
         ):
             result = fetch_market_news(topic="general")
 
@@ -110,13 +112,14 @@ class TestMarketSectionNews:
 
     def test_news_summary_structure(self):
         """summary must contain total_articles and sentiment_breakdown."""
-        from commands.fetch_market_news import fetch_market_news
+        from ic_engine.commands.fetch_market_news import fetch_market_news
 
         with (
             patch(
-                "commands.fetch_market_news._fetch_yahoo_news", return_value=[_FAKE_NEWS_ARTICLE]
+                "ic_engine.commands.fetch_market_news._fetch_yahoo_news",
+                return_value=[_FAKE_NEWS_ARTICLE],
             ),
-            patch("commands.fetch_market_news._fetch_finnhub_news", return_value=[]),
+            patch("ic_engine.commands.fetch_market_news._fetch_finnhub_news", return_value=[]),
         ):
             result = fetch_market_news(topic="general")
 

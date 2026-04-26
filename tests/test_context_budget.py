@@ -29,7 +29,8 @@ if str(_skill_root) not in sys.path:
     sys.path.insert(0, str(_skill_root))
 
 import pytest
-from models.context_budget import (
+
+from ic_engine.models.context_budget import (
     MODEL_CONTEXT_WINDOWS,
     PROVIDER_TPM_UNKNOWN,
     ModelCapability,

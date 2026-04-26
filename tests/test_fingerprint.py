@@ -35,8 +35,8 @@ _skill_root = Path(__file__).parent.parent
 if str(_skill_root) not in sys.path:
     sys.path.insert(0, str(_skill_root))
 
-from internal.tier3_enrichment import _compute_fingerprint
-from services.consultation_policy import update_session_fingerprint
+from ic_engine.internal.tier3_enrichment import _compute_fingerprint
+from ic_engine.services.consultation_policy import update_session_fingerprint
 
 _HEX_RE = re.compile(r"^[0-9a-f]+$")
 

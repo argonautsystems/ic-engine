@@ -17,7 +17,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from setup.update_checker import (
+from ic_engine.setup.update_checker import (
     RuntimeContext,
     _is_newer,
     backup_env,
@@ -114,7 +114,8 @@ class BackupEnvTests(unittest.TestCase):
 
             with tempfile.TemporaryDirectory() as backup_home:
                 with patch(
-                    "setup.update_checker.BACKUP_DIR", Path(backup_home) / ".investorclaw-backups"
+                    "ic_engine.setup.update_checker.BACKUP_DIR",
+                    Path(backup_home) / ".investorclaw-backups",
                 ):
                     result = backup_env(td_path)
 
@@ -134,7 +135,8 @@ class BackupEnvTests(unittest.TestCase):
             (td_path / ".env").write_text("SECRET=yes")
             with tempfile.TemporaryDirectory() as backup_home:
                 with patch(
-                    "setup.update_checker.BACKUP_DIR", Path(backup_home) / ".investorclaw-backups"
+                    "ic_engine.setup.update_checker.BACKUP_DIR",
+                    Path(backup_home) / ".investorclaw-backups",
                 ):
                     result = backup_env(td_path)
 

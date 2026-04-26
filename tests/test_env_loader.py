@@ -27,7 +27,7 @@ _skill_root = Path(__file__).parent.parent
 if str(_skill_root) not in sys.path:
     sys.path.insert(0, str(_skill_root))
 
-from config.env_loader import apply_env_defaults, load_env_file
+from ic_engine.config.env_loader import apply_env_defaults, load_env_file
 
 # ---------------------------------------------------------------------------
 # load_env_file — file presence

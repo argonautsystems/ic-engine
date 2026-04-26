@@ -28,7 +28,8 @@ if str(_skill_root) not in sys.path:
     sys.path.insert(0, str(_skill_root))
 
 import pytest
-from runtime.router import (
+
+from ic_engine.runtime.router import (
     _DISPATCH_SENTINEL,
     COMMANDS,
     DEFAULT_SECTIONS,

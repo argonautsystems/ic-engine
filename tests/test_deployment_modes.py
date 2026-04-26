@@ -42,8 +42,9 @@ Covers:
 from __future__ import annotations
 
 import pytest
-from config.deployment_modes import DeploymentMode, Feature, GuardrailLevel
-from config.feature_manager import FeatureManager, FeatureNotAvailableError
+
+from ic_engine.config.deployment_modes import DeploymentMode, Feature, GuardrailLevel
+from ic_engine.config.feature_manager import FeatureManager, FeatureNotAvailableError
 
 # ---------------------------------------------------------------------------
 # Fixtures

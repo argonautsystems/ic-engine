@@ -29,9 +29,10 @@ if str(_skill_root) not in sys.path:
     sys.path.insert(0, str(_skill_root))
 
 import pytest
-from config.schema import normalize_portfolio
-from config.schema_v2_pydantic import convert_cdm_to_canonical
-from models.context_budget import get_model_context_window
+
+from ic_engine.config.schema import normalize_portfolio
+from ic_engine.config.schema_v2_pydantic import convert_cdm_to_canonical
+from ic_engine.models.context_budget import get_model_context_window
 
 # ---------------------------------------------------------------------------
 # Provider-prefix stripping
