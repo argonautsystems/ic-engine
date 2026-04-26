@@ -36,6 +36,13 @@ _SKILL_ROOT = Path(__file__).parent.parent
 if str(_SKILL_ROOT) not in sys.path:
     sys.path.insert(0, str(_SKILL_ROOT))
 
+# Phase 1 of IC_DECOMPOSITION moved command scripts from <repo>/commands
+# to src/ic_engine/commands. The spec_from_file_location calls below need
+# the engine path, not the repo root.
+import ic_engine
+
+_ENGINE_COMMANDS_DIR = Path(ic_engine.__file__).resolve().parent / "commands"
+
 
 # ---------------------------------------------------------------------------
 # canonical_json helper (RFC §3.0.1)
@@ -150,7 +157,7 @@ class TestMarketSectionConcept:
 
         spec = importlib.util.spec_from_file_location(
             "concept_decline",
-            _SKILL_ROOT / "commands" / "concept_decline.py",
+            _ENGINE_COMMANDS_DIR / "concept_decline.py",
         )
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
@@ -211,7 +218,7 @@ class TestMarketSectionMarket:
 
         spec = importlib.util.spec_from_file_location(
             "concept_decline_market",
-            _SKILL_ROOT / "commands" / "concept_decline.py",
+            _ENGINE_COMMANDS_DIR / "concept_decline.py",
         )
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)

@@ -465,15 +465,14 @@ def test_maybe_narrate_updates_segment_count(
 
 def test_excluded_commands_contains_stonkmode_aliases():
     """stonkmode itself must never trigger narration."""
-    import importlib
-    import importlib.util
+    # Phase 1 of IC_DECOMPOSITION moved the CLI router from
+    # <repo>/investorclaw.py into ic_engine.cli; STONKMODE_EXCLUDED_COMMANDS
+    # is now a frozenset on the engine module. Read the engine source rather
+    # than the legacy adapter shim.
+    import ic_engine.cli as cli_module
 
-    importlib.util.spec_from_file_location(
-        "investorclaw_main",
-        _skill_root / "investorclaw.py",
-    )
-    # Just parse the source for the set literal rather than executing the module
-    src = (_skill_root / "investorclaw.py").read_text()
+    cli_path = Path(cli_module.__file__)
+    src = cli_path.read_text()
     assert "STONKMODE_EXCLUDED_COMMANDS" in src
     for alias in ("stonkmode", "stonk-mode", "stonks", "setup", "guardrails"):
         assert alias in src, f"Expected {alias!r} in STONKMODE_EXCLUDED_COMMANDS"

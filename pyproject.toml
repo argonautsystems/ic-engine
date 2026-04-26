@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ic-engine"
-version = "2.4.3"
+version = "2.4.4"
 description = "Python portfolio-analysis library powering the InvestorClaw skill ecosystem. Consumed by claws-runtime and Claude Code adapters. FINOS CDM 5.x inspired data model."
 license = { text = "Apache 2.0 Dual License" }
 requires-python = ">=3.10"
@@ -76,6 +76,22 @@ python_files = ["test_*.py"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+# Ship runtime asset bundles inside built wheels. Without this, the
+# stonkmode-avatars manifest + SVGs land in the source tree but not in
+# `pip install`/uv-installed copies, and avatar_manifest() raises
+# FileNotFoundError for installed users.
+[tool.setuptools.package-data]
+ic_engine = [
+    "assets/stonkmode-avatars/manifest.json",
+    "assets/stonkmode-avatars/*.svg",
+    "rendering/pwa/manifest.json",
+    "rendering/pwa/sw.js",
+    "rendering/pwa/*.html",
+    "rendering/pwa/*.css",
+    "rendering/pwa/*.js",
+    "rendering/pwa/assets/**/*",
+]
 
 [tool.uv]
 python-preference = "managed"
