@@ -2,6 +2,7 @@
 
 from .analyst_stage import AnalystStage
 from .bonds_stage import BondsStage
+from .cashflow_stage import CashflowStage
 from .holdings_stage import HoldingsStage
 from .news_stage import NewsStage
 from .optimization_stage import OptimizationStage
@@ -13,6 +14,7 @@ __all__ = [
     "HoldingsStage",
     "PerformanceStage",
     "BondsStage",
+    "CashflowStage",
     "AnalystStage",
     "NewsStage",
     "SynthesisStage",

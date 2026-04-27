@@ -87,9 +87,10 @@ class TestPortfolioPipeline(unittest.TestCase):
     def test_pipeline_initialization(self):
         """Test pipeline creates all stages."""
         pipeline = PortfolioPipeline()
-        self.assertEqual(len(pipeline.stages), 8)
+        self.assertEqual(len(pipeline.stages), 9)
         self.assertIn("holdings", pipeline.stages)
         self.assertIn("performance", pipeline.stages)
+        self.assertIn("cashflow", pipeline.stages)
         self.assertIn("peer", pipeline.stages)
 
     def test_pipeline_config_loading(self):

@@ -112,6 +112,26 @@ class LiteLLMConsultationClient:
 
         Retries once on empty response (1s backoff).
         """
+        return self.complete(
+            messages=[
+                {"role": "system", "content": _SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
+            timeout=timeout,
+            temperature=0.65,
+            top_p=0.9,
+            max_tokens=1200,
+        )
+
+    def complete(
+        self,
+        messages: list[dict[str, str]],
+        timeout: int = 120,
+        temperature: float = 0.0,
+        top_p: float = 0.9,
+        max_tokens: int = 1200,
+    ) -> ConsultationResult:
+        """Send explicit chat messages through the configured litellm backend."""
         t0 = time.time()
 
         for attempt in range(2):
@@ -129,15 +149,12 @@ class LiteLLMConsultationClient:
 
                 response = completion(
                     model=model_str,
-                    messages=[
-                        {"role": "system", "content": _SYSTEM_PROMPT},
-                        {"role": "user", "content": prompt},
-                    ],
+                    messages=messages,
                     api_base=api_base,
                     timeout=timeout,
-                    temperature=0.65,
-                    top_p=0.9,
-                    max_tokens=1200,
+                    temperature=temperature,
+                    top_p=top_p,
+                    max_tokens=max_tokens,
                 )
 
                 # Extract text from response

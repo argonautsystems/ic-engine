@@ -158,6 +158,8 @@ STONKMODE_EXCLUDED_COMMANDS: frozenset = frozenset(
         "update-identity",
         "update_identity",
         "identity",
+        "ask",
+        "refresh",
     }
 )
 
@@ -239,7 +241,10 @@ def main() -> int:
         _auto_prime_guardrails(SCRIPTS_DIR)
 
     # v2.2: extract --section flag before downstream arg synthesis sees it.
-    section, user_args = _extract_section_flag(list(sys.argv[2:]))
+    raw_user_args = list(sys.argv[2:])
+    if command == "refresh":
+        raw_user_args.insert(0, "--refresh-only")
+    section, user_args = _extract_section_flag(raw_user_args)
 
     script_path = resolve_script(command, SCRIPTS_DIR, section=section)
     if script_path is None:

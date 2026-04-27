@@ -21,6 +21,7 @@ if _root not in sys.path:
 from ic_engine.commands.stages import (
     AnalystStage,
     BondsStage,
+    CashflowStage,
     HoldingsStage,
     NewsStage,
     OptimizationStage,
@@ -88,6 +89,8 @@ class PortfolioPipeline:
             "synthesis": SynthesisStage(),
             # P3: Optimization
             "optimization": OptimizationStage(),
+            # P3b: Cashflow
+            "cashflow": CashflowStage(),
             # P4: Peer analysis
             "peer": PeerAnalysisStage(),
         }
@@ -399,6 +402,166 @@ class PortfolioPipeline:
                 "total_retries": self.metrics.total_retries,
                 "pipeline_duration_seconds": total_elapsed / 1000,
                 "detailed_metrics": self.metrics.to_dict(),
+            },
+        )
+
+    async def run_full(self, holdings_file: str) -> PipelineResult:
+        """
+        Execute the v2.5 deterministic-first full pipeline.
+
+        Holdings is still the prerequisite load step; every downstream
+        section then fans out concurrently so the narrator receives one
+        complete envelope instead of routing the user's question to a single
+        command.
+        """
+        start_time = time.time()
+        self.metrics = PipelineMetrics()
+        config = dict(self.config)
+        config["holdings_file"] = holdings_file
+        context = PipelineContext(
+            portfolio_data=None,
+            upstream_results={},
+            config=config,
+            cache_dir=self.cache_dir,
+        )
+
+        max_retries = config.get("max_retries", 2)
+        retry_delay = config.get("retry_delay_seconds", 1.0)
+
+        logger.info("Full pipeline: starting holdings load")
+        holdings_stage = self.stages["holdings"]
+        holdings_stage.holdings_file = holdings_file
+
+        p0_start = time.time()
+        p0_result = await self._execute_with_retry(
+            "holdings",
+            lambda: holdings_stage.execute(context),
+            max_retries=max_retries,
+            retry_delay=retry_delay,
+        )
+        p0_elapsed = (time.time() - p0_start) * 1000
+        p0_result._timing["execution_ms"] = p0_elapsed
+        self.metrics.p0_duration_ms = p0_elapsed
+        self.metrics.stage_metrics["holdings"] = {
+            "status": p0_result.status,
+            "duration_ms": p0_elapsed,
+        }
+        context.upstream_results["holdings"] = p0_result
+
+        if p0_result.status != "success":
+            self.metrics.stages_failed += 1
+            return PipelineResult(
+                stages=context.upstream_results,
+                _timing={"total_ms": (time.time() - start_time) * 1000},
+                _status="failed",
+                _metadata={
+                    "failed_stage": "holdings",
+                    "error": p0_result.error,
+                    "metrics": self.metrics.to_dict(),
+                    "full_pipeline": True,
+                },
+            )
+
+        self.metrics.stages_completed += 1
+
+        try:
+            from ic_engine.internal.holdings_loader import HoldingsLoader
+
+            context.portfolio_data = HoldingsLoader().load(holdings_file)
+        except Exception as e:
+            self.metrics.stages_failed += 1
+            return PipelineResult(
+                stages=context.upstream_results,
+                _timing={"total_ms": (time.time() - start_time) * 1000},
+                _status="failed",
+                _metadata={
+                    "failed_stage": "holdings",
+                    "error": str(e),
+                    "metrics": self.metrics.to_dict(),
+                    "full_pipeline": True,
+                },
+            )
+
+        fanout_stages = [
+            "performance",
+            "bonds",
+            "analyst",
+            "news",
+            "synthesis",
+            "optimization",
+            "cashflow",
+            "peer",
+        ]
+        fanout_start = time.time()
+
+        async def execute_full_stage(stage_name: str) -> StageResult:
+            stage = self.stages[stage_name]
+            s_start = time.time()
+            result = await self._execute_with_retry(
+                stage_name,
+                lambda: stage.execute(context),
+                max_retries=max_retries,
+                retry_delay=retry_delay,
+            )
+            s_elapsed = (time.time() - s_start) * 1000
+            result._timing["execution_ms"] = s_elapsed
+            self.metrics.stage_metrics[stage_name] = {
+                "status": result.status,
+                "duration_ms": s_elapsed,
+            }
+            return result
+
+        try:
+            results = await asyncio.wait_for(
+                asyncio.gather(*(execute_full_stage(stage_name) for stage_name in fanout_stages)),
+                timeout=config.get("parallel_timeout_seconds", 60),
+            )
+        except asyncio.TimeoutError:
+            self.metrics.stages_failed += 1
+            return PipelineResult(
+                stages=context.upstream_results,
+                _timing={"total_ms": (time.time() - start_time) * 1000},
+                _status="failed",
+                _metadata={
+                    "error": "Full pipeline sections exceeded timeout",
+                    "metrics": self.metrics.to_dict(),
+                    "full_pipeline": True,
+                },
+            )
+
+        fanout_elapsed = (time.time() - fanout_start) * 1000
+        self.metrics.p1_duration_ms = fanout_elapsed
+
+        for result in results:
+            context.upstream_results[result.stage_name] = result
+            if result.status == "success":
+                self.metrics.stages_completed += 1
+            elif result.status == "skipped":
+                self.metrics.stages_skipped += 1
+            else:
+                self.metrics.stages_failed += 1
+                logger.warning("Full pipeline stage %s failed: %s", result.stage_name, result.error)
+
+        total_elapsed = (time.time() - start_time) * 1000
+        self.metrics.total_duration_ms = total_elapsed
+
+        return PipelineResult(
+            stages=context.upstream_results,
+            _timing={
+                "p0_ms": self.metrics.p0_duration_ms,
+                "fanout_ms": fanout_elapsed,
+                "total_ms": total_elapsed,
+            },
+            _status="complete",
+            _metadata={
+                "stages_completed": self.metrics.stages_completed,
+                "stages_failed": self.metrics.stages_failed,
+                "stages_skipped": self.metrics.stages_skipped,
+                "total_retries": self.metrics.total_retries,
+                "pipeline_duration_seconds": total_elapsed / 1000,
+                "detailed_metrics": self.metrics.to_dict(),
+                "full_pipeline": True,
+                "parallel_sections": fanout_stages,
             },
         )
 
