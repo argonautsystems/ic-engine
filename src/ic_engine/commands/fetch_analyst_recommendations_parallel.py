@@ -588,13 +588,15 @@ class ParallelAnalystFetcher:
                 "total_symbols": total_requested,
                 "successful": total_successful,
                 "failed": total_failed,
-                "success_rate": f"{(total_successful / total_requested * 100):.1f}%"
-                if total_requested > 0
-                else "N/A",
+                "success_rate": (
+                    f"{(total_successful / total_requested * 100):.1f}%"
+                    if total_requested > 0
+                    else "N/A"
+                ),
                 "total_time_seconds": round(total_time / 1000, 1),
-                "avg_time_per_symbol_ms": round(total_time / total_requested, 0)
-                if total_requested > 0
-                else 0,
+                "avg_time_per_symbol_ms": (
+                    round(total_time / total_requested, 0) if total_requested > 0 else 0
+                ),
             },
             "by_tier": [asdict(m) for m in self.metrics],
             "recommendations_count": len(self.recommendations),
@@ -703,7 +705,10 @@ def _extract_symbols_weighted_from_holdings(holdings_data: Dict) -> List[Tuple[s
         if isinstance(assets, dict):
             for symbol, asset_data in assets.items():
                 if isinstance(asset_data, dict):
-                    value = asset_data.get("value", 0)
+                    value = asset_data.get(
+                        "value",
+                        asset_data.get("market_value", asset_data.get("marketValue", 0)),
+                    )
                     symbols_weighted.append((symbol, value))
 
     return symbols_weighted
@@ -821,16 +826,16 @@ if __name__ == "__main__":
                 "consensus": rec.consensus_recommendation
                 or ("No Coverage" if rec.analyst_count == 0 else "Unknown"),
                 "analyst_count": rec.analyst_count,
-                "recommendation_mean": rec.recommendation_mean
-                if rec.recommendation_mean is not None
-                else 0.0,
+                "recommendation_mean": (
+                    rec.recommendation_mean if rec.recommendation_mean is not None else 0.0
+                ),
                 "current_price": rec.current_price,
                 "buy_count": rec.buy_count,
                 "hold_count": rec.hold_count,
                 "sell_count": rec.sell_count,
-                "target_price_mean": rec.target_price_mean
-                if rec.target_price_mean is not None
-                else 0.0,
+                "target_price_mean": (
+                    rec.target_price_mean if rec.target_price_mean is not None else 0.0
+                ),
                 "data_source": rec.data_source,
             }
             for symbol, rec in recommendations.items()

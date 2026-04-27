@@ -40,6 +40,8 @@ from __future__ import annotations
 import html
 from typing import Any, Dict, List, Optional
 
+from ic_engine.services.summary_utils import extract_summary_block, normalize_summary_fields
+
 
 def _esc(value: Any) -> str:
     """HTML-escape a value for safe interpolation into email markup."""
@@ -110,6 +112,18 @@ def _sign_color(v: float) -> str:
 def _signed(v: float, decimals: int = 1) -> str:
     sign = "+" if v > 0 else ""
     return f"{sign}{v:.{decimals}%}"
+
+
+def _portfolio_summary(holdings: dict) -> Dict[str, Any]:
+    return normalize_summary_fields(extract_summary_block(holdings))
+
+
+def _first_number(mapping: dict, *keys: str, default: float = 0.0) -> float:
+    for key in keys:
+        value = mapping.get(key)
+        if value is not None:
+            return float(value or 0)
+    return default
 
 
 def _priority_color(p: str) -> str:
@@ -211,7 +225,7 @@ def _render_header(date: str, total_value: float) -> str:
 
 
 def _render_portfolio_summary(holdings: dict) -> str:
-    raw = holdings.get("summary") or holdings.get("data", {}).get("summary", {})
+    raw = _portfolio_summary(holdings)
     total = float(raw.get("total_value", 0))
     net = float(raw.get("net_value", total))
     equity = float(raw.get("equity_value", 0))
@@ -270,7 +284,7 @@ def _render_portfolio_summary(holdings: dict) -> str:
 
 
 def _render_top_holdings(holdings: dict, analyst_data: Optional[dict]) -> str:
-    top_equity: List[dict] = holdings.get("top_equity", [])
+    top_equity: List[dict] = holdings.get("top_equity") or holdings.get("top_holdings", [])
     if not top_equity:
         return ""
 
@@ -290,9 +304,21 @@ def _render_top_holdings(holdings: dict, analyst_data: Optional[dict]) -> str:
     for pos in top_equity[:10]:
         sym = pos.get("symbol", "")
         sector = pos.get("sector", "—")
-        value = float(pos.get("value", 0))
-        weight = float(pos.get("weight_pct", 0))
-        gl_pct = float(pos.get("gl_pct", 0)) / 100.0
+        value = _first_number(pos, "value", "market_value", "marketValue")
+        weight = _first_number(pos, "weight_pct")
+        if weight == 0:
+            total = float(_portfolio_summary(holdings).get("total_value", 0) or 0)
+            weight = value / total * 100 if total else 0
+        gl_pct = (
+            _first_number(
+                pos,
+                "gl_pct",
+                "unrealized_gain_loss_pct",
+                "unrealizedGainLossPct",
+                "unrealizedPct",
+            )
+            / 100.0
+        )
 
         rec = recs.get(sym, {})
         consensus = rec.get("consensus", "—") if rec else "—"
@@ -311,9 +337,7 @@ def _render_top_holdings(holdings: dict, analyst_data: Optional[dict]) -> str:
         consensus_color = (
             _C_POSITIVE
             if consensus_lower in ("buy", "strong buy")
-            else _C_NEGATIVE
-            if consensus_lower in ("sell", "strong sell")
-            else _C_NEUTRAL
+            else _C_NEGATIVE if consensus_lower in ("sell", "strong sell") else _C_NEUTRAL
         )
 
         rows.append(f"""<tr>
@@ -382,9 +406,7 @@ def _render_news_summary(news: dict) -> str:
     posture_color = (
         _C_POSITIVE
         if posture.lower() in ("bullish", "positive")
-        else _C_NEGATIVE
-        if posture.lower() in ("bearish", "negative", "cautious")
-        else _C_NEUTRAL
+        else _C_NEGATIVE if posture.lower() in ("bearish", "negative", "cautious") else _C_NEUTRAL
     )
 
     posture_badge = (
@@ -735,7 +757,7 @@ def render_eod_email(report_data: Dict[str, Any]) -> str:
     fa_topics = report_data.get("fa_topics", [])
     run_duration_s = float(report_data.get("run_duration_s", 0))
 
-    raw = holdings.get("summary") or holdings.get("data", {}).get("summary", {})
+    raw = _portfolio_summary(holdings)
     total_value = float(raw.get("total_value", 0))
 
     body_parts = [

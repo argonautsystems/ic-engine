@@ -156,6 +156,9 @@ def normalize_portfolio(data: Dict[str, Any]) -> Dict[str, Any]:
             if alias in portfolio and isinstance(portfolio[alias], dict):
                 normalized[canonical].update(portfolio[alias])
 
+    if isinstance(portfolio.get("summary"), dict):
+        normalized["summary"] = portfolio["summary"]
+
     return {**data, "portfolio": normalized}
 
 

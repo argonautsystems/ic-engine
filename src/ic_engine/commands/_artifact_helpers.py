@@ -43,6 +43,7 @@ from ic_engine.rendering.artifact_generator import (
     extract_dr_stonk_definitions,
     get_stonkmode_narrative,
 )
+from ic_engine.services.summary_utils import extract_summary_block, normalize_summary_fields
 
 # ---------------------------------------------------------------------------
 # Shared: attach stonkmode narrative + Dr. Stonk box if requested
@@ -93,7 +94,7 @@ def build_holdings_artifact(
     stonkmode: bool = False,
 ) -> str:
     """Render holdings-command artifact and return the output path."""
-    summary = compact.get("summary", {}) or {}
+    summary = normalize_summary_fields(extract_summary_block(compact))
     total_value = summary.get("total_value", 0) or 0
     metadata = {
         "As of": compact.get("as_of", "unknown"),
@@ -158,15 +159,34 @@ def build_holdings_artifact(
         )
 
     # Top holdings table
-    top_equity = compact.get("top_equity", []) or []
+    top_equity = compact.get("top_equity") or compact.get("top_holdings", []) or []
     if top_equity:
+
+        def _top_value(h: Dict[str, Any]) -> float:
+            return h.get("value", h.get("market_value", h.get("marketValue", 0))) or 0
+
+        def _top_weight(h: Dict[str, Any]) -> float:
+            return h.get("weight_pct", h.get("pct", 0)) or 0
+
+        def _top_gl(h: Dict[str, Any]) -> float:
+            return (
+                h.get(
+                    "gl_pct",
+                    h.get(
+                        "unrealized_gain_loss_pct",
+                        h.get("unrealizedGainLossPct", h.get("unrealizedPct", 0)),
+                    ),
+                )
+                or 0
+            )
+
         rows = [
             {
                 "Symbol": h.get("symbol", ""),
                 "Sector": h.get("sector", ""),
-                "Value": f"${h.get('value', 0):,.2f}",
-                "Weight": f"{h.get('weight_pct', 0):.2f}%",
-                "G/L": f"{h.get('gl_pct', 0):+.2f}%",
+                "Value": f"${_top_value(h):,.2f}",
+                "Weight": f"{_top_weight(h):.2f}%",
+                "G/L": f"{_top_gl(h):+.2f}%",
                 "Type": h.get("type", "equity"),
             }
             for h in top_equity
@@ -207,9 +227,21 @@ def build_holdings_artifact(
         "TOP 10 HOLDINGS:",
     ]
     for i, h in enumerate(top10, 1):
+        h_value = h.get("value", h.get("market_value", h.get("marketValue", 0))) or 0
+        h_weight = h.get("weight_pct", h.get("pct", 0)) or 0
+        h_gl = (
+            h.get(
+                "gl_pct",
+                h.get(
+                    "unrealized_gain_loss_pct",
+                    h.get("unrealizedGainLossPct", h.get("unrealizedPct", 0)),
+                ),
+            )
+            or 0
+        )
         summary_lines.append(
-            f"  {i}. {h.get('symbol')}: ${h.get('value', 0):,.0f} "
-            f"({h.get('weight_pct', 0):.1f}%, G/L {h.get('gl_pct', 0):+.1f}%) - {h.get('sector', '')}"
+            f"  {i}. {h.get('symbol')}: ${h_value:,.0f} "
+            f"({h_weight:.1f}%, G/L {h_gl:+.1f}%) - {h.get('sector', '')}"
         )
     data_summary = "\n".join(summary_lines)
     text_for_terms = data_summary  # may pick up "Volatility"/"Sharpe"/etc. in future

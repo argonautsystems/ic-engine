@@ -65,6 +65,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from ic_engine.services.summary_utils import extract_summary_block, normalize_summary_fields
+
 
 def _validate_http_url(url: str) -> str:
     """Return url if scheme is http/https; raise ValueError otherwise."""
@@ -357,17 +359,17 @@ def _load_json(path: Path) -> Optional[dict]:
 def _summarize_holdings(data: dict) -> str:
     """Summarize holdings compact output for narration."""
     d = data.get("data", data)
-    summary = d.get("summary", {})
+    summary = normalize_summary_fields(extract_summary_block(d))
     total_val = summary.get("total_value", 0)
     equity_val = summary.get("equity_value", 0)
     bond_val = summary.get("bond_value", 0)
     cash_val = summary.get("cash_value", 0)
     gl_pct = summary.get("unrealized_gl_pct", 0)
     positions = summary.get("position_count", {})
-    equity_count = positions.get("equity", 0)
-    bond_count = positions.get("bond", 0)
+    equity_count = positions.get("equity", 0) if isinstance(positions, dict) else 0
+    bond_count = positions.get("bond", 0) if isinstance(positions, dict) else 0
 
-    top_equity = d.get("top_equity", [])[:10]
+    top_equity = (d.get("top_equity") or d.get("top_holdings", []))[:10]
     sectors = d.get("sector_weights", {})
 
     lines = [
@@ -381,9 +383,18 @@ def _summarize_holdings(data: dict) -> str:
     ]
     for h in top_equity:
         sym = h.get("symbol", "???")
-        val = h.get("value", 0)
-        wt = h.get("weight_pct", 0)
-        gl = h.get("gl_pct", 0)
+        val = h.get("value", h.get("market_value", h.get("marketValue", 0))) or 0
+        wt = h.get("weight_pct", h.get("pct", 0)) or 0
+        gl = (
+            h.get(
+                "gl_pct",
+                h.get(
+                    "unrealized_gain_loss_pct",
+                    h.get("unrealizedGainLossPct", h.get("unrealizedPct", 0)),
+                ),
+            )
+            or 0
+        )
         lines.append(f"  {sym}: ${val:,.0f} ({wt:.1f}%, G/L {gl:+.1f}%)")
 
     if sectors:
@@ -527,7 +538,7 @@ def _summarize_with_top10(data: dict, label: str = "PORTFOLIO") -> str:
     Relies on top_equity being injected by summarize_for_narration from holdings.json.
     """
     # Top-level summary figures (from injected _holdings_summary or portfolio_summary)
-    hs = data.get("_holdings_summary", data.get("portfolio_summary", {}))
+    hs = normalize_summary_fields(data.get("_holdings_summary", data.get("portfolio_summary", {})))
     total_val = hs.get("total_value", 0)
     equity_val = hs.get("equity_value", 0)
     gl_pct = hs.get("unrealized_gl_pct", 0)
@@ -552,14 +563,23 @@ def _summarize_with_top10(data: dict, label: str = "PORTFOLIO") -> str:
     ]
 
     # Top-10 holdings with full detail — the core data for running commentary
-    top_equity = data.get("top_equity", [])
+    top_equity = data.get("top_equity") or data.get("top_holdings", [])
     if top_equity:
         lines.append("TOP 10 HOLDINGS (comment on EACH one by name):")
         for i, h in enumerate(top_equity[:10], 1):
             sym = h.get("symbol", "???")
-            val = h.get("value", 0)
-            wt = h.get("weight_pct", 0)
-            gl = h.get("gl_pct", 0)
+            val = h.get("value", h.get("market_value", h.get("marketValue", 0))) or 0
+            wt = h.get("weight_pct", h.get("pct", 0)) or 0
+            gl = (
+                h.get(
+                    "gl_pct",
+                    h.get(
+                        "unrealized_gain_loss_pct",
+                        h.get("unrealizedGainLossPct", h.get("unrealizedPct", 0)),
+                    ),
+                )
+                or 0
+            )
             sec = h.get("sector", "")
             htype = h.get("type", "")
             tag = f" [{htype.upper()}]" if htype and htype != "equity" else ""
@@ -1638,15 +1658,17 @@ def maybe_narrate(command: str, skill_dir: Path) -> None:
                     },
                     "model": f"{model}@{endpoint}",
                     "inference_ms": inference_ms,
-                    "dr_stonk": {
-                        "enabled": is_dr_stonk_enabled(),
-                        "terms_explained": sorted(terms_in_narration)
-                        if is_dr_stonk_enabled()
-                        else [],
-                        "box": dr_stonk_box,
-                    }
-                    if is_dr_stonk_enabled() and terms_in_narration
-                    else None,
+                    "dr_stonk": (
+                        {
+                            "enabled": is_dr_stonk_enabled(),
+                            "terms_explained": (
+                                sorted(terms_in_narration) if is_dr_stonk_enabled() else []
+                            ),
+                            "box": dr_stonk_box,
+                        }
+                        if is_dr_stonk_enabled() and terms_in_narration
+                        else None
+                    ),
                 }
             }
         )

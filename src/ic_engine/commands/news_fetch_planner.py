@@ -301,22 +301,54 @@ class NewsFetchPlanner:
         # Build symbol → {value, asset_type} dict from whichever schema is present
         holdings: Dict[str, dict] = {}
 
+        try:
+            from ic_engine.internal.holdings_loader import HoldingsLoader
+
+            portfolio = HoldingsLoader().load_from_dict(data)
+            for pos in portfolio.positions:
+                value = pos.market_value
+                if value is None and pos.shares is not None and pos.current_price is not None:
+                    value = float(pos.shares) * float(pos.current_price)
+                if pos.symbol:
+                    asset_type = pos.asset_class
+                    if isinstance(pos.raw, dict):
+                        asset_type = (
+                            pos.raw.get("asset_type") or pos.raw.get("assetType") or asset_type
+                        )
+                    if pos.symbol in holdings:
+                        holdings[pos.symbol]["value"] += float(value or 0)
+                    else:
+                        holdings[pos.symbol] = {
+                            "value": float(value or 0),
+                            "asset_type": asset_type,
+                        }
+            if holdings:
+                return cls.make_plan(holdings, model_id)
+        except Exception:
+            holdings = {}
+
         if "holdings" in data:
             for h in data["holdings"]:
                 sym = h.get("symbol", "").strip()
                 if sym:
                     holdings[sym] = {
-                        "value": float(h.get("value", 0) or 0),
+                        "value": float(
+                            h.get("value", h.get("market_value", h.get("marketValue", 0))) or 0
+                        ),
                         "asset_type": h.get("asset_type", "equity"),
                     }
         elif "portfolio" in data:
             for asset_type, assets in data["portfolio"].items():
                 if isinstance(assets, dict):
                     for sym, asset_data in assets.items():
+                        value = 0
+                        if isinstance(asset_data, dict):
+                            value = asset_data.get(
+                                "value",
+                                asset_data.get("market_value", asset_data.get("marketValue", 0)),
+                            )
                         holdings[sym] = {
-                            "value": float(
-                                asset_data.get("value", 0) if isinstance(asset_data, dict) else 0
-                            ),
+                            "value": float(value or 0),
                             "asset_type": asset_type,
                         }
 

@@ -49,38 +49,98 @@ class ReportExporter:
         self.holdings_data = {}
         self.performance_data = {}
 
+    @staticmethod
+    def _holding_value(holding: dict) -> float:
+        value = holding.get("value")
+        if value is not None:
+            return value
+        market_value = holding.get("market_value")
+        if market_value is not None:
+            return market_value
+        return holding.get("marketValue", 0)
+
+    @staticmethod
+    def _holding_quantity(holding: dict) -> float:
+        quantity = holding.get("quantity")
+        if quantity is not None:
+            return quantity
+        shares = holding.get("shares")
+        if shares is not None:
+            return shares
+        return holding.get("par_value", 0)
+
+    @staticmethod
+    def _holding_amount(holding: dict) -> float:
+        amount = holding.get("amount")
+        if amount is not None:
+            return amount
+        shares = holding.get("shares")
+        if shares is not None:
+            return shares
+        return holding.get("market_value", 0)
+
+    @staticmethod
+    def _holding_unrealized_pct(holding: dict) -> float:
+        unrealized_pct = holding.get("unrealized_pct")
+        if unrealized_pct is not None:
+            return unrealized_pct
+        unrealized_gain_loss_pct = holding.get("unrealized_gain_loss_pct")
+        if unrealized_gain_loss_pct is not None:
+            return unrealized_gain_loss_pct
+        unrealized_gain_loss_pct = holding.get("unrealizedGainLossPct")
+        if unrealized_gain_loss_pct is not None:
+            return unrealized_gain_loss_pct
+        return holding.get("unrealizedPct", 0)
+
+    @staticmethod
+    def _summary_value(summary: dict, *keys: str, default: float = 0.0) -> float:
+        for key in keys:
+            value = summary.get(key)
+            if value is not None:
+                return value
+        return default
+
+    @classmethod
+    def _summary_to_snake(cls, summary: dict) -> dict:
+        total_value = cls._summary_value(
+            summary,
+            "total_portfolio_value",
+            "total_value",
+            "totalPortfolioValue",
+        )
+        net_worth = cls._summary_value(
+            summary,
+            "net_worth",
+            "net_value",
+            "netValue",
+            default=total_value,
+        )
+        return {
+            "equity_value": cls._summary_value(summary, "equity_value", "equityValue"),
+            "bond_value": cls._summary_value(summary, "bond_value", "bondValue"),
+            "cash_value": cls._summary_value(summary, "cash_value", "cashValue"),
+            "margin_value": cls._summary_value(summary, "margin_value", "marginValue"),
+            "total_portfolio_value": total_value,
+            "net_worth": net_worth,
+            "total_unrealized_gain_loss": cls._summary_value(
+                summary,
+                "total_unrealized_gain_loss",
+                "unrealized_gl",
+                "totalUnrealizedGainLoss",
+            ),
+        }
+
     def _get_summary(self) -> dict:
-        """Return summary dict in snake_case, handling both legacy and CDM formats."""
-        # CDM format: holdings_data['portfolio']['summary'] with camelCase keys
+        """Return summary dict in snake_case, handling legacy and CDM formats."""
         cdm_summary = self.holdings_data.get("portfolio", {}).get("summary", {})
         if cdm_summary:
-            return {
-                "equity_value": cdm_summary.get("equityValue", 0.0),
-                "bond_value": cdm_summary.get("bondValue", 0.0),
-                "cash_value": cdm_summary.get("cashValue", 0.0),
-                "margin_value": cdm_summary.get("marginValue", 0.0),
-                "total_portfolio_value": cdm_summary.get("totalPortfolioValue", 0.0),
-                "net_worth": cdm_summary.get("totalPortfolioValue", 0.0),
-                "total_unrealized_gain_loss": cdm_summary.get("totalUnrealizedGainLoss", 0.0),
-            }
-        # Compact format: holdings_data['summary'] with snake_case keys
+            return self._summary_to_snake(cdm_summary)
+
         compact = self.holdings_data.get("summary", {})
         if compact:
-            return {
-                "equity_value": compact.get("equity_value", compact.get("equityValue", 0.0)),
-                "bond_value": compact.get("bond_value", compact.get("bondValue", 0.0)),
-                "cash_value": compact.get("cash_value", compact.get("cashValue", 0.0)),
-                "margin_value": compact.get("margin_value", compact.get("marginValue", 0.0)),
-                "total_portfolio_value": compact.get(
-                    "total_value", compact.get("totalPortfolioValue", 0.0)
-                ),
-                "net_worth": compact.get("net_value", compact.get("totalPortfolioValue", 0.0)),
-                "total_unrealized_gain_loss": compact.get(
-                    "unrealized_gl", compact.get("totalUnrealizedGainLoss", 0.0)
-                ),
-            }
-        # Fallback to nested format
-        return {}
+            return self._summary_to_snake(compact)
+
+        return self._summary_to_snake({})
 
     def load_data(self, holdings_file: str, performance_file: Optional[str] = None) -> None:
         """Load holdings and performance data."""
@@ -134,9 +194,9 @@ class ReportExporter:
                     "Purchase Price": holding.get("purchase_price", 0),
                     "Purchase Date": holding.get("purchase_date", "N/A"),
                     "Current Price": holding.get("current_price", 0),
-                    "Current Value": holding.get("value", 0),
+                    "Current Value": self._holding_value(holding),
                     "Unrealized G/L": holding.get("unrealized_gain_loss", 0),
-                    "Unrealized %": holding.get("unrealized_pct", 0),
+                    "Unrealized %": self._holding_unrealized_pct(holding),
                     "Sector": holding.get("sector", "Unknown"),
                     "Total Return %": perf.get("total_return_pct", 0),
                     "YTD Return %": perf.get("ytd_return_pct", 0),
@@ -162,13 +222,13 @@ class ReportExporter:
                 {
                     "Asset Type": "Bond",
                     "Symbol": sym,
-                    "Quantity": holding.get("quantity", 0),
+                    "Quantity": self._holding_quantity(holding),
                     "Purchase Price": holding.get("purchase_price", 0),
                     "Purchase Date": holding.get("purchase_date", "N/A"),
                     "Current Price": holding.get("current_price", 0),
-                    "Current Value": holding.get("value", 0),
+                    "Current Value": self._holding_value(holding),
                     "Unrealized G/L": holding.get("unrealized_gain_loss", 0),
-                    "Unrealized %": holding.get("unrealized_pct", 0),
+                    "Unrealized %": self._holding_unrealized_pct(holding),
                     "Coupon Rate %": holding.get("coupon_rate", 0),
                     "Maturity Date": holding.get("maturity_date", "N/A"),
                     "YTM %": holding.get("ytm", "N/A"),
@@ -189,9 +249,9 @@ class ReportExporter:
                 {
                     "Asset Type": "Cash",
                     "Account Name": sym,
-                    "Amount": holding.get("amount", 0),
+                    "Amount": self._holding_amount(holding),
                     "Interest Rate %": holding.get("interest_rate", 0) * 100,
-                    "Current Value": holding.get("value", 0),
+                    "Current Value": self._holding_value(holding),
                 }
             )
 

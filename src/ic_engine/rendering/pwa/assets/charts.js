@@ -44,12 +44,16 @@ const Charts = {
      * Render sector breakdown pie chart
      */
     renderSectorBreakdown(holdings) {
-        if (!holdings.sector_breakdown) {
+        const sectors = holdings.sector_breakdown || holdings.sector_weights;
+        if (!sectors) {
             return;
         }
 
-        const labels = Object.keys(holdings.sector_breakdown);
-        const values = Object.values(holdings.sector_breakdown).map(s => s.weight || 0);
+        const labels = Object.keys(sectors);
+        const values = Object.values(sectors).map(s => {
+            if (s && typeof s === 'object') return s.weight || s.value || 0;
+            return s || 0;
+        });
 
         const data = [{
             labels,
@@ -125,13 +129,16 @@ const Charts = {
         let html = '<h3>Top Equity Positions</h3><table class="data-table"><thead><tr><th>Symbol</th><th>Value</th><th>Weight</th><th>Return</th></tr></thead><tbody>';
 
         for (const equity of holdings.top_equity.slice(0, 10)) {
-            const weight = ((equity.market_value / holdings.summary.total_value) * 100).toFixed(2);
-            const returnColor = (equity.unrealized_gain >= 0) ? 'success' : 'negative';
-            const returnValue = equity.unrealized_gain || 0;
+            const value = equity.value ?? equity.market_value ?? equity.marketValue ?? 0;
+            const totalValue = holdings.summary?.total_value ?? holdings.summary?.totalPortfolioValue ?? 0;
+            const weightValue = equity.weight_pct ?? equity.pct ?? (totalValue ? value / totalValue * 100 : 0);
+            const weight = Number(weightValue || 0).toFixed(2);
+            const returnValue = Number(equity.gl_pct ?? equity.unrealized_gain_loss_pct ?? equity.unrealizedGainLossPct ?? equity.unrealizedPct ?? 0);
+            const returnColor = (returnValue >= 0) ? 'success' : 'negative';
 
             html += `<tr>
                 <td>${equity.symbol}</td>
-                <td>$${(equity.market_value || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })}</td>
+                <td>$${(value || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })}</td>
                 <td>${weight}%</td>
                 <td class="${returnColor}">${returnValue.toFixed(2)}%</td>
             </tr>`;

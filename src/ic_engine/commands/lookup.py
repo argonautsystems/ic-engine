@@ -103,6 +103,32 @@ def _filter_fields(record: dict, fields: list[str] | None) -> dict:
     return {k: v for k, v in record.items() if k in fields}
 
 
+def _position_identifier(pos: dict) -> str:
+    product = pos.get("product", {}) if isinstance(pos, dict) else {}
+    asset = pos.get("asset", {}) if isinstance(pos, dict) else {}
+    ident = product.get("productIdentifier") or product.get("product_identifier") or {}
+    if not isinstance(ident, dict):
+        ident = {}
+    asset_ident = asset.get("productIdentifier") or asset.get("product_identifier") or {}
+    if not isinstance(asset_ident, dict):
+        asset_ident = {}
+    return str(
+        ident.get("identifier")
+        or asset_ident.get("identifier")
+        or pos.get("symbol")
+        or pos.get("ticker")
+        or ""
+    )
+
+
+def _holding_value(holding: dict) -> float:
+    for key in ("value", "market_value", "marketValue"):
+        value = holding.get(key)
+        if value is not None:
+            return value
+    return 0.0
+
+
 # ---------------------------------------------------------------------------
 # Query handlers
 # ---------------------------------------------------------------------------
@@ -119,9 +145,27 @@ def query_holdings_symbol(reports_dir: Path, symbol: str, fields: list[str] | No
     sym_upper = symbol.upper()
 
     for pos in positions:
-        ident = pos.get("product", {}).get("productIdentifier", {})
-        if ident.get("identifier", "").upper() == sym_upper:
+        if _position_identifier(pos).upper() == sym_upper:
             matches.append(pos)
+
+    if not matches:
+        portfolio = cdm.get("portfolio", {}) if isinstance(cdm, dict) else {}
+        for asset_class in ("equity", "bond", "cash", "margin", "crypto", "futures", "metals"):
+            bucket = portfolio.get(asset_class, {})
+            if not isinstance(bucket, dict):
+                continue
+            for sym, holding in bucket.items():
+                if str(sym).upper() != sym_upper or not isinstance(holding, dict):
+                    continue
+                matches.append(
+                    {
+                        "symbol": sym,
+                        "asset_class": asset_class,
+                        "asset_type": asset_class,
+                        **holding,
+                        "value": _holding_value(holding),
+                    }
+                )
 
     if not matches:
         print(json.dumps({"error": f"Symbol '{symbol}' not found in holdings."}))
