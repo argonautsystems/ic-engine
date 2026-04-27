@@ -51,6 +51,7 @@ from ic_engine.commands.analyze_performance_polars import PerformanceAnalyzer
 from ic_engine.commands.export_report import ReportExporter
 from ic_engine.config.path_resolver import get_reports_dir, secure_file_permissions
 from ic_engine.config.schema import normalize_portfolio, validate_portfolio
+from ic_engine.runtime.full_run import run_full as _runtime_run_full
 from ic_engine.services.portfolio_utils import load_holdings_list
 
 _CDM_SUMMARY_FIELD_MAP = {
@@ -97,6 +98,11 @@ _CDM_SUMMARY_PERCENT_VALUE_KEYS = {
 
 _PIPELINE_SUMMARY_SOURCE_KEY = "_pipeline_source"
 _COMPACT_SUMMARY_BUCKETS = ("equity", "bond", "cash", "margin", "crypto", "futures", "metals")
+
+
+def run_full(holdings_file: str, **kwargs):
+    """v2.5 signed-envelope pipeline entry point, exposed from the legacy module."""
+    return _runtime_run_full(holdings_file, **kwargs)
 
 
 def _file_sha256(path: Path) -> str:

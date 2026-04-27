@@ -215,6 +215,8 @@ COMMANDS: dict = {
     "market-wide": "concept_decline.py",
     # v2.2 market-news entry (portfolio_market --section=news --topic=X)
     "market-news": "fetch_market_news.py",
+    "ask": "ask.py",
+    "refresh": "ask.py",
 }
 
 # Commands that should NOT trigger guardrail auto-priming (saves ~80 tokens/call)
@@ -274,6 +276,8 @@ NON_ANALYSIS_COMMANDS: frozenset = frozenset(
         "market",
         "macro",
         "market-wide",
+        "ask",
+        "refresh",
     }
 )
 
