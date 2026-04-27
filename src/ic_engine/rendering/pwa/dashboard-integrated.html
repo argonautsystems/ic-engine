@@ -823,14 +823,20 @@
             }
 
             renderHoldings(data) {
-                const holdings = data.positions || [];
+                const holdings = data.positions || data.top_equity || data.top_holdings || [];
                 const summary = data.summary || {};
+                const totalValue = summary.total_value ?? summary.totalPortfolioValue ?? 0;
+                const cashPct = summary.cash_pct ?? summary.cashPct ?? 0;
+                const allocationPctToRatio = (value) => Number(value || 0) / 100;
+                const holdingValue = (h) => h.market_value ?? h.marketValue ?? h.value ?? 0;
+                const holdingQuantity = (h) => h.quantity ?? h.shares ?? h.amount ?? 0;
+                const holdingPrice = (h) => h.price ?? h.current_price ?? h.currentPrice ?? 0;
 
                 // Metrics
                 const metricsHtml = `
                     <div class="metric-card">
                         <div class="metric-label">Total Value</div>
-                        <div class="metric-value">$${this.formatNumber(summary.total_value || 0)}</div>
+                        <div class="metric-value">$${this.formatNumber(totalValue)}</div>
                     </div>
                     <div class="metric-card">
                         <div class="metric-label">Holdings</div>
@@ -838,7 +844,7 @@
                     </div>
                     <div class="metric-card">
                         <div class="metric-label">Cash %</div>
-                        <div class="metric-value">${this.formatPercent(summary.cash_pct || 0)}</div>
+                        <div class="metric-value">${this.formatPercent(allocationPctToRatio(cashPct))}</div>
                     </div>
                 `;
                 document.getElementById('holdings-metrics').innerHTML = metricsHtml;
@@ -846,7 +852,7 @@
                 // Chart
                 if (holdings.length > 0) {
                     const symbols = holdings.map(h => h.symbol);
-                    const values = holdings.map(h => h.market_value || 0);
+                    const values = holdings.map(h => holdingValue(h));
                     Plotly.newPlot('asset-allocation-chart', [{
                         labels: symbols,
                         values: values,
@@ -864,10 +870,10 @@
                 tbody.innerHTML = holdings.slice(0, 10).map(h => `
                     <tr>
                         <td>${h.symbol}</td>
-                        <td>${this.formatNumber(h.quantity || 0)}</td>
-                        <td>$${this.formatNumber(h.price || 0)}</td>
-                        <td>$${this.formatNumber(h.market_value || 0)}</td>
-                        <td>${this.formatPercent((h.market_value / summary.total_value || 0))}</td>
+                        <td>${this.formatNumber(holdingQuantity(h))}</td>
+                        <td>$${this.formatNumber(holdingPrice(h))}</td>
+                        <td>$${this.formatNumber(holdingValue(h))}</td>
+                        <td>${this.formatPercent(totalValue ? holdingValue(h) / totalValue : 0)}</td>
                     </tr>
                 `).join('');
             }
@@ -1064,6 +1070,7 @@
             formatPercent(num) {
                 return new Intl.NumberFormat('en-US', {
                     style: 'percent',
+                    minimumFractionDigits: 2,
                     maximumFractionDigits: 2
                 }).format(num);
             }

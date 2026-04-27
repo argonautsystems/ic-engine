@@ -161,7 +161,7 @@ class Position:
     """
 
     symbol: str
-    asset_class: str = "equity"  # 'equity' | 'bond' | 'cash' | 'derivative' | 'other'
+    asset_class: str = "equity"  # equity | bond | cash | crypto | futures | metals
     security_type: Optional[str] = None  # CDM securityType as reported by the envelope
     sector: Optional[str] = None
 
@@ -745,9 +745,15 @@ class HoldingsLoader:
             or "fixed" in haystack
         ):
             return "bond"
+        if "crypto" in haystack or "cryptocurrency" in haystack:
+            return "crypto"
+        if "future" in haystack:
+            return "futures"
+        if "commodity" in haystack or "metal" in haystack:
+            return "metals"
         if "equity" in haystack or "stock" in haystack or "etf" in haystack or "fund" in haystack:
             return "equity"
-        if "option" in haystack or "future" in haystack or "derivative" in haystack:
+        if "option" in haystack or "derivative" in haystack:
             return "derivative"
         # Fall back to symbol-based heuristic
         return infer_asset_class(symbol)

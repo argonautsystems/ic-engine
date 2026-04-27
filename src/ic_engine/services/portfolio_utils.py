@@ -39,6 +39,11 @@ if str(_skill_dir) not in sys.path:
 # Import Holding for CDM-compatible interface
 from ic_engine.internal.holdings_loader import HoldingsLoader
 from ic_engine.models.holdings import Holding
+from ic_engine.services.summary_utils import (  # noqa: F401  re-exported for back-compat
+    SUMMARY_FIELD_ALIASES,
+    extract_summary_block,
+    normalize_summary_fields,
+)
 
 logger = logging.getLogger(__name__)
 

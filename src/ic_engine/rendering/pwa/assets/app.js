@@ -177,25 +177,36 @@ const IC = {
   renderHoldings() {
     const data = this.data.holdings;
     const summary = data?.summary || {};
-    const holdings = data?.top_holdings || [];
-    const sectors = data?.sector_weights || {};
+    const holdings = data?.top_holdings || data?.top_equity || data?.positions || [];
+    const sectors = data?.sector_weights || data?.sector_breakdown || {};
+    const totalValue = summary.total_value ?? summary.totalPortfolioValue ?? 0;
+    const positionCountRaw = summary.position_count ?? summary.asset_count ?? summary.assetCount;
+    const positionCount = positionCountRaw && typeof positionCountRaw === 'object'
+      ? Object.values(positionCountRaw).reduce((sum, count) => sum + Number(count || 0), 0)
+      : (positionCountRaw ?? holdings.length);
+    const holdingValue = h => h.value ?? h.market_value ?? h.marketValue ?? 0;
+    const weightPct = h => {
+      const explicit = h.weight_pct ?? h.pct;
+      if (explicit !== undefined && explicit !== null) return Number(explicit);
+      return totalValue ? holdingValue(h) / totalValue * 100 : 0;
+    };
 
     const summaryHtml = `
       <div class="section-header">
         <h2>Portfolio Holdings</h2>
         <div class="navbar-status">
-          <div class="total-value">Total: $${this._fmt(summary.total_value)}</div>
+          <div class="total-value">Total: $${this._fmt(totalValue)}</div>
           <div class="last-update">As of ${summary.as_of || 'N/A'}</div>
         </div>
       </div>
       <div class="holdings-summary">
         <div class="summary-card">
           <div class="card-label">Total Value</div>
-          <div class="card-value">$${this._fmt(summary.total_value)}</div>
+          <div class="card-value">$${this._fmt(totalValue)}</div>
         </div>
         <div class="summary-card">
           <div class="card-label">Positions</div>
-          <div class="card-value">${summary.position_count || 0}</div>
+          <div class="card-value">${positionCount || 0}</div>
         </div>
       </div>
 
@@ -203,7 +214,7 @@ const IC = {
       <table class="holdings-table">
         <thead><tr><th>Symbol</th><th>Value</th><th>Weight</th></tr></thead>
         <tbody>
-          ${holdings.map(h => `<tr><td>${h.symbol}</td><td>$${this._fmt(h.value)}</td><td>${this._pct(h.pct)}</td></tr>`).join('')}
+          ${holdings.map(h => `<tr><td>${h.symbol}</td><td>$${this._fmt(holdingValue(h))}</td><td>${this._pct(weightPct(h) / 100)}</td></tr>`).join('')}
         </tbody>
       </table>
 
@@ -211,7 +222,10 @@ const IC = {
       <table class="sector-table">
         <thead><tr><th>Sector</th><th>Weight</th></tr></thead>
         <tbody>
-          ${Object.entries(sectors).map(([s, p]) => `<tr><td>${s}</td><td>${this._pct(p)}</td></tr>`).join('')}
+          ${Object.entries(sectors).map(([s, p]) => {
+            const pct = p && typeof p === 'object' ? (p.weight ?? p.pct ?? 0) : p;
+            return `<tr><td>${s}</td><td>${this._pct(Number(pct || 0) / 100)}</td></tr>`;
+          }).join('')}
         </tbody>
       </table>
     `;

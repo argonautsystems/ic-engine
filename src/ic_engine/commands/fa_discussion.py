@@ -44,6 +44,8 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
+from ic_engine.services.summary_utils import extract_summary_block, normalize_summary_fields
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -66,6 +68,18 @@ def _fmt_currency(v: float) -> str:
     return f"${v:,.0f}"
 
 
+def _portfolio_summary(data: dict) -> dict:
+    return normalize_summary_fields(extract_summary_block(data))
+
+
+def _first_number(mapping: dict, *keys: str, default: float = 0.0) -> float:
+    for key in keys:
+        value = mapping.get(key)
+        if value is not None:
+            return float(value or 0)
+    return default
+
+
 # ---------------------------------------------------------------------------
 # Per-source extractors
 # ---------------------------------------------------------------------------
@@ -74,8 +88,8 @@ def _fmt_currency(v: float) -> str:
 def _topics_from_holdings(data: dict) -> List[dict]:
     topics: List[dict] = []
 
-    raw = data.get("summary") or data.get("data", {}).get("summary", {})
-    top_equity: List[dict] = data.get("top_equity", [])
+    raw = _portfolio_summary(data)
+    top_equity: List[dict] = data.get("top_equity") or data.get("top_holdings", [])
     sector_weights: dict = data.get("sector_weights", {})
     sector_weights_ex_espp: dict = data.get("sector_weights_ex_espp", {})
     espp_sector_pct: dict = data.get("espp_sector_pct", {})
@@ -93,7 +107,10 @@ def _topics_from_holdings(data: dict) -> List[dict]:
 
     # --- Single-position concentration ---
     for pos in top_equity:
-        w = float(pos.get("weight_pct", 0))
+        position_value = _first_number(pos, "value", "market_value", "marketValue")
+        w = _first_number(pos, "weight_pct")
+        if w == 0 and total_value > 0:
+            w = position_value / total_value * 100
         is_espp = bool(pos.get("espp_status"))
         if w >= 10.0:
             espp_note = (
@@ -113,7 +130,7 @@ def _topics_from_holdings(data: dict) -> List[dict]:
                     + (" (ESPP)" if is_espp else ""),
                     "detail": (
                         f"{pos['symbol']} is your largest single holding at {w:.1f}% of total value "
-                        f"({_fmt_currency(float(pos.get('value', 0)))}).{espp_note}"
+                        f"({_fmt_currency(position_value)}).{espp_note}"
                     ),
                     "metric": f"{w:.1f}% weight" + (" · ESPP" if is_espp else ""),
                 }
@@ -309,7 +326,9 @@ def _topics_from_analyst(recommendations: dict, top_equity: List[dict]) -> List[
     topics: List[dict] = []
 
     # Build lookup of top equity symbols by weight for context
-    top_symbols = {e["symbol"]: float(e.get("weight_pct", 0)) for e in top_equity}
+    top_symbols = {
+        e["symbol"]: _first_number(e, "weight_pct") for e in top_equity if e.get("symbol")
+    }
 
     sells: List[tuple] = []
     wide_gap: List[tuple] = []  # target/current gap > 30%
@@ -412,9 +431,11 @@ def _topics_from_news(news_data: dict) -> List[dict]:
             {
                 "category": "news",
                 "priority": "low",
-                "title": f"Identified portfolio risks: {key_risks[0]}"
-                if key_risks
-                else "News risk flags",
+                "title": (
+                    f"Identified portfolio risks: {key_risks[0]}"
+                    if key_risks
+                    else "News risk flags"
+                ),
                 "detail": (
                     f"Today's news digest flagged the following risks affecting your holdings: "
                     f"{risks_str}. Review whether these risks alter your near-term outlook "
@@ -605,7 +626,7 @@ def _topics_from_performance(perf_data: dict, top_equity: List[dict]) -> List[di
 
     # Find top-equity positions with very high individual volatility
     high_vol_positions = []
-    top_syms = {e["symbol"]: float(e.get("weight_pct", 0)) for e in top_equity}
+    top_syms = {e["symbol"]: _first_number(e, "weight_pct") for e in top_equity if e.get("symbol")}
     for sym, pdata in holdings_perf.items():
         if sym not in top_syms:
             continue
@@ -668,7 +689,9 @@ def extract_fa_topics(
 
     # Analyst
     analyst_data = pd.get("analyst_raw") or _load(reports_dir / "analyst_data.json")
-    top_equity: List[dict] = holdings.get("top_equity", []) if holdings else []
+    top_equity: List[dict] = (
+        (holdings.get("top_equity") or holdings.get("top_holdings", [])) if holdings else []
+    )
     if analyst_data:
         recs = analyst_data.get("recommendations", {})
         topics.extend(_topics_from_analyst(recs, top_equity))

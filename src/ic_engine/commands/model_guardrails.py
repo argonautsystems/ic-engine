@@ -332,11 +332,15 @@ def enforce(text: str, profile: GuardrailProfile) -> EnforcementResult:
 def _canonical_total() -> Optional[float]:
     """Return total_portfolio_value from holdings.json, or None."""
     try:
+        from ic_engine.services.summary_utils import (
+            extract_summary_block,
+            normalize_summary_fields,
+        )
+
         with open(HOLDINGS_FILE) as f:
             data = json.load(f)
-        if "data" in data:
-            data = data["data"]
-        v = data.get("summary", {}).get("total_portfolio_value")
+        summary = normalize_summary_fields(extract_summary_block(data))
+        v = summary.get("total_value")
         return float(v) if v else None
     except Exception:
         return None
