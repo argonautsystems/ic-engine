@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ic-engine"
-version = "2.5.0"
+version = "2.5.1"
 description = "Python portfolio-analysis library powering the InvestorClaw skill ecosystem. Consumed by claws-runtime and Claude Code adapters. FINOS CDM 5.x inspired data model."
 license = { text = "Apache 2.0 Dual License" }
 requires-python = ">=3.10"
@@ -21,7 +21,7 @@ classifiers = [
     "Topic :: Office/Business :: Financial",
 ]
 dependencies = [
-    "clio @ git+https://gitlab.com/perlowja/clio.git@v0.1.0",
+    "clio @ git+https://gitlab.com/argonautsystems/clio.git@v0.1.0",
     "polars>=0.20.0",
     "pandas>=2.0.0",
     "pyarrow>=12.0.0",
@@ -65,10 +65,10 @@ dependencies = [
 investorclaw = "ic_engine.cli:main"
 
 [project.urls]
-Homepage = "https://gitlab.com/perlowja/ic-engine"
-Repository = "https://gitlab.com/perlowja/ic-engine"
-Issues = "https://gitlab.com/perlowja/ic-engine"
-Spec = "https://gitlab.com/perlowja/InvestorClaw/-/blob/main/docs/IC_DECOMPOSITION_SPEC.md"
+Homepage = "https://gitlab.com/argonautsystems/ic-engine"
+Repository = "https://gitlab.com/argonautsystems/ic-engine"
+Issues = "https://gitlab.com/argonautsystems/ic-engine"
+Spec = "https://gitlab.com/argonautsystems/InvestorClaw/-/blob/main/docs/IC_DECOMPOSITION_SPEC.md"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
