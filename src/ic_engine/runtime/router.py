@@ -534,39 +534,63 @@ _HOLDINGS_CONSUMERS = frozenset(
         "complete",
         "run",
         "pipeline",
+        # Top-level entry points that drive the envelope-cache pipeline,
+        # which transitively reads holdings via HoldingsLoader. These need
+        # the .raw/holdings.json bootstrap on first run against a CSV/XLS.
+        "ask",
+        "refresh",
     }
 )
 
 
-def _auto_bootstrap_holdings(command: str, skill_dir: Path, reports_dir: Path) -> None:
+def auto_bootstrap_holdings(
+    command: str,
+    skill_dir: Path,
+    reports_dir: Path,
+    portfolio_path: Optional[Path] = None,
+) -> Optional[Path]:
     """Auto-materialize holdings.json from a portfolio CSV when a downstream
     command needs it but it is absent.
 
-    Silent no-op when:
+    Returns the materialized holdings.json path on success, None when no-op
+    or failure (logged at WARNING so it's visible in operator output).
+
+    Silent no-op (returns None) when:
       - command is not in _HOLDINGS_CONSUMERS (e.g. llm-config, setup, help)
-      - holdings.json already exists (either .raw/ or legacy location)
+      - holdings.json already exists (returns existing path so callers can rebind)
       - no portfolio CSV is available
       - the command is 'holdings' itself (let the explicit invocation handle it)
       - fetch_holdings.py is missing
-    Failures are logged and swallowed; the caller's own error path will surface
-    the missing-data message to the user.
+
+    `portfolio_path` argument: when set, use it directly instead of running
+    `find_portfolio_file(skill_dir)`. Required for `ask --portfolio /path.csv`
+    where the user picked a CSV outside the skill's portfolios/ directory.
     """
     from ic_engine.config.path_resolver import find_portfolio_file
 
     if command in {"holdings", "snapshot", "prices"}:
-        return
+        return None
 
     if command not in _HOLDINGS_CONSUMERS:
-        return
+        return None
 
     raw_holdings = reports_dir / ".raw" / "holdings.json"
     legacy_holdings = reports_dir / "holdings.json"
-    if raw_holdings.exists() or legacy_holdings.exists():
-        return
+    if raw_holdings.exists():
+        return raw_holdings
+    if legacy_holdings.exists():
+        return legacy_holdings
 
-    portfolio_file = find_portfolio_file(skill_dir)
+    portfolio_file: Optional[str]
+    if portfolio_path is not None:
+        # Caller passed an explicit --portfolio CSV/XLS — use it directly.
+        # If it's already a JSON envelope, the caller shouldn't have invoked us;
+        # but tolerate the shape and let HoldingsLoader handle it downstream.
+        portfolio_file = str(portfolio_path)
+    else:
+        portfolio_file = find_portfolio_file(skill_dir)
     if not portfolio_file:
-        return
+        return None
 
     # fetch_holdings.py lives in the engine package, not in the adapter's
     # user-data root. Resolve via SCRIPTS_DIR (cli.py's single source of
@@ -576,7 +600,11 @@ def _auto_bootstrap_holdings(command: str, skill_dir: Path, reports_dir: Path) -
 
     fetch_script = SCRIPTS_DIR / "fetch_holdings.py"
     if not fetch_script.exists():
-        return
+        logger.warning(
+            "Holdings auto-bootstrap skipped: fetch_holdings.py missing at %s",
+            fetch_script,
+        )
+        return None
 
     raw_holdings.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -596,7 +624,7 @@ def _auto_bootstrap_holdings(command: str, skill_dir: Path, reports_dir: Path) -
                 venv_python = str(candidate)
                 break
 
-        subprocess.run(
+        proc = subprocess.run(
             [venv_python, str(fetch_script), portfolio_file, str(raw_holdings)],
             capture_output=True,
             check=False,
@@ -604,8 +632,27 @@ def _auto_bootstrap_holdings(command: str, skill_dir: Path, reports_dir: Path) -
             timeout=60,
             env=build_env(skill_dir),
         )
+        if proc.returncode != 0:
+            logger.warning(
+                "Holdings auto-bootstrap failed (exit=%d): %s",
+                proc.returncode,
+                (proc.stderr or b"").decode("utf-8", errors="replace")[:500],
+            )
+            return None
+        if not raw_holdings.exists():
+            logger.warning(
+                "Holdings auto-bootstrap returned 0 but %s was not written",
+                raw_holdings,
+            )
+            return None
+        return raw_holdings
     except Exception as exc:
-        logger.debug("Holdings auto-bootstrap failed: %s", exc)
+        logger.warning("Holdings auto-bootstrap raised: %s", exc)
+        return None
+
+
+# Back-compat alias for any callers still using the underscore-private name.
+_auto_bootstrap_holdings = auto_bootstrap_holdings
 
 
 def synthesize_args(
