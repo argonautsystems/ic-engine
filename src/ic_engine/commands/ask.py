@@ -15,7 +15,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from ic_engine.config.path_resolver import find_portfolio_file
+from ic_engine.config.path_resolver import find_portfolio_file, get_reports_dir
 from ic_engine.config.user_messages import (
     CACHE_HIT_BANNER,
     NARRATOR_FABRICATION_REFUSAL,
@@ -144,6 +144,12 @@ def main(argv: list[str] | None = None) -> int:
     force_refresh = bool(args.refresh_only)
     if force_refresh or (status["needs_run"] and not args.no_refresh):
         _emit_wait_messages(status, force_refresh)
+
+    # Cold-cache safety: if holdings.json hasn't been materialized yet (first
+    # run against a CSV/XLS portfolio), bootstrap it before HoldingsLoader
+    # tries to json.load() the raw CSV and trips a JSONDecodeError cascade.
+    from ic_engine.runtime.router import _auto_bootstrap_holdings
+    _auto_bootstrap_holdings("ask", _skill_dir(), get_reports_dir())
 
     try:
         if args.no_refresh and status["exists"] and status["valid"]:
