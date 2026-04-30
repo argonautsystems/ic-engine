@@ -162,7 +162,8 @@ if __name__ == "__main__":
     import sys
 
     # Quick smoke test
-    _out = Path(os.environ.get("INVESTOR_CLAW_REPORTS_DIR", "/tmp")) / ".raw"
+    import tempfile
+    _out = Path(os.environ.get("INVESTOR_CLAW_REPORTS_DIR", tempfile.gettempdir())) / ".raw"
     _path = render_card(
         "TEST",
         "Analyst consensus is Buy with 42 analysts. Main risk is macro uncertainty.",

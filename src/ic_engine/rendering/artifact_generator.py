@@ -41,7 +41,7 @@ Typical command usage:
     artifact.add_table(rows, "Top Holdings", columns=["Symbol", "Value"])
     artifact.add_narrative_block("Commentary", lead_text, persona="Big Jim")
     artifact.add_dr_stonk_box({"Sharpe Ratio": "..."})
-    artifact.save("/tmp/holdings.html")
+    artifact.save(Path(tempfile.gettempdir()) / "holdings.html")
 """
 
 from __future__ import annotations
