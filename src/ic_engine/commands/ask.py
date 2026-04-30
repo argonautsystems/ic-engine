@@ -140,16 +140,23 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
+    # Cold-cache safety: if a CSV/XLS portfolio was selected and there's no
+    # materialized holdings.json yet, run the bootstrap (same path setup uses)
+    # to convert it BEFORE cache_status hashes the path and BEFORE get_or_run
+    # reaches HoldingsLoader (which only knows json.load). Rebind holdings_path
+    # to the materialized JSON so the rest of the pipeline operates on the
+    # correct artifact and cache lookups hit the right key.
+    from ic_engine.runtime.router import auto_bootstrap_holdings
+    materialized = auto_bootstrap_holdings(
+        "ask", _skill_dir(), get_reports_dir(), portfolio_path=holdings_path
+    )
+    if materialized is not None:
+        holdings_path = materialized
+
     status = cache_status(holdings_path)
     force_refresh = bool(args.refresh_only)
     if force_refresh or (status["needs_run"] and not args.no_refresh):
         _emit_wait_messages(status, force_refresh)
-
-    # Cold-cache safety: if holdings.json hasn't been materialized yet (first
-    # run against a CSV/XLS portfolio), bootstrap it before HoldingsLoader
-    # tries to json.load() the raw CSV and trips a JSONDecodeError cascade.
-    from ic_engine.runtime.router import _auto_bootstrap_holdings
-    _auto_bootstrap_holdings("ask", _skill_dir(), get_reports_dir())
 
     try:
         if args.no_refresh and status["exists"] and status["valid"]:
