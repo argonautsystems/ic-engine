@@ -857,9 +857,12 @@ class PriceProvider:
     }
 
     # Preferred provider order per operation type (first available wins)
+    # massive (Polygon) leads history because it is paid + unrate-limited.
+    # alpha_vantage's 4-calls/min cap and finnhub's premium-only candle
+    # endpoint both collapse under barrage load.
     _OP_ROUTING: Dict[str, List[str]] = {
         "quotes": ["massive", "yfinance", "finnhub"],
-        "history": ["alpha_vantage", "finnhub", "yfinance"],
+        "history": ["massive", "alpha_vantage", "finnhub", "yfinance"],
         "news": ["newsapi", "finnhub"],
         "analyst": ["finnhub", "yfinance"],
     }

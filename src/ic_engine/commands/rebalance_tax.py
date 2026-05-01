@@ -195,39 +195,22 @@ def load_holdings_with_lots(holdings_file: str) -> Tuple[pd.DataFrame, List[Dict
 # Target-weight solver
 # ---------------------------------------------------------------------------
 def _fetch_returns(symbols: List[str], period: str = "1y") -> pd.DataFrame:
-    import yfinance as yf  # type: ignore
+    from ic_engine.providers.price_panel import get_close_panel
 
     if not symbols:
         return pd.DataFrame()
     logger.info("Fetching %s historical data for %d symbols", period, len(symbols))
     try:
-        raw = yf.download(symbols, period=period, progress=False, auto_adjust=False)
+        data = get_close_panel(symbols, period=period)
     except Exception as e:
-        logger.warning("yfinance download failed: %s", e)
+        logger.warning("PriceProvider history fetch failed: %s", e)
         return pd.DataFrame()
-    if raw is None or raw.empty:
+    if data is None or data.empty:
         return pd.DataFrame()
-    # Try 'Adj Close' then fall back to 'Close'
-    data = None
-    if isinstance(raw.columns, pd.MultiIndex):
-        for col in ("Adj Close", "Close"):
-            if col in raw.columns.get_level_values(0):
-                data = raw[col]
-                break
-    else:
-        for col in ("Adj Close", "Close"):
-            if col in raw.columns:
-                data = raw[[col]]
-                data.columns = [symbols[0]]
-                break
-    if data is None:
-        return pd.DataFrame()
-    # Drop columns that are entirely NaN (symbols yfinance could not resolve)
+    # Drop columns that are entirely NaN (symbols no provider could resolve)
     data = data.dropna(axis=1, how="all")
     if data.empty:
         return pd.DataFrame()
-    if isinstance(data, pd.Series):
-        data = data.to_frame(name=symbols[0])
     return data.pct_change(fill_method=None).dropna(how="all")
 
 
