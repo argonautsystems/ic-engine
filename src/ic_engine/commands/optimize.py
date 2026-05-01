@@ -345,20 +345,26 @@ def fetch_historical_returns(symbols: List[str], period: str = "1y") -> pd.DataF
             equity_data = get_close_panel(equity_symbols, period=period)
             if equity_data.empty:
                 raise RuntimeError("PriceProvider returned no equity history")
-            # Drop all-NaN columns (symbols no provider could resolve) BEFORE
-            # pct_change — otherwise a single missing symbol wipes the panel via
-            # the default dropna(how="any").
+            # Drop all-NaN columns BEFORE pct_change so a single missing symbol
+            # does not wipe the panel via default dropna(how="any").
             equity_data = equity_data.dropna(axis=1, how="all")
+            if equity_data.empty:
+                raise RuntimeError("All equity symbols failed provider lookup")
             equity_returns = equity_data.pct_change(fill_method=None).dropna(how="all")
+            valid_len = len(equity_returns)
             for sym in equity_symbols:
                 if sym in equity_returns.columns:
                     returns_dict[sym] = equity_returns[sym].dropna().values
                 else:
-                    # Provider chain returned nothing for this symbol — seed with
-                    # synthetic returns so optimizer still receives a series.
-                    returns_dict[sym] = np.random.normal(0.0005, 0.01, 252)
+                    # Provider chain returned nothing for this symbol; seed with
+                    # synthetic returns matched in length to the valid equity
+                    # returns so pd.DataFrame(returns_dict) does not raise on
+                    # unequal-length arrays.
+                    returns_dict[sym] = np.random.normal(
+                        0.0005, 0.01, max(valid_len, 1)
+                    )
                     logger.warning(
-                        f"No history for {sym}; seeded with synthetic returns"
+                        f"No history for {sym}; seeded {valid_len} synthetic returns"
                     )
         except Exception as e:
             logger.warning(f"Failed to fetch equity data via PriceProvider: {e}")
@@ -376,6 +382,15 @@ def fetch_historical_returns(symbols: List[str], period: str = "1y") -> pd.DataF
             logger.warning(f"Failed to fetch bond data from FRED: {e}")
             for sym in bond_symbols:
                 returns_dict[sym] = np.random.normal(0.0003, 0.005, 252)  # Fallback
+
+    # Align all return series to the same length (shortest). Unequal lengths
+    # arise when valid equity histories have ~249 trading days while bond/
+    # fallback paths produce 252-day arrays. Truncate from the head (oldest)
+    # to keep the most recent returns aligned.
+    if returns_dict:
+        min_len = min(len(v) for v in returns_dict.values())
+        if min_len > 0:
+            returns_dict = {k: v[-min_len:] for k, v in returns_dict.items()}
 
     # Combine into DataFrame
     returns = pd.DataFrame(returns_dict)
