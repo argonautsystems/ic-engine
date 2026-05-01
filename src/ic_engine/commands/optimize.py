@@ -275,11 +275,15 @@ def fetch_bond_returns_fred(symbols: List[str], period: str = "1y") -> pd.DataFr
     import os
     from datetime import timedelta
 
+    def _constant_bond_returns(value: float, periods: int = 252) -> pd.DataFrame:
+        idx = pd.bdate_range(end=pd.Timestamp.now().normalize(), periods=periods)
+        return pd.DataFrame({sym: [value] * periods for sym in symbols}, index=idx)
+
     fred_key = os.environ.get("FRED_API_KEY") or os.environ.get("FRED_API_KEY")
     if not fred_key:
         logger.warning("FRED_API_KEY not found, falling back to constant returns for bonds")
         # Fallback: use bond ETF proxy yields
-        return pd.DataFrame({sym: [0.04] * 252 for sym in symbols})
+        return _constant_bond_returns(0.04)
 
     try:
         import requests
@@ -304,27 +308,30 @@ def fetch_bond_returns_fred(symbols: List[str], period: str = "1y") -> pd.DataFr
             observations = data.get("observations", [])
 
             # Convert yields to daily returns (simplified: yield/252)
-            daily_returns = []
+            daily_returns = {}
             for obs in observations:
                 try:
+                    obs_date = pd.to_datetime(obs.get("date"), errors="coerce")
+                    if pd.isna(obs_date):
+                        continue
                     yield_pct = float(obs.get("value", 0)) / 100
-                    daily_return = yield_pct / 252
-                    daily_returns.append(daily_return)
+                    daily_returns[obs_date] = yield_pct / 252
                 except (ValueError, TypeError):
-                    daily_returns.append(0)
+                    continue
 
             if daily_returns:
-                logger.info(f"Fetched {len(daily_returns)} FRED observations for bonds")
-                return pd.DataFrame({sym: daily_returns[:252] for sym in symbols})
+                bond_series = pd.Series(daily_returns).sort_index().tail(252)
+                logger.info(f"Fetched {len(bond_series)} FRED observations for bonds")
+                return pd.DataFrame({sym: bond_series for sym in symbols})
         else:
             logger.warning(
                 f"FRED API returned {response.status_code}, falling back to constant returns"
             )
-            return pd.DataFrame({sym: [0.04 / 252] * 252 for sym in symbols})
+            return _constant_bond_returns(0.04 / 252)
 
     except Exception as e:
         logger.warning(f"FRED fetch failed ({e}), falling back to constant returns for bonds")
-        return pd.DataFrame({sym: [0.04 / 252] * 252 for sym in symbols})
+        return _constant_bond_returns(0.04 / 252)
 
 
 def fetch_historical_returns(symbols: List[str], period: str = "1y") -> pd.DataFrame:
@@ -337,7 +344,7 @@ def fetch_historical_returns(symbols: List[str], period: str = "1y") -> pd.DataF
     bond_symbols = [s for s in symbols if is_bond_ticker(s)]
     equity_symbols = [s for s in symbols if not is_bond_ticker(s)]
 
-    returns_dict = {}
+    returns_dict: Dict[str, pd.Series] = {}
 
     # Fetch equity data via PriceProvider (massive → alpha_vantage → finnhub → yfinance)
     if equity_symbols:
@@ -345,31 +352,35 @@ def fetch_historical_returns(symbols: List[str], period: str = "1y") -> pd.DataF
             equity_data = get_close_panel(equity_symbols, period=period)
             if equity_data.empty:
                 raise RuntimeError("PriceProvider returned no equity history")
-            # Drop all-NaN columns BEFORE pct_change so a single missing symbol
-            # does not wipe the panel via default dropna(how="any").
+            # Drop all-NaN columns (symbols no provider could resolve) BEFORE
+            # pct_change so a single missing symbol does not wipe the panel.
             equity_data = equity_data.dropna(axis=1, how="all")
             if equity_data.empty:
                 raise RuntimeError("All equity symbols failed provider lookup")
-            equity_returns = equity_data.pct_change(fill_method=None).dropna(how="all")
-            valid_len = len(equity_returns)
+            equity_returns = equity_data.pct_change(fill_method=None)
             for sym in equity_symbols:
                 if sym in equity_returns.columns:
-                    returns_dict[sym] = equity_returns[sym].dropna().values
+                    returns_dict[sym] = equity_returns[sym]
                 else:
                     # Provider chain returned nothing for this symbol; seed with
-                    # synthetic returns matched in length to the valid equity
-                    # returns so pd.DataFrame(returns_dict) does not raise on
-                    # unequal-length arrays.
-                    returns_dict[sym] = np.random.normal(
-                        0.0005, 0.01, max(valid_len, 1)
+                    # synthetic returns indexed on the SAME dates as the valid
+                    # equity returns so date-alignment is preserved.
+                    returns_dict[sym] = pd.Series(
+                        np.random.normal(0.0005, 0.01, len(equity_returns)),
+                        index=equity_returns.index,
                     )
                     logger.warning(
-                        f"No history for {sym}; seeded {valid_len} synthetic returns"
+                        f"No history for {sym}; seeded {len(equity_returns)} synthetic returns on equity index"
                     )
         except Exception as e:
             logger.warning(f"Failed to fetch equity data via PriceProvider: {e}")
+            # No valid date index available — fall back to a synthetic
+            # business-day index so subsequent bond data can align.
+            synthetic_idx = pd.bdate_range(end=pd.Timestamp.now().normalize(), periods=252)
             for sym in equity_symbols:
-                returns_dict[sym] = np.random.normal(0.0005, 0.01, 252)  # Fallback
+                returns_dict[sym] = pd.Series(
+                    np.random.normal(0.0005, 0.01, 252), index=synthetic_idx
+                )
 
     # Fetch bond data from FRED
     if bond_symbols:
@@ -377,23 +388,36 @@ def fetch_historical_returns(symbols: List[str], period: str = "1y") -> pd.DataF
             bond_returns = fetch_bond_returns_fred(bond_symbols, period)
             for sym in bond_symbols:
                 if sym in bond_returns.columns:
-                    returns_dict[sym] = bond_returns[sym].values
+                    returns_dict[sym] = bond_returns[sym]
+                else:
+                    # FRED missed; use last-resort fallback aligned on bond_returns index
+                    fallback_idx = bond_returns.index if not bond_returns.empty else (
+                        next(iter(returns_dict.values())).index
+                        if returns_dict
+                        else pd.bdate_range(end=pd.Timestamp.now().normalize(), periods=252)
+                    )
+                    returns_dict[sym] = pd.Series(
+                        np.random.normal(0.0003, 0.005, len(fallback_idx)),
+                        index=fallback_idx,
+                    )
         except Exception as e:
             logger.warning(f"Failed to fetch bond data from FRED: {e}")
+            fallback_idx = (
+                next(iter(returns_dict.values())).index
+                if returns_dict
+                else pd.bdate_range(end=pd.Timestamp.now().normalize(), periods=252)
+            )
             for sym in bond_symbols:
-                returns_dict[sym] = np.random.normal(0.0003, 0.005, 252)  # Fallback
+                returns_dict[sym] = pd.Series(
+                    np.random.normal(0.0003, 0.005, len(fallback_idx)),
+                    index=fallback_idx,
+                )
 
-    # Align all return series to the same length (shortest). Unequal lengths
-    # arise when valid equity histories have ~249 trading days while bond/
-    # fallback paths produce 252-day arrays. Truncate from the head (oldest)
-    # to keep the most recent returns aligned.
-    if returns_dict:
-        min_len = min(len(v) for v in returns_dict.values())
-        if min_len > 0:
-            returns_dict = {k: v[-min_len:] for k, v in returns_dict.items()}
-
-    # Combine into DataFrame
-    returns = pd.DataFrame(returns_dict)
+    # Combine into DataFrame — pd.DataFrame aligns Series by date index
+    # automatically, then drop rows with any NaN to keep only the
+    # intersection of valid dates across all symbols. This eliminates the
+    # ordinal-position-alignment bug that earlier numpy-array flow had.
+    returns = pd.DataFrame(returns_dict).dropna(how="any")
     return returns
 
 
