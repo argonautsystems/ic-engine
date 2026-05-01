@@ -329,7 +329,7 @@ def fetch_bond_returns_fred(symbols: List[str], period: str = "1y") -> pd.DataFr
 
 def fetch_historical_returns(symbols: List[str], period: str = "1y") -> pd.DataFrame:
     """Fetch historical returns for covariance matrix calculation, using FRED for bonds."""
-    import yfinance as yf
+    from ic_engine.providers.price_panel import get_close_panel
 
     logger.info(f"Fetching {period} historical data for {len(symbols)} symbols...")
 
@@ -339,18 +339,18 @@ def fetch_historical_returns(symbols: List[str], period: str = "1y") -> pd.DataF
 
     returns_dict = {}
 
-    # Fetch equity data from yfinance
+    # Fetch equity data via PriceProvider (massive → alpha_vantage → finnhub → yfinance)
     if equity_symbols:
         try:
-            equity_data = yf.download(equity_symbols, period=period, progress=False)["Adj Close"]
-            if len(equity_symbols) == 1:
-                equity_data = equity_data.to_frame()
+            equity_data = get_close_panel(equity_symbols, period=period)
+            if equity_data.empty:
+                raise RuntimeError("PriceProvider returned no equity history")
             equity_returns = equity_data.pct_change().dropna()
             for sym in equity_symbols:
                 if sym in equity_returns.columns:
                     returns_dict[sym] = equity_returns[sym].values
         except Exception as e:
-            logger.warning(f"Failed to fetch equity data from yfinance: {e}")
+            logger.warning(f"Failed to fetch equity data via PriceProvider: {e}")
             for sym in equity_symbols:
                 returns_dict[sym] = np.random.normal(0.0005, 0.01, 252)  # Fallback
 

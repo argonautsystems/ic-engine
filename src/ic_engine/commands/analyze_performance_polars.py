@@ -232,11 +232,28 @@ class PerformanceAnalyzer:
             logger.info(f"Fetching data for {len(symbols)} symbols from {start_date} to {end_date}")
             timer = get_timer()
 
-            # Download price data (yfinance returns pandas, convert to Polars)
-            with timer.measure("yfinance_download"):
-                data_pd = yf.download(
-                    symbols, start=start_date, end=end_date, progress=False, auto_adjust=True
-                )
+            # Fetch OHLCV via PriceProvider (massive → alpha_vantage → finnhub → yfinance).
+            # Returns a DataFrame shaped exactly like yf.download(auto_adjust=True):
+            # single-symbol → flat columns; multi-symbol → MultiIndex (metric, symbol).
+            with timer.measure("price_panel_fetch"):
+                from ic_engine.providers.price_panel import get_ohlcv_panel
+
+                # Compute lookback in days from the requested date range so PriceProvider
+                # returns at least the window the analyzer asked for. Pad by 7 days to
+                # cover weekends/holidays at the leading edge.
+                start_dt = pd.to_datetime(start_date)
+                end_dt = pd.to_datetime(end_date)
+                today = pd.Timestamp.now().normalize()
+                lookback_days = max(int((today - start_dt).days) + 7, 30)
+
+                data_pd = get_ohlcv_panel(symbols, days=lookback_days)
+
+                # Filter to requested date window (PriceProvider returns rolling window
+                # ending today; analyzer wants [start_date, end_date]).
+                if not data_pd.empty:
+                    data_pd = data_pd.loc[
+                        (data_pd.index >= start_dt) & (data_pd.index <= end_dt)
+                    ]
 
             # Normalize column structure for both single and multiple symbols
             if len(symbols) == 1:
