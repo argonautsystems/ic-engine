@@ -580,25 +580,27 @@ class PolygonProvider:
         applies all factors. This avoids the compounding bug where computing a
         later (older-ex_date) factor against an already-adjusted close skews
         cumulative adjustment for multi-dividend windows.
+
+        Raises:
+            Exception: when list_dividends fails (network/auth/SDK error).
+                Caller (get_history) should return [] so PriceProvider falls back
+                to the next provider in the routing chain rather than serving
+                silently degraded split-only data as dividend-adjusted data.
         """
         if not rows:
             return rows
 
-        try:
-            divs = list(
-                self._client.list_dividends(
-                    ticker=symbol,
-                    ex_dividend_date_gte=rows[0]["date"],
-                    ex_dividend_date_lte=rows[-1]["date"],
-                    limit=1000,
-                )
+        divs = list(
+            self._client.list_dividends(
+                ticker=symbol,
+                ex_dividend_date_gte=rows[0]["date"],
+                ex_dividend_date_lte=rows[-1]["date"],
+                limit=1000,
             )
-        except Exception as e:
-            logger.debug(f"Polygon list_dividends({symbol}): {e}")
-            return rows
+        )
 
         if not divs:
-            logger.debug(f"Polygon list_dividends({symbol}): no dividends")
+            logger.debug(f"Polygon list_dividends({symbol}): no dividends in range")
             return rows
 
         date_to_idx = {r["date"]: i for i, r in enumerate(rows)}
@@ -697,7 +699,14 @@ class PolygonProvider:
                 }
                 for a in aggs
             ]
-            rows = self._apply_dividend_adjustment(rows, symbol)
+            try:
+                rows = self._apply_dividend_adjustment(rows, symbol)
+            except Exception as e:
+                logger.warning(
+                    f"Polygon dividend adjustment failed for {symbol}: {e}; "
+                    f"returning [] to trigger provider fallback"
+                )
+                return []
             return rows
         except Exception as e:
             logger.warning(f"Polygon history({symbol}): {e}")
