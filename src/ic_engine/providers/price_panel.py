@@ -31,7 +31,7 @@ historical yfinance adjusted-close semantics expected by return calculations.
 """
 
 import logging
-from typing import Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional
 
 import pandas as pd
 
@@ -77,6 +77,14 @@ def _history_for(provider: PriceProvider, symbol: str, days: int) -> List[dict]:
         return []
 
 
+def _polygon_happy_path_provider() -> PriceProvider:
+    pp = PriceProvider(primary="massive")
+    # price_panel owns the fallback phase so yfinance can be called once in
+    # batch, instead of through PriceProvider's per-symbol history chain.
+    pp._fallback_names = []
+    return pp
+
+
 def _rows_to_ohlcv(rows: List[dict]) -> Optional[pd.DataFrame]:
     """Convert a PriceProvider history list into a date-indexed OHLCV DataFrame."""
     if not rows:
@@ -99,6 +107,110 @@ def _rows_to_ohlcv(rows: List[dict]) -> Optional[pd.DataFrame]:
     return out if not out.empty else None
 
 
+def _date_str(date_idx) -> str:
+    return date_idx.strftime("%Y-%m-%d") if hasattr(date_idx, "strftime") else str(date_idx)[:10]
+
+
+def _row_float(row, *names: str, default: float = 0.0) -> float:
+    for name in names:
+        val = row.get(name)
+        if val is not None and not pd.isna(val):
+            return float(val)
+    return default
+
+
+def _row_int(row, *names: str, default: int = 0) -> int:
+    for name in names:
+        val = row.get(name)
+        if val is not None and not pd.isna(val):
+            return int(val)
+    return default
+
+
+def _append_yf_rows(out: Dict[str, List[Dict]], sym: str, data: pd.DataFrame) -> None:
+    for date_idx, row in data.iterrows():
+        close = row.get("Close", row.get("close"))
+        if close is None or pd.isna(close):
+            continue
+        out[sym].append(
+            {
+                "date": _date_str(date_idx),
+                "open": _row_float(row, "Open", "open"),
+                "high": _row_float(row, "High", "high"),
+                "low": _row_float(row, "Low", "low"),
+                "close": float(close),
+                "volume": _row_int(row, "Volume", "volume"),
+                "symbol": sym,
+                "provider": "yfinance",
+            }
+        )
+
+
+def _yf_batch_fallback(symbols: List[str], days: int) -> Dict[str, List[Dict]]:
+    """Batch fallback for symbols that PriceProvider could not resolve.
+
+    Single ``yf.download()`` call for all symbols at once, matching the
+    pre-refactor behavior. Used when the Polygon-first happy path returns
+    empty for one or more symbols; avoids the per-symbol rate-limit cascade
+    through AlphaVantage/Finnhub/yfinance.Ticker.history.
+
+    Returns dict mapping each requested symbol to a list of OHLCV row dicts
+    in the PriceProvider format. Symbols absent from yfinance response get
+    empty lists.
+    """
+    out: Dict[str, List[Dict]] = {sym: [] for sym in symbols}
+    if not symbols:
+        return out
+
+    try:
+        import yfinance as yf
+    except ImportError:
+        return out
+
+    period = "1y" if days <= 365 else ("2y" if days <= 730 else "5y")
+
+    try:
+        yf_syms = [s.replace(".", "-") for s in symbols]
+        reverse = {yf_syms[i]: symbols[i] for i in range(len(symbols))}
+        data = yf.download(
+            yf_syms if len(yf_syms) > 1 else yf_syms[0],
+            period=period,
+            progress=False,
+            auto_adjust=True,
+            threads=False,
+        )
+    except Exception as e:
+        logger.warning(f"yf.download batch fallback failed: {e}")
+        return out
+
+    if data is None or data.empty:
+        return out
+
+    if len(yf_syms) == 1:
+        sym = symbols[0]
+        if isinstance(data.columns, pd.MultiIndex):
+            try:
+                data = data.xs(yf_syms[0], axis=1, level=1, drop_level=True)
+            except Exception as e:
+                logger.warning(f"yf batch fallback parse({sym}): {e}")
+                return out
+        _append_yf_rows(out, sym, data)
+        return out
+
+    # Multi-symbol shape: MultiIndex columns like (Open, AAPL), (Close, AAPL).
+    for yf_sym in yf_syms:
+        sym = reverse[yf_sym]
+        try:
+            sym_data = data.xs(yf_sym, axis=1, level=1, drop_level=True)
+            if sym_data is None or sym_data.empty:
+                continue
+            _append_yf_rows(out, sym, sym_data)
+        except Exception as e:
+            logger.warning(f"yf batch fallback parse({sym}): {e}")
+
+    return out
+
+
 def get_ohlcv_panel(
     symbols: Iterable[str],
     *,
@@ -113,36 +225,49 @@ def get_ohlcv_panel(
 
     Symbols that fail to fetch are retained as all-NaN columns.
 
-    NOTE: When PriceProvider routes through Polygon (the default for history),
-    returned close prices are split-adjusted AND dividend-adjusted, matching the
-    semantics of yfinance.download(auto_adjust=True). When the routing falls
-    through to AlphaVantage, prices are also dividend-adjusted (Adjusted Close).
-    When the routing falls through to yfinance.Ticker.history (raw close, no
-    auto_adjust), prices are NOT dividend-adjusted — daily-return calculations
-    will exclude the dividend yield component for that fallback path only.
+    NOTE: In the default adapter path, PriceProvider is limited to Polygon for
+    the per-symbol happy path. Missing symbols are then fetched in one
+    yfinance.download(auto_adjust=True) batch so fallback remains split- and
+    dividend-adjusted without per-symbol provider cascades.
     """
     syms = [s for s in symbols if s and str(s).strip()]
     if not syms:
         return pd.DataFrame()
 
-    pp = provider or PriceProvider()
+    pp = provider or _polygon_happy_path_provider()
     n_days = _resolve_days(days=days, period=period)
 
-    if len(syms) == 1:
-        sym = syms[0]
-        ohlcv = _rows_to_ohlcv(_history_for(pp, sym, n_days))
-        return ohlcv if ohlcv is not None else pd.DataFrame()
-
     frames: List[pd.DataFrame] = []
+    missing_syms: List[str] = []
     for sym in syms:
         ohlcv = _rows_to_ohlcv(_history_for(pp, sym, n_days))
         if ohlcv is None or ohlcv.empty:
+            missing_syms.append(sym)
             continue
-        ohlcv.columns = pd.MultiIndex.from_product([list(ohlcv.columns), [sym]])
-        frames.append(ohlcv)
+        if len(syms) == 1:
+            frames.append(ohlcv)
+        else:
+            ohlcv.columns = pd.MultiIndex.from_product([list(ohlcv.columns), [sym]])
+            frames.append(ohlcv)
+
+    if missing_syms:
+        logger.info(f"price_panel: batch-fallback {len(missing_syms)} symbols via yfinance")
+        fallback_rows = _yf_batch_fallback(missing_syms, n_days)
+        for sym, rows in fallback_rows.items():
+            ohlcv = _rows_to_ohlcv(rows)
+            if ohlcv is None or ohlcv.empty:
+                continue
+            if len(syms) == 1:
+                frames.append(ohlcv)
+            else:
+                ohlcv.columns = pd.MultiIndex.from_product([list(ohlcv.columns), [sym]])
+                frames.append(ohlcv)
 
     if not frames:
         return pd.DataFrame()
+
+    if len(syms) == 1:
+        return frames[0]
 
     combined = pd.concat(frames, axis=1).sort_index()
     # Reorder columns to mirror yfinance: outer level metrics in OHLCV order,
@@ -164,29 +289,41 @@ def get_close_panel(
     Replaces the historical idiom ``yf.download(symbols, period=p)["Adj Close"]``
     plus the single-symbol ``.to_frame()`` dance in callers like ``optimize.py``.
 
-    NOTE: When PriceProvider routes through Polygon (the default for history),
-    returned close prices are split-adjusted AND dividend-adjusted, matching the
-    semantics of yfinance.download(auto_adjust=True). When the routing falls
-    through to AlphaVantage, prices are also dividend-adjusted (Adjusted Close).
-    When the routing falls through to yfinance.Ticker.history (raw close, no
-    auto_adjust), prices are NOT dividend-adjusted — daily-return calculations
-    will exclude the dividend yield component for that fallback path only.
+    NOTE: In the default adapter path, PriceProvider is limited to Polygon for
+    the per-symbol happy path. Missing symbols are then fetched in one
+    yfinance.download(auto_adjust=True) batch so fallback remains split- and
+    dividend-adjusted without per-symbol provider cascades.
     """
     syms = [s for s in symbols if s and str(s).strip()]
     if not syms:
         return pd.DataFrame()
 
-    pp = provider or PriceProvider()
+    pp = provider or _polygon_happy_path_provider()
     n_days = _resolve_days(days=days, period=period)
 
     series = {}
+    missing_syms: List[str] = []
     for sym in syms:
         ohlcv = _rows_to_ohlcv(_history_for(pp, sym, n_days))
         if ohlcv is None or "Close" not in ohlcv.columns:
+            missing_syms.append(sym)
             continue
         col = ohlcv["Close"].dropna()
         if not col.empty:
             series[sym] = col
+        else:
+            missing_syms.append(sym)
+
+    if missing_syms:
+        logger.info(f"price_panel: batch-fallback {len(missing_syms)} symbols via yfinance")
+        fallback_rows = _yf_batch_fallback(missing_syms, n_days)
+        for sym, rows in fallback_rows.items():
+            ohlcv = _rows_to_ohlcv(rows)
+            if ohlcv is None or "Close" not in ohlcv.columns:
+                continue
+            col = ohlcv["Close"].dropna()
+            if not col.empty:
+                series[sym] = col
 
     panel = pd.DataFrame(series).sort_index()
     # Preserve caller's symbol ordering and failed symbols as all-NaN columns.
