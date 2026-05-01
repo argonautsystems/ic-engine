@@ -345,10 +345,21 @@ def fetch_historical_returns(symbols: List[str], period: str = "1y") -> pd.DataF
             equity_data = get_close_panel(equity_symbols, period=period)
             if equity_data.empty:
                 raise RuntimeError("PriceProvider returned no equity history")
-            equity_returns = equity_data.pct_change().dropna()
+            # Drop all-NaN columns (symbols no provider could resolve) BEFORE
+            # pct_change — otherwise a single missing symbol wipes the panel via
+            # the default dropna(how="any").
+            equity_data = equity_data.dropna(axis=1, how="all")
+            equity_returns = equity_data.pct_change(fill_method=None).dropna(how="all")
             for sym in equity_symbols:
                 if sym in equity_returns.columns:
-                    returns_dict[sym] = equity_returns[sym].values
+                    returns_dict[sym] = equity_returns[sym].dropna().values
+                else:
+                    # Provider chain returned nothing for this symbol — seed with
+                    # synthetic returns so optimizer still receives a series.
+                    returns_dict[sym] = np.random.normal(0.0005, 0.01, 252)
+                    logger.warning(
+                        f"No history for {sym}; seeded with synthetic returns"
+                    )
         except Exception as e:
             logger.warning(f"Failed to fetch equity data via PriceProvider: {e}")
             for sym in equity_symbols:
