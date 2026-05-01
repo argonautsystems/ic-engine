@@ -576,10 +576,12 @@ class PolygonProvider:
         prices match yfinance Adj Close semantics (total-return basis).
 
         Two-pass implementation: first pass reads ORIGINAL close-before-ex_date
-        for every dividend and computes its factor independently; second pass
-        applies all factors. This avoids the compounding bug where computing a
-        later (older-ex_date) factor against an already-adjusted close skews
-        cumulative adjustment for multi-dividend windows.
+        for every dividend and computes its factor independently using
+        Polygon.split_adjusted_cash_amount (matching the split-adjusted basis of
+        aggs returned with adjusted=True); second pass applies all factors. This
+        avoids the compounding bug where computing a later (older-ex_date)
+        factor against an already-adjusted close skews cumulative adjustment for
+        multi-dividend windows.
 
         Raises:
             Exception: when list_dividends fails (network/auth/SDK error).
@@ -608,9 +610,21 @@ class PolygonProvider:
         # PASS 1: collect (idx_before, factor) tuples using ORIGINAL closes.
         # No mutation in this pass.
         factors: List[Tuple[int, float]] = []
+        logged_cash_amount_fallback = False
         for div in divs:
             ex_date = getattr(div, "ex_dividend_date", None)
-            cash_amount = getattr(div, "cash_amount", None)
+            # Aggs are split-adjusted; prefer the split-adjusted dividend amount so
+            # both sides use the same basis. Fall back to cash_amount for older SDK
+            # versions that did not expose split_adjusted_cash_amount.
+            cash_amount = getattr(div, "split_adjusted_cash_amount", None)
+            if cash_amount is None:
+                cash_amount = getattr(div, "cash_amount", None)
+                if cash_amount is not None and not logged_cash_amount_fallback:
+                    logger.debug(
+                        f"Polygon div adj({symbol}): using cash_amount fallback; "
+                        f"dividend basis mismatch may be present"
+                    )
+                    logged_cash_amount_fallback = True
             if not ex_date or cash_amount is None or cash_amount <= 0:
                 continue
 
