@@ -26,11 +26,8 @@ logic:
     N symbols →  MultiIndex columns [('Open', 'AAPL'), ('Close', 'AAPL'), ...]
 
 PriceProvider routes history calls to ``massive`` (Polygon) first, which
-returns split-adjusted (but not dividend-adjusted) prices. That is a
-deliberate trade vs. yfinance's dividend-adjusted ``Adj Close`` — Polygon's
-paid plan has no rate-limit ceiling and barrage stability is the dominant
-constraint here. Daily-return calculations are minimally affected for
-typical equities.
+returns split-adjusted and dividend-adjusted prices. This preserves the
+historical yfinance adjusted-close semantics expected by return calculations.
 """
 
 import logging
@@ -116,10 +113,13 @@ def get_ohlcv_panel(
 
     Symbols that fail to fetch are retained as all-NaN columns.
 
-    WARNING: Returned close prices are split-adjusted (Polygon default) but
-    NOT dividend-adjusted. Daily returns computed via pct_change() therefore
-    exclude the dividend-yield component. Callers needing total-return series
-    must add dividend yield separately.
+    NOTE: When PriceProvider routes through Polygon (the default for history),
+    returned close prices are split-adjusted AND dividend-adjusted, matching the
+    semantics of yfinance.download(auto_adjust=True). When the routing falls
+    through to AlphaVantage, prices are also dividend-adjusted (Adjusted Close).
+    When the routing falls through to yfinance.Ticker.history (raw close, no
+    auto_adjust), prices are NOT dividend-adjusted — daily-return calculations
+    will exclude the dividend yield component for that fallback path only.
     """
     syms = [s for s in symbols if s and str(s).strip()]
     if not syms:
@@ -164,10 +164,13 @@ def get_close_panel(
     Replaces the historical idiom ``yf.download(symbols, period=p)["Adj Close"]``
     plus the single-symbol ``.to_frame()`` dance in callers like ``optimize.py``.
 
-    WARNING: Returned close prices are split-adjusted (Polygon default) but
-    NOT dividend-adjusted. Daily returns computed via pct_change() therefore
-    exclude the dividend-yield component. Callers needing total-return series
-    must add dividend yield separately.
+    NOTE: When PriceProvider routes through Polygon (the default for history),
+    returned close prices are split-adjusted AND dividend-adjusted, matching the
+    semantics of yfinance.download(auto_adjust=True). When the routing falls
+    through to AlphaVantage, prices are also dividend-adjusted (Adjusted Close).
+    When the routing falls through to yfinance.Ticker.history (raw close, no
+    auto_adjust), prices are NOT dividend-adjusted — daily-return calculations
+    will exclude the dividend yield component for that fallback path only.
     """
     syms = [s for s in symbols if s and str(s).strip()]
     if not syms:

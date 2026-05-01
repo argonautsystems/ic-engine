@@ -568,6 +568,86 @@ class PolygonProvider:
                 results[sym] = q
         return results
 
+    def _apply_dividend_adjustment(self, rows: List[Dict], symbol: str) -> List[Dict]:
+        """Apply backward dividend adjustment to OHLC prices.
+
+        Polygon list_aggs with adjusted=True only adjusts for splits; this method
+        further adjusts close/open/high/low for cash dividends so the resulting
+        prices match yfinance Adj Close semantics (total-return basis).
+        """
+        if not rows:
+            return rows
+
+        try:
+            divs = list(
+                self._client.list_dividends(
+                    ticker=symbol,
+                    ex_dividend_date_gte=rows[0]["date"],
+                    ex_dividend_date_lte=rows[-1]["date"],
+                    limit=1000,
+                )
+            )
+        except Exception as e:
+            logger.debug(f"Polygon list_dividends({symbol}): {e}")
+            return rows
+
+        if not divs:
+            logger.debug(f"Polygon list_dividends({symbol}): no dividends")
+            return rows
+
+        # Build date -> row index map for fast lookup.
+        date_to_idx = {r["date"]: i for i, r in enumerate(rows)}
+
+        # Sort dividends by ex_date descending so we apply most-recent first
+        # (each adjustment compounds onto already-adjusted earlier prices).
+        sorted_divs = sorted(
+            divs,
+            key=lambda d: getattr(d, "ex_dividend_date", "") or "",
+            reverse=True,
+        )
+
+        applied = 0
+        for div in sorted_divs:
+            ex_date = getattr(div, "ex_dividend_date", None)
+            cash_amount = getattr(div, "cash_amount", None)
+            if not ex_date or cash_amount is None or cash_amount <= 0:
+                continue
+
+            # Find the trading day immediately before ex_date in our agg series.
+            # Polygon ex_date is a YYYY-MM-DD string.
+            idx_before = date_to_idx.get(ex_date)
+            if idx_before is not None:
+                idx_before -= 1
+            else:
+                idx_before = None
+                for i in range(len(rows) - 1, -1, -1):
+                    if rows[i]["date"] < ex_date:
+                        idx_before = i
+                        break
+            if idx_before is None or idx_before < 0:
+                continue
+
+            close_before = rows[idx_before]["close"]
+            if close_before is None or close_before <= cash_amount:
+                logger.warning(
+                    f"Polygon div adj({symbol}): close_before={close_before} <= D={cash_amount} "
+                    f"on ex_date={ex_date}; skipping"
+                )
+                continue
+
+            factor = (close_before - cash_amount) / close_before
+            # Apply factor to OHLC of every row with date < ex_date.
+            for i in range(idx_before + 1):
+                for fld in ("open", "high", "low", "close"):
+                    v = rows[i].get(fld)
+                    if v is not None:
+                        rows[i][fld] = v * factor
+            applied += 1
+
+        if applied:
+            logger.debug(f"Polygon div adj({symbol}): applied {applied}/{len(sorted_divs)} dividends")
+        return rows
+
     def get_history(self, symbol: str, days: int = 365) -> List[Dict]:
         """Daily OHLCV aggregates."""
         try:
@@ -590,7 +670,7 @@ class PolygonProvider:
             if not aggs:
                 return []
 
-            return [
+            rows = [
                 {
                     "date": datetime.fromtimestamp(a.timestamp / 1000).strftime(
                         "%Y-%m-%d"
@@ -605,6 +685,8 @@ class PolygonProvider:
                 }
                 for a in aggs
             ]
+            rows = self._apply_dividend_adjustment(rows, symbol)
+            return rows
         except Exception as e:
             logger.warning(f"Polygon history({symbol}): {e}")
             return []
