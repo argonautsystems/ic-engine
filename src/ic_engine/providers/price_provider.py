@@ -35,7 +35,7 @@ import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import requests
 from ratelimit import limits, sleep_and_retry
@@ -574,6 +574,12 @@ class PolygonProvider:
         Polygon list_aggs with adjusted=True only adjusts for splits; this method
         further adjusts close/open/high/low for cash dividends so the resulting
         prices match yfinance Adj Close semantics (total-return basis).
+
+        Two-pass implementation: first pass reads ORIGINAL close-before-ex_date
+        for every dividend and computes its factor independently; second pass
+        applies all factors. This avoids the compounding bug where computing a
+        later (older-ex_date) factor against an already-adjusted close skews
+        cumulative adjustment for multi-dividend windows.
         """
         if not rows:
             return rows
@@ -595,29 +601,20 @@ class PolygonProvider:
             logger.debug(f"Polygon list_dividends({symbol}): no dividends")
             return rows
 
-        # Build date -> row index map for fast lookup.
         date_to_idx = {r["date"]: i for i, r in enumerate(rows)}
 
-        # Sort dividends by ex_date descending so we apply most-recent first
-        # (each adjustment compounds onto already-adjusted earlier prices).
-        sorted_divs = sorted(
-            divs,
-            key=lambda d: getattr(d, "ex_dividend_date", "") or "",
-            reverse=True,
-        )
-
-        applied = 0
-        for div in sorted_divs:
+        # PASS 1: collect (idx_before, factor) tuples using ORIGINAL closes.
+        # No mutation in this pass.
+        factors: List[Tuple[int, float]] = []
+        for div in divs:
             ex_date = getattr(div, "ex_dividend_date", None)
             cash_amount = getattr(div, "cash_amount", None)
             if not ex_date or cash_amount is None or cash_amount <= 0:
                 continue
 
-            # Find the trading day immediately before ex_date in our agg series.
-            # Polygon ex_date is a YYYY-MM-DD string.
-            idx_before = date_to_idx.get(ex_date)
-            if idx_before is not None:
-                idx_before -= 1
+            idx = date_to_idx.get(ex_date)
+            if idx is not None:
+                idx_before = idx - 1
             else:
                 idx_before = None
                 for i in range(len(rows) - 1, -1, -1):
@@ -636,16 +633,31 @@ class PolygonProvider:
                 continue
 
             factor = (close_before - cash_amount) / close_before
-            # Apply factor to OHLC of every row with date < ex_date.
-            for i in range(idx_before + 1):
-                for fld in ("open", "high", "low", "close"):
-                    v = rows[i].get(fld)
-                    if v is not None:
-                        rows[i][fld] = v * factor
-            applied += 1
+            factors.append((idx_before, factor))
 
-        if applied:
-            logger.debug(f"Polygon div adj({symbol}): applied {applied}/{len(sorted_divs)} dividends")
+        if not factors:
+            return rows
+
+        # PASS 2: apply factors. Each row at index i gets multiplied by the
+        # product of all factors whose idx_before >= i (i.e., dividends with
+        # ex_date AFTER the row date). Compute per-row cumulative factor.
+        n = len(rows)
+        cum_factor = [1.0] * n
+        for idx_before, f in factors:
+            for i in range(idx_before + 1):
+                cum_factor[i] *= f
+
+        for i, cf in enumerate(cum_factor):
+            if cf == 1.0:
+                continue
+            for fld in ("open", "high", "low", "close"):
+                v = rows[i].get(fld)
+                if v is not None:
+                    rows[i][fld] = v * cf
+
+        logger.debug(
+            f"Polygon div adj({symbol}): applied {len(factors)} dividends across {n} rows"
+        )
         return rows
 
     def get_history(self, symbol: str, days: int = 365) -> List[Dict]:
