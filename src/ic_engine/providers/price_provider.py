@@ -574,30 +574,36 @@ class PolygonProvider:
             to_date = datetime.now().strftime("%Y-%m-%d")
             from_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
 
-            data = self._client.list_aggs(
-                ticker=symbol,
-                timespan="day",
-                from_=from_date,
-                to=to_date,
-                limit=days,
-                sort="asc",
+            aggs = list(
+                self._client.list_aggs(
+                    ticker=symbol,
+                    multiplier=1,
+                    timespan="day",
+                    from_=from_date,
+                    to=to_date,
+                    adjusted=True,
+                    limit=min(days, 50000),
+                    sort="asc",
+                )
             )
 
-            if not data or not data.results:
+            if not aggs:
                 return []
 
             return [
                 {
-                    "date": datetime.fromtimestamp(r.t / 1000).strftime("%Y-%m-%d"),
-                    "open": r.o,
-                    "high": r.h,
-                    "low": r.l,
-                    "close": r.c,
-                    "volume": r.v,
+                    "date": datetime.fromtimestamp(a.timestamp / 1000).strftime(
+                        "%Y-%m-%d"
+                    ),
+                    "open": a.open,
+                    "high": a.high,
+                    "low": a.low,
+                    "close": a.close,
+                    "volume": a.volume,
                     "symbol": symbol,
                     "provider": self.NAME,
                 }
-                for r in data.results
+                for a in aggs
             ]
         except Exception as e:
             logger.warning(f"Polygon history({symbol}): {e}")

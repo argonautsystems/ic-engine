@@ -114,9 +114,12 @@ def get_ohlcv_panel(
     Single symbol → flat columns ['Open', 'High', 'Low', 'Close', 'Volume'].
     Multiple symbols → MultiIndex columns ``[(metric, symbol)]``.
 
-    Symbols that fail to fetch are silently dropped (consistent with yfinance
-    behavior of returning all-NaN columns; callers that strip all-NaN columns
-    end up with the same effective result).
+    Symbols that fail to fetch are retained as all-NaN columns.
+
+    WARNING: Returned close prices are split-adjusted (Polygon default) but
+    NOT dividend-adjusted. Daily returns computed via pct_change() therefore
+    exclude the dividend-yield component. Callers needing total-return series
+    must add dividend yield separately.
     """
     syms = [s for s in symbols if s and str(s).strip()]
     if not syms:
@@ -145,9 +148,7 @@ def get_ohlcv_panel(
     # Reorder columns to mirror yfinance: outer level metrics in OHLCV order,
     # inner level symbols in caller-supplied order.
     metrics = [m for m in _OHLCV_FIELDS if m in combined.columns.get_level_values(0)]
-    columns = [
-        (m, s) for m in metrics for s in syms if (m, s) in combined.columns
-    ]
+    columns = [(m, s) for m in metrics for s in syms]
     return combined.reindex(columns=pd.MultiIndex.from_tuples(columns))
 
 
@@ -162,6 +163,11 @@ def get_close_panel(
 
     Replaces the historical idiom ``yf.download(symbols, period=p)["Adj Close"]``
     plus the single-symbol ``.to_frame()`` dance in callers like ``optimize.py``.
+
+    WARNING: Returned close prices are split-adjusted (Polygon default) but
+    NOT dividend-adjusted. Daily returns computed via pct_change() therefore
+    exclude the dividend-yield component. Callers needing total-return series
+    must add dividend yield separately.
     """
     syms = [s for s in symbols if s and str(s).strip()]
     if not syms:
@@ -179,9 +185,6 @@ def get_close_panel(
         if not col.empty:
             series[sym] = col
 
-    if not series:
-        return pd.DataFrame()
-
     panel = pd.DataFrame(series).sort_index()
-    # Preserve caller's symbol ordering for any symbols that did fetch.
-    return panel[[s for s in syms if s in panel.columns]]
+    # Preserve caller's symbol ordering and failed symbols as all-NaN columns.
+    return panel.reindex(columns=syms)
