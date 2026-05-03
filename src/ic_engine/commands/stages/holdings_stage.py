@@ -96,12 +96,15 @@ class HoldingsStage(PipelineStage):
             sector = d.get("sector") or "Unknown"
             sector_weights[sector] = round(sector_weights.get(sector, 0.0) + (d["weight_pct"]), 4)
 
-        equities.sort(key=lambda x: x.get("value", 0), reverse=True)
-        bonds.sort(key=lambda x: x.get("value", 0), reverse=True)
+        def _val(d):
+            return float(d.get("value") or d.get("market_value") or 0.0)
 
-        equity_value = round(sum(float(e.get("value") or 0) for e in equities), 2)
-        bond_value = round(sum(float(b.get("value") or 0) for b in bonds), 2)
-        cash_value = round(sum(float(c.get("value") or 0) for c in cash), 2)
+        equities.sort(key=_val, reverse=True)
+        bonds.sort(key=_val, reverse=True)
+
+        equity_value = round(sum(_val(e) for e in equities), 2)
+        bond_value = round(sum(_val(b) for b in bonds), 2)
+        cash_value = round(sum(_val(c) for c in cash), 2)
 
         for acct in accounts.values():
             if total_value > 0:
