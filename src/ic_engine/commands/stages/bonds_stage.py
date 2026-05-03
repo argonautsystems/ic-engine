@@ -91,6 +91,12 @@ class BondsStage(PipelineStage):
                 ],
             }
 
+            # Attach a Treasury yield curve so the narrator can answer
+            # bond-strategy / yield-curve / Fed-policy questions even when
+            # FRED_API_KEY is missing. Uses public treasury_fiscaldata as
+            # the no-key fallback. Best-effort.
+            analysis_data["treasury_yield_curve"] = self._fetch_yield_curve()
+
             return StageResult(
                 stage_name=self.stage_name,
                 status="success",
@@ -108,3 +114,16 @@ class BondsStage(PipelineStage):
                 status="failed",
                 error=str(e),
             )
+
+    @staticmethod
+    def _fetch_yield_curve() -> dict:
+        """Fetch US Treasury yield curve via PriceProvider chain
+        (treasury_fiscaldata; FRED if FRED_API_KEY is wired in future).
+        Best-effort: returns {} on any failure."""
+        try:
+            from ic_engine.providers.price_provider import PriceProvider
+            curve = PriceProvider().get_treasury_yields()
+            return curve or {}
+        except Exception as e:
+            logger.debug(f"yield_curve fetch skipped: {e}")
+            return {}

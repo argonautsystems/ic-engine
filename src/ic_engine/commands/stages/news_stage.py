@@ -112,10 +112,16 @@ class NewsStage(PipelineStage):
                     holdings_file, output_file=None, top_n=top_n, cache_file=None
                 )
 
+                payload = news_data if isinstance(news_data, dict) else {"news": news_data}
+                # Enrich with category-keyed news so the narrator can answer
+                # market-wide questions like "any M&A news today?", "what's
+                # happening in crypto?", "EUR/USD news?". Per-symbol news
+                # alone (above) doesn't carry that signal.
+                payload["category_news"] = self._fetch_category_news()
                 return StageResult(
                     stage_name=self.stage_name,
                     status="success",
-                    data=news_data if isinstance(news_data, dict) else {"news": news_data},
+                    data=payload,
                     _metadata={"symbols_analyzed": len(symbols)},
                 )
             finally:
@@ -137,3 +143,24 @@ class NewsStage(PipelineStage):
                 status="failed",
                 error=str(e),
             )
+
+    @staticmethod
+    def _fetch_category_news() -> dict:
+        """Fetch market-wide news in the four cobol-targeted categories
+        (general, forex, crypto, merger) via PriceProvider's general_news
+        chain (Finnhub → Marketaux). Best-effort: any category that fails
+        comes back with []."""
+        out: dict = {}
+        try:
+            from ic_engine.providers.price_provider import PriceProvider
+            pp = PriceProvider()
+            for cat in ("general", "forex", "crypto", "merger"):
+                try:
+                    items = pp.get_general_news(cat)
+                    out[cat] = items[:10]  # cap to keep envelope lean
+                except Exception as e:
+                    logger.debug(f"category_news({cat}) failed: {e}")
+                    out[cat] = []
+        except Exception as e:
+            logger.warning(f"category_news disabled: {e}")
+        return out
