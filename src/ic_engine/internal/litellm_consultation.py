@@ -53,14 +53,28 @@ class LiteLLMConsultationClient:
       INVESTORCLAW_CONSULTATION_MODEL     — Model name (e.g., gemma4-consult)
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        endpoint: str | None = None,
+        model: str | None = None,
+        api_key: str | None = None,
+    ) -> None:
+        """Optional explicit overrides let callers (e.g. the narrator) target
+        a different endpoint than the consultation default — narrator wants
+        the long-context narrative model (Together MiniMax-M2.7), not the
+        local consultation gemma4.
+        """
         if not LITELLM_AVAILABLE:
             raise ImportError("litellm not installed. Install with: pip install litellm")
 
-        self.endpoint = os.environ.get(
-            "INVESTORCLAW_CONSULTATION_ENDPOINT", "http://localhost:11434"
+        self.endpoint = (
+            endpoint
+            or os.environ.get("INVESTORCLAW_CONSULTATION_ENDPOINT", "http://localhost:11434")
         ).rstrip("/")
-        self.model = os.environ.get("INVESTORCLAW_CONSULTATION_MODEL", "gemma4-consult")
+        self.model = (
+            model or os.environ.get("INVESTORCLAW_CONSULTATION_MODEL", "gemma4-consult")
+        )
+        self._api_key_override = api_key
         self._available = None  # Lazy probe result
 
     def is_available(self) -> bool:
@@ -138,19 +152,33 @@ class LiteLLMConsultationClient:
             try:
                 model_str = self._build_model_string()
 
-                # Set custom API base if using local inference
+                # Set custom API base for any non-default OpenAI endpoint —
+                # this includes localhost/127.0.0.1, IP-addressed local servers
+                # (e.g. CERBERUS at 192.168.207.96:8080), and OpenAI-compatible
+                # remotes (Together, Groq, etc.). Only the default OpenAI base
+                # may be left as None to use litellm's built-in.
                 api_base = None
-                if (
-                    "localhost" in self.endpoint
-                    or "127.0.0.1" in self.endpoint
-                    or "ollama" in self.endpoint.lower()
-                ):
+                if self.endpoint and "api.openai.com" not in self.endpoint:
                     api_base = self.endpoint
+
+                # API key resolution chain — covers narrative, consultation,
+                # and the standard openai env var. Local servers (llama-server,
+                # ollama, vLLM) ignore the value but litellm still requires
+                # something non-empty; "sk-no-key-needed" is the convention.
+                # Caller-supplied override (passed to __init__) wins over env.
+                api_key = (
+                    self._api_key_override
+                    or os.environ.get("INVESTORCLAW_CONSULTATION_API_KEY")
+                    or os.environ.get("INVESTORCLAW_NARRATIVE_API_KEY")
+                    or os.environ.get("OPENAI_API_KEY")
+                    or "sk-no-key-needed"
+                )
 
                 response = completion(
                     model=model_str,
                     messages=messages,
                     api_base=api_base,
+                    api_key=api_key,
                     timeout=timeout,
                     temperature=temperature,
                     top_p=top_p,
