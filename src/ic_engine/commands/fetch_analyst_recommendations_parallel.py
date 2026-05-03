@@ -390,11 +390,17 @@ class ParallelAnalystFetcher:
             return (symbol, consensus, fetch_time)
 
         except Exception as e:
-            fetch_time = (time.time() - start) * 1000
-            error_msg = f"Failed to fetch {symbol}: {str(e)}"
+            # yfinance raised — most commonly YFRateLimitError on 429. Try the
+            # PriceProvider chain (Finnhub→massive→yfinance) before giving up,
+            # so a Yahoo throttle doesn't sink the whole symbol.
+            error_msg = f"yfinance raised for {symbol}: {str(e)}"
             logger.debug(error_msg)
             self.errors.append((symbol, error_msg))
-            return (symbol, None, fetch_time)
+            fallback = self._fetch_via_provider_fallback(symbol, start)
+            if fallback[1] is not None:
+                logger.debug(f"PriceProvider rescued {symbol} after yfinance exception")
+                return fallback
+            return fallback  # (symbol, None, fetch_time) when both paths failed
 
     def _fetch_with_retry(
         self, symbol: str, retry_count: int = 0
