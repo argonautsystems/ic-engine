@@ -511,20 +511,28 @@ class PolygonProvider:
         self._client = RESTClient(api_key=self.api_key)
 
     def get_quote(self, symbol: str) -> Optional[Dict]:
-        """Previous-day close (free tier)."""
+        """Previous-day close (free tier).
+
+        polygon-api-client renamed `get_previous_close` -> `get_previous_close_agg`
+        in 2024. Modern shape: returns a List[PreviousCloseAgg] directly (no
+        wrapper object with .results), with full attr names (close/open/high/
+        low/volume/timestamp) instead of the legacy single-letter (.c/.o/.h/
+        .l/.v/.t).
+        """
         try:
-            data = self._client.get_previous_close(symbol)
-            if not data or not data.results:
+            aggs = self._client.get_previous_close_agg(symbol)
+            if not aggs:
                 return None
-            r = data.results[0]
+            r = aggs[0]
+            ts = getattr(r, "timestamp", None) or getattr(r, "t", None)
             return {
                 "symbol": symbol,
-                "price": r.c,
-                "open": r.o,
-                "high": r.h,
-                "low": r.l,
-                "volume": r.v,
-                "date": datetime.fromtimestamp(r.t / 1000).strftime("%Y-%m-%d"),
+                "price": getattr(r, "close", None) or getattr(r, "c", None) or 0,
+                "open": getattr(r, "open", None) or getattr(r, "o", None) or 0,
+                "high": getattr(r, "high", None) or getattr(r, "h", None) or 0,
+                "low": getattr(r, "low", None) or getattr(r, "l", None) or 0,
+                "volume": getattr(r, "volume", None) or getattr(r, "v", None) or 0,
+                "date": datetime.fromtimestamp(ts / 1000).strftime("%Y-%m-%d") if ts else None,
                 "provider": self.NAME,
             }
         except Exception as e:
@@ -532,31 +540,42 @@ class PolygonProvider:
             return None
 
     def get_quotes(self, symbols: List[str]) -> Dict[str, Dict]:
+        """Batch quotes via snapshot-all endpoint (Starter+ plan) or prev-day fallback.
+
+        Modern polygon-api-client uses `get_snapshot_all(market_type, tickers)`
+        for batch — old `get_snapshot_ticker(symbols=joined)` was a single-
+        ticker call with an unsupported batch kwarg.
         """
-        Batch quotes via snapshot endpoint (Starter+ plan) or prev-day fallback.
-        """
-        results = {}
+        results: Dict[str, Dict] = {}
 
         # Try batch snapshot (Starter+ plan only)
         try:
-            joined = ",".join(symbols)
-            data = self._client.get_snapshot_ticker(symbols=joined)
-            if data and data.results:
-                for t in data.results:
-                    day = t.day or {}
-                    last = t.last_trade or {}
-                    results[t.ticker] = {
-                        "symbol": t.ticker,
-                        "price": day.c or last.p or 0,
-                        "open": day.o or 0,
-                        "high": day.h or 0,
-                        "low": day.l or 0,
-                        "volume": day.v or 0,
+            data = self._client.get_snapshot_all(market_type="stocks", tickers=symbols)
+            if data:
+                for t in data:
+                    day = getattr(t, "day", None)
+                    last = getattr(t, "last_trade", None)
+                    ticker = getattr(t, "ticker", None)
+                    if not ticker:
+                        continue
+                    price = (
+                        (getattr(day, "close", None) or getattr(day, "c", None) if day else None)
+                        or (getattr(last, "price", None) or getattr(last, "p", None) if last else None)
+                        or 0
+                    )
+                    results[ticker] = {
+                        "symbol": ticker,
+                        "price": price,
+                        "open": (getattr(day, "open", None) or getattr(day, "o", None)) if day else 0,
+                        "high": (getattr(day, "high", None) or getattr(day, "h", None)) if day else 0,
+                        "low": (getattr(day, "low", None) or getattr(day, "l", None)) if day else 0,
+                        "volume": (getattr(day, "volume", None) or getattr(day, "v", None)) if day else 0,
                         "provider": self.NAME,
                     }
-                return results
-        except Exception:
-            pass
+                if results:
+                    return results
+        except Exception as e:
+            logger.debug(f"Polygon snapshot_all unavailable: {e}; falling back to sequential")
 
         # Free-tier fallback: sequential prev-day calls
         logger.info(
@@ -934,7 +953,205 @@ PROVIDER_CLASSES = {
     "massive": PolygonProvider,
     "polygon": PolygonProvider,
     "alpha_vantage": AlphaVantageProvider,
+    # Lazy registration — appended below after the no-key providers are defined.
 }
+
+
+# ─── Frankfurter FX provider (no-key) ────────────────────────────────────────
+# https://www.frankfurter.app — free EUR/USD/etc. spot rates. Used when the
+# user asks about FX (news-forex). No API key required, ECM data provenance.
+
+class FrankfurterFxProvider:
+    """FX spot rates from frankfurter.app (free, no key)."""
+
+    NAME = "frankfurter"
+    BASE_URL = "https://api.frankfurter.app"
+
+    def __init__(self, api_key: Optional[str] = None):
+        # Frankfurter takes no key; constructor signature parity with peers.
+        del api_key
+
+    def get_fx(self, from_ccy: str = "EUR", to_ccy: str = "USD") -> Optional[Dict]:
+        """Latest spot rate. Returns {from, to, rate, date, provider}."""
+        try:
+            import urllib.request, json as _json
+            url = f"{self.BASE_URL}/latest?from={from_ccy}&to={to_ccy}"
+            req = urllib.request.Request(url, headers={"User-Agent": "ic-engine/4.1 (mnemos-ic-runtime)"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = _json.loads(resp.read().decode())
+            rate = (data.get("rates") or {}).get(to_ccy.upper())
+            if rate is None:
+                return None
+            return {
+                "from": from_ccy.upper(),
+                "to": to_ccy.upper(),
+                "rate": rate,
+                "date": data.get("date"),
+                "provider": self.NAME,
+            }
+        except Exception as e:
+            logger.warning(f"Frankfurter fx({from_ccy}->{to_ccy}): {e}")
+            return None
+
+    def get_fx_pairs(self, base: str = "USD") -> Dict[str, float]:
+        """Spot rates for every supported quote currency against `base`."""
+        try:
+            import urllib.request, json as _json
+            url = f"{self.BASE_URL}/latest?from={base}"
+            req = urllib.request.Request(url, headers={"User-Agent": "ic-engine/4.1 (mnemos-ic-runtime)"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = _json.loads(resp.read().decode())
+            return data.get("rates") or {}
+        except Exception as e:
+            logger.warning(f"Frankfurter fx_pairs({base}): {e}")
+            return {}
+
+
+# ─── Treasury.gov fiscal-data yield provider (no-key FRED fallback) ───────
+# https://api.fiscaldata.treasury.gov — public Treasury yield data. Used when
+# FRED_API_KEY is not set. No registration required.
+
+class TreasuryFiscalDataProvider:
+    """US Treasury yield curve via fiscaldata.treasury.gov (free, no key)."""
+
+    NAME = "treasury_fiscaldata"
+    BASE_URL = "https://api.fiscaldata.treasury.gov/services/api/fiscal_service"
+
+    def __init__(self, api_key: Optional[str] = None):
+        del api_key
+
+    def get_yield_curve(self) -> Dict[str, float]:
+        """Latest avg interest rates by security description (Treasury bills,
+        notes, bonds, TIPS, etc.). Returns dict keyed by security_desc.
+        """
+        try:
+            import urllib.request, json as _json
+            # Latest record per security description
+            url = (
+                f"{self.BASE_URL}/v2/accounting/od/avg_interest_rates"
+                "?fields=record_date,security_desc,avg_interest_rate_amt"
+                "&sort=-record_date"
+                "&page[size]=200"
+            )
+            req = urllib.request.Request(url, headers={"User-Agent": "ic-engine/4.1 (mnemos-ic-runtime)"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = _json.loads(resp.read().decode())
+            rows = data.get("data") or []
+            if not rows:
+                return {}
+            # Take the most-recent rate per security_desc
+            seen = set()
+            curve: Dict[str, float] = {}
+            for row in rows:
+                desc = row.get("security_desc")
+                if not desc or desc in seen:
+                    continue
+                seen.add(desc)
+                try:
+                    curve[desc] = float(row.get("avg_interest_rate_amt"))
+                except (TypeError, ValueError):
+                    continue
+            return curve
+        except Exception as e:
+            logger.warning(f"Treasury fiscal_data yield_curve: {e}")
+            return {}
+
+
+PROVIDER_CLASSES["frankfurter"] = FrankfurterFxProvider
+PROVIDER_CLASSES["treasury_fiscaldata"] = TreasuryFiscalDataProvider
+
+
+# ─── Marketaux news provider ──────────────────────────────────────────────
+# https://www.marketaux.com — financial news with broader category filters
+# than NewsAPI (forex, crypto, M&A, country/sector). Free tier 100/day.
+
+class MarketauxNewsProvider:
+    """Financial news via marketaux.com (free tier, MARKETAUX_API_KEY)."""
+
+    NAME = "marketaux"
+    BASE_URL = "https://api.marketaux.com/v1"
+
+    def __init__(self, api_key: Optional[str] = None):
+        self.api_key = api_key or os.getenv("MARKETAUX_API_KEY")
+        if not self.api_key:
+            raise ValueError("MARKETAUX_API_KEY not set")
+
+    def get_news(self, symbols: List[str], days: int = 7) -> List[Dict]:
+        """News articles mentioning the given symbols."""
+        try:
+            import urllib.request, urllib.parse, json as _json
+            params = {
+                "api_token": self.api_key,
+                "symbols": ",".join(symbols[:50]),  # marketaux caps at 50
+                "filter_entities": "true",
+                "language": "en",
+                "limit": "10",
+            }
+            url = f"{self.BASE_URL}/news/all?{urllib.parse.urlencode(params)}"
+            req = urllib.request.Request(url, headers={"User-Agent": "ic-engine/4.1 (mnemos-ic-runtime)"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = _json.loads(resp.read().decode())
+            articles = []
+            for item in (data.get("data") or []):
+                articles.append({
+                    "title": item.get("title", ""),
+                    "summary": item.get("description") or item.get("snippet", ""),
+                    "source": item.get("source", ""),
+                    "url": item.get("url", ""),
+                    "datetime": (item.get("published_at") or "")[:16].replace("T", " "),
+                    "provider": self.NAME,
+                })
+            return articles
+        except Exception as e:
+            logger.warning(f"Marketaux news({len(symbols)} symbols): {e}")
+            return []
+
+    def get_general_news(self, category: str = "general") -> List[Dict]:
+        """Category-filtered news (general / forex / crypto / merger / etc.).
+
+        Marketaux maps:
+          general -> all entity types
+          forex   -> industries=Forex
+          crypto  -> industries=Crypto
+          merger  -> entity_types=organization + topic search 'merger acquisition'
+        """
+        try:
+            import urllib.request, urllib.parse, json as _json
+            params: Dict[str, str] = {
+                "api_token": self.api_key,
+                "language": "en",
+                "limit": "10",
+            }
+            cat = (category or "general").lower()
+            if cat == "forex":
+                params["industries"] = "Currencies"
+            elif cat == "crypto":
+                params["industries"] = "Cryptocurrency"
+            elif cat == "merger":
+                params["search"] = "merger OR acquisition"
+            # general: no filter — full feed
+            url = f"{self.BASE_URL}/news/all?{urllib.parse.urlencode(params)}"
+            req = urllib.request.Request(url, headers={"User-Agent": "ic-engine/4.1 (mnemos-ic-runtime)"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = _json.loads(resp.read().decode())
+            articles = []
+            for item in (data.get("data") or []):
+                articles.append({
+                    "category": cat,
+                    "title": item.get("title", ""),
+                    "summary": item.get("description") or item.get("snippet", ""),
+                    "source": item.get("source", ""),
+                    "url": item.get("url", ""),
+                    "datetime": (item.get("published_at") or "")[:16].replace("T", " "),
+                    "provider": self.NAME,
+                })
+            return articles
+        except Exception as e:
+            logger.warning(f"Marketaux general_news({category}): {e}")
+            return []
+
+
+PROVIDER_CLASSES["marketaux"] = MarketauxNewsProvider
 
 
 def _build_provider(name: str):
@@ -977,6 +1194,9 @@ class PriceProvider:
         "polygon": 999_999,
         "alpha_vantage": 500,
         "newsapi": 100,
+        "marketaux": 100,                # free tier 100/day
+        "frankfurter": 999_999,          # no quota (no key, ECB-sourced)
+        "treasury_fiscaldata": 999_999,  # no quota (public Treasury API)
     }
 
     # Preferred provider order per operation type (first available wins)
@@ -986,7 +1206,21 @@ class PriceProvider:
     _OP_ROUTING: Dict[str, List[str]] = {
         "quotes": ["massive", "yfinance", "finnhub"],
         "history": ["massive", "alpha_vantage", "finnhub", "yfinance"],
-        "news": ["newsapi", "finnhub"],
+        # news (per-symbol): marketaux first (broader sources, 100/day free,
+        # entity-keyed); then newsapi (US-only, 100/day) and finnhub (premium-
+        # depth on company news). yfinance last for any-symbol coverage.
+        "news": ["marketaux", "newsapi", "finnhub", "yfinance"],
+        # general_news (category-keyed: general/forex/crypto/merger): finnhub
+        # has native category endpoints; marketaux as fallback with
+        # industry-filter mapping. NewsAPI doesn't expose category endpoints
+        # in the free tier so it's not in this chain.
+        "general_news": ["finnhub", "marketaux"],
+        # FX spot rates: frankfurter is free + no key + ECB-sourced; alpha
+        # vantage as paid backup.
+        "fx": ["frankfurter", "alpha_vantage"],
+        # Treasury yields: FRED (when FRED_API_KEY set) is preferred; the
+        # treasury fiscaldata API is the no-key public fallback.
+        "treasury_yields": ["treasury_fiscaldata"],
         "analyst": ["finnhub", "yfinance"],
     }
 
@@ -1156,6 +1390,60 @@ class PriceProvider:
     def get_analyst_ratings(self, symbols: List[str]) -> Dict[str, Dict]:
         """Analyst consensus."""
         return self._try_op("analyst", "get_analyst_ratings", symbols)
+
+    def get_general_news(self, category: str = "general") -> List[Dict]:
+        """Category-keyed news (general/forex/crypto/merger). Returns the
+        first non-empty result from the general_news provider chain. Useful
+        for prompts like 'any big M&A news today?' that aren't symbol-keyed.
+        """
+        seen_urls = set()
+        articles: List[Dict] = []
+        for provider in self._providers_for_op("general_news"):
+            fn = getattr(provider, "get_general_news", None)
+            if fn is None:
+                continue
+            try:
+                cost = self._estimate_quota_cost(provider.NAME, "get_news", 1)
+                self._use_quota(provider.NAME, cost)
+                for a in fn(category):
+                    url = a.get("url", "")
+                    if url and url not in seen_urls:
+                        seen_urls.add(url)
+                        articles.append(a)
+                if articles:
+                    return articles  # first provider with content wins
+            except Exception as e:
+                logger.warning(f"{provider.NAME}.get_general_news({category}) failed: {e}")
+        return articles
+
+    def get_fx(self, from_ccy: str = "EUR", to_ccy: str = "USD") -> Optional[Dict]:
+        """FX spot rate. Returns dict with from/to/rate/date/provider."""
+        for provider in self._providers_for_op("fx"):
+            fn = getattr(provider, "get_fx", None)
+            if fn is None:
+                continue
+            try:
+                result = fn(from_ccy, to_ccy)
+                if result:
+                    return result
+            except Exception as e:
+                logger.warning(f"{provider.NAME}.get_fx({from_ccy}->{to_ccy}) failed: {e}")
+        return None
+
+    def get_treasury_yields(self) -> Dict[str, float]:
+        """US Treasury yield curve. Returns dict keyed by security_desc.
+        Used as a no-key fallback when FRED_API_KEY is not configured."""
+        for provider in self._providers_for_op("treasury_yields"):
+            fn = getattr(provider, "get_yield_curve", None)
+            if fn is None:
+                continue
+            try:
+                curve = fn()
+                if curve:
+                    return curve
+            except Exception as e:
+                logger.warning(f"{provider.NAME}.get_yield_curve failed: {e}")
+        return {}
 
     def quota_status(self) -> Dict[str, Dict]:
         """Return quota used/remaining per provider (for diagnostics)."""
