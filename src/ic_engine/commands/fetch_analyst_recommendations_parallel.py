@@ -231,8 +231,79 @@ class ParallelAnalystFetcher:
         m = re.match(r"^\s*([0-9]+(?:\.[0-9]+)?)", str(avg_rating))
         return float(m.group(1)) if m else None
 
+    def _fetch_via_provider_fallback(
+        self, symbol: str, start: float
+    ) -> Optional[Tuple[str, AnalystConsensus, float]]:
+        """Fall back to PriceProvider (Finnhub→yfinance→massive) when the
+        yfinance-direct path returned empty data — typically because Yahoo's
+        anonymous query API rate-limited us with HTTP 429. PriceProvider's
+        analyst chain prefers Finnhub which has a separate quota and is not
+        affected by Yahoo's throttling.
+        """
+        try:
+            from ic_engine.providers.price_provider import PriceProvider
+        except Exception as e:
+            logger.debug(f"PriceProvider unavailable for {symbol} fallback: {e}")
+            return (symbol, None, (time.time() - start) * 1000)
+
+        try:
+            pp = getattr(self, "_price_provider", None)
+            if pp is None:
+                pp = PriceProvider()
+                self._price_provider = pp
+
+            ratings = pp.get_analyst_ratings([symbol]) or {}
+            r = ratings.get(symbol) or {}
+            if not r:
+                return (symbol, None, (time.time() - start) * 1000)
+
+            quotes = pp.get_quotes([symbol]) or {}
+            q = quotes.get(symbol) or {}
+            current_price = q.get("price") or q.get("current") or q.get("close") or 0.0
+
+            buy_count = int(r.get("strong_buy", 0)) + int(r.get("buy", 0))
+            hold_count = int(r.get("hold", 0))
+            sell_count = int(r.get("sell", 0)) + int(r.get("strong_sell", 0))
+            analyst_count = int(r.get("total", 0)) or (buy_count + hold_count + sell_count)
+            consensus_rec = (
+                "Buy" if buy_count > hold_count and buy_count > sell_count
+                else "Sell" if sell_count > hold_count and sell_count > buy_count
+                else "Hold"
+            )
+
+            consensus = AnalystConsensus(
+                symbol=symbol,
+                current_price=float(current_price or 0.0),
+                consensus_recommendation=consensus_rec,
+                buy_count=buy_count,
+                hold_count=hold_count,
+                sell_count=sell_count,
+                total_recommendations=analyst_count,
+                target_price_mean=None,  # Finnhub recommendation_trends doesn't carry targets
+                target_price_high=None,
+                target_price_low=None,
+                target_price_current=float(current_price or 0.0),
+                analyst_count=analyst_count,
+                recommendation_mean=None,
+                data_timestamp=datetime.now().isoformat(),
+                fetch_time_ms=int((time.time() - start) * 1000),
+            )
+            return (symbol, consensus, (time.time() - start) * 1000)
+        except Exception as e:
+            logger.debug(f"PriceProvider fallback failed for {symbol}: {e}")
+            return (symbol, None, (time.time() - start) * 1000)
+
     def _fetch_consensus(self, symbol: str) -> Optional[Tuple[str, AnalystConsensus, float]]:
-        """Fetch single symbol (with timing)"""
+        """Fetch single symbol (with timing).
+
+        Tries yfinance.Ticker.info first (fast, batch-friendly). When Yahoo
+        rate-limits us with a 429 (which currently happens for unauthenticated
+        anonymous query1 traffic regardless of source IP), `info` comes back
+        empty and we fall back to PriceProvider — which prefers Finnhub for
+        analyst ratings and Polygon (massive) for quotes, avoiding Yahoo
+        entirely. The fallback path requires FINNHUB_KEY and/or MASSIVE_API_KEY
+        to be set; if neither is, the symbol returns None like before.
+        """
         start = time.time()
         try:
             # Normalise broker symbols: BRK.B → BRK-B (yfinance uses hyphens, not periods)
@@ -241,8 +312,9 @@ class ParallelAnalystFetcher:
 
             current_price = info.get("currentPrice") or info.get("regularMarketPrice")
             if current_price is None:
-                logger.debug(f"No price for {symbol}")
-                return (symbol, None, (time.time() - start) * 1000)
+                # Yahoo returned nothing usable — try the provider chain.
+                logger.debug(f"yfinance empty for {symbol}; falling back to PriceProvider")
+                return self._fetch_via_provider_fallback(symbol, start)
 
             analyst_count = info.get("numberOfAnalystOpinions", 0)
             rec_key = info.get("recommendationKey", "").lower()
