@@ -346,6 +346,34 @@ def fetch_benchmark_returns(benchmark: str = "SPY", period: str = "1y") -> np.nd
     if cache_key in _benchmark_cache:
         return _benchmark_cache[cache_key]
 
+    # Map yfinance period strings to days for PriceProvider.
+    period_days = {
+        "1mo": 30, "3mo": 90, "6mo": 180,
+        "1y": 372, "2y": 730, "5y": 1825, "max": 3650,
+    }
+    days = period_days.get(period, 372)
+
+    # Primary: PriceProvider chain (massive → alpha_vantage → finnhub → yfinance batch).
+    # Avoids per-call yfinance.Ticker throttling that wipes out 215-symbol portfolios.
+    try:
+        from ic_engine.providers.price_panel import get_close_panel
+        panel = get_close_panel([benchmark], days=days)
+        if panel is not None and not panel.empty and benchmark in panel.columns:
+            prices = panel[benchmark].dropna().values
+            if len(prices) >= 2:
+                returns = np.diff(prices) / prices[:-1]
+                _benchmark_cache[cache_key] = returns
+                logger.debug(
+                    f"Cached {len(returns)} benchmark returns for {benchmark} via PriceProvider"
+                )
+                return returns
+        logger.warning(
+            f"PriceProvider returned no data for benchmark {benchmark}; falling back to yfinance"
+        )
+    except Exception as e:
+        logger.warning(f"PriceProvider benchmark fetch failed for {benchmark}: {e}")
+
+    # Fallback: direct yfinance (rate-limit prone but kept as last resort).
     try:
         import yfinance as yf
 

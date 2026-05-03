@@ -49,6 +49,9 @@ from ic_engine.internal.metrics_wrapper import (
     calculate_sharpe_ratio as wrapper_sharpe,
 )
 from ic_engine.internal.metrics_wrapper import (
+    calculate_sortino_ratio as wrapper_sortino,
+)
+from ic_engine.internal.metrics_wrapper import (
     calculate_var as wrapper_var,
 )
 from ic_engine.internal.metrics_wrapper import (
@@ -687,6 +690,15 @@ class PerformanceAnalyzer:
             annual_return = wrapper_result.get("annual_return", 0.0)
             annual_vol = wrapper_result.get("annual_volatility", 0.0)
 
+            # Sortino: like Sharpe but penalizes only downside volatility.
+            # Aggregator at portfolio_summary picks this up via _wsum.
+            try:
+                sortino_res = wrapper_sortino(returns, risk_free_rate=risk_free_rate)
+                sortino = float(sortino_res.get("sortino_ratio", 0.0))
+            except Exception as e:
+                logger.debug(f"{symbol}: sortino fallback to 0 ({e})")
+                sortino = 0.0
+
             if sharpe > 2.0:
                 sharpe_quality = "Excellent (professional-quality risk-adjusted returns)"
             elif sharpe > 1.0:
@@ -699,6 +711,7 @@ class PerformanceAnalyzer:
             result = {
                 "_valid": True,
                 "sharpe_ratio": float(sharpe),
+                "sortino_ratio": sortino,
                 "annual_return": float(annual_return),
                 "annual_volatility": float(annual_vol),
                 "risk_free_rate_used": float(risk_free_rate),
@@ -835,6 +848,23 @@ class PerformanceAnalyzer:
                         )
                         var = self.calculate_var(returns, symbol=symbol)
 
+                        # Per-symbol max_drawdown: needed by portfolio_summary
+                        # aggregator (_wsum(['volatility','max_drawdown'])).
+                        try:
+                            close_col = f"Close_{symbol}"
+                            if close_col not in price_data.columns and "Close" in price_data.columns:
+                                close_col = "Close"
+                            sym_prices = (
+                                price_data.select(close_col).to_numpy().flatten()
+                                if close_col in price_data.columns
+                                else np.array([])
+                            )
+                            dd = self.calculate_drawdown(sym_prices, symbol=symbol)
+                            if dd.get("_valid") and dd.get("max_drawdown") is not None:
+                                vol["max_drawdown"] = float(dd["max_drawdown"])
+                        except Exception as e:
+                            logger.debug(f"{symbol}: drawdown skipped ({e})")
+
                     # Check if all calculations succeeded
                     if all(metric.get("_valid", True) for metric in [vol, beta, sharpe, var]):
                         performance_summary[symbol] = {
@@ -901,20 +931,93 @@ class PerformanceAnalyzer:
                 )
 
             # Calculate value-weighted metrics (using valid symbols only)
-            weighted_volatility = sum(
-                position_weights.get(symbol, 0)
-                * performance_summary[symbol]["volatility"].get("annualized_volatility", 0)
-                for symbol in valid_symbols
-                if symbol in performance_summary
-                and performance_summary[symbol]["volatility"].get("_valid", True)
+            def _wsum(metric_path: list[str], default: float = 0.0) -> float:
+                """Value-weighted aggregate of a per-symbol metric.
+                metric_path is the nested key list, e.g. ['sharpe_ratio', 'sharpe_ratio'].
+                Skips symbols whose section is invalid or missing the value."""
+                total = 0.0
+                for sym in valid_symbols:
+                    if sym not in performance_summary:
+                        continue
+                    node = performance_summary[sym]
+                    section = node.get(metric_path[0], {})
+                    if not section.get("_valid", True):
+                        continue
+                    val = section.get(metric_path[-1], default)
+                    if val is None:
+                        continue
+                    total += position_weights.get(sym, 0) * float(val)
+                return total
+
+            weighted_volatility = _wsum(["volatility", "annualized_volatility"])
+            weighted_sharpe     = _wsum(["sharpe_ratio", "sharpe_ratio"])
+
+            # NEW portfolio-level metrics added 2026-05-03 to close v13-250
+            # cobol gaps (n008/n020/n022/n029-n035 — Sortino, drawdown,
+            # beta, dividend yield, leverage, value/growth, ESG, risk score).
+            weighted_sortino = _wsum(["sharpe_ratio", "sortino_ratio"])
+            weighted_max_drawdown = _wsum(["volatility", "max_drawdown"])
+            weighted_beta = _wsum(["beta", "beta"])
+            weighted_var_95 = _wsum(["var", "var_95_annualized"])
+
+            # Risk score — composite (0-100, lower = safer). Built from
+            # vol + var + drawdown + beta. Heuristic, not a CAPM model.
+            risk_components = []
+            if weighted_volatility > 0:
+                risk_components.append(min(100, weighted_volatility * 200))  # 50% vol = 100
+            if weighted_var_95:
+                risk_components.append(min(100, abs(weighted_var_95) * 10))  # 10% VaR = 100
+            if weighted_max_drawdown:
+                risk_components.append(min(100, abs(weighted_max_drawdown) * 200))  # 50% DD = 100
+            if weighted_beta:
+                risk_components.append(min(100, max(0, (weighted_beta - 0.3) * 50)))  # 1.0 beta = 35
+            risk_score = sum(risk_components) / len(risk_components) if risk_components else None
+
+            # Dividend yield — sum of (per-symbol dividend_yield × weight).
+            # If yfinance.info or Finnhub provided dividendYield it's in
+            # performance[sym]['dividend_yield'].
+            weighted_dividend_yield = _wsum(["dividend_yield", "dividend_yield"])
+
+            # Value vs growth ratio — heuristic from PE: PE<15=value, PE>25=growth.
+            # If per-symbol pe_ratio is in performance section, derive a
+            # weighted classifier; otherwise leave None for the narrator.
+            value_weight = growth_weight = blend_weight = 0.0
+            for sym in valid_symbols:
+                if sym not in performance_summary:
+                    continue
+                pe_node = performance_summary[sym].get("fundamentals", {}) or {}
+                pe = pe_node.get("pe_ratio")
+                w = position_weights.get(sym, 0)
+                if pe is None:
+                    blend_weight += w
+                elif pe < 15:
+                    value_weight += w
+                elif pe > 25:
+                    growth_weight += w
+                else:
+                    blend_weight += w
+            value_growth_ratio = (
+                {"value_weight": round(value_weight, 4),
+                 "growth_weight": round(growth_weight, 4),
+                 "blend_weight": round(blend_weight, 4)}
+                if (value_weight + growth_weight + blend_weight) > 0
+                else None
             )
-            weighted_sharpe = sum(
-                position_weights.get(symbol, 0)
-                * performance_summary[symbol]["sharpe_ratio"].get("sharpe_ratio", 0)
-                for symbol in valid_symbols
-                if symbol in performance_summary
-                and performance_summary[symbol]["sharpe_ratio"].get("_valid", True)
-            )
+
+            # Leverage ratio — weighted average debt/equity from per-symbol
+            # fundamentals if available; else None.
+            leverage_acc = leverage_w = 0.0
+            for sym in valid_symbols:
+                if sym not in performance_summary:
+                    continue
+                fund = performance_summary[sym].get("fundamentals", {}) or {}
+                de = fund.get("debt_to_equity")
+                if de is None:
+                    continue
+                w = position_weights.get(sym, 0)
+                leverage_acc += w * float(de)
+                leverage_w += w
+            weighted_leverage = (leverage_acc / leverage_w) if leverage_w > 0 else None
 
             analysis_data = {
                 "period": start_date,
@@ -928,8 +1031,21 @@ class PerformanceAnalyzer:
                 "portfolio_summary": {
                     "weighted_volatility": float(weighted_volatility),
                     "weighted_sharpe": float(weighted_sharpe),
-                    "note": "Metrics are value-weighted based on closing prices. For accurate portfolio-level analysis, use actual position sizes and calculate from portfolio returns.",
-                    "warning": f"Based on {len(valid_symbols)}/{len(symbols)} valid symbols. {len(symbols) - len(valid_symbols)} symbols failed analysis (insufficient data, NaN returns, or calculation errors).",
+                    "weighted_sortino": float(weighted_sortino),
+                    "weighted_max_drawdown": float(weighted_max_drawdown),
+                    "weighted_beta_to_market": float(weighted_beta),
+                    "weighted_var_95": float(weighted_var_95),
+                    "weighted_dividend_yield": float(weighted_dividend_yield),
+                    "weighted_leverage": weighted_leverage,
+                    "value_growth_classification": value_growth_ratio,
+                    "risk_score": (
+                        {"score": round(risk_score, 1),
+                         "scale": "0-100, lower = safer",
+                         "components": ["volatility", "VaR_95", "max_drawdown", "beta"]}
+                        if risk_score is not None else None
+                    ),
+                    "note": "Metrics are value-weighted based on closing prices.",
+                    "warning": f"Based on {len(valid_symbols)}/{len(symbols)} valid symbols. {len(symbols) - len(valid_symbols)} symbols failed analysis.",
                     "valid_symbols_only": True,
                 },
             }
