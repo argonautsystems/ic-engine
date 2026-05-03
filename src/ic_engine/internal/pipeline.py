@@ -108,7 +108,15 @@ class PortfolioPipeline:
                 return json.load(f)
         return {
             "cache_dir": str(self.cache_dir),
-            "parallel_timeout_seconds": 60,
+            # P1 parallel-stage timeout. Was 60s; bumped 2026-05-03 because
+            # 200+ position portfolios overflowed it — asyncio.gather raised
+            # TimeoutError, ALL P1 results were lost, the envelope marked
+            # every section "did not run" even though individual stages
+            # (e.g. analyst at 17s) had completed. The narrator then refused
+            # to answer because the envelope was sparse, which masqueraded
+            # as a routing bug for weeks. Per-stage retry handles transient
+            # failures within this budget.
+            "parallel_timeout_seconds": 600,
             "max_workers": 4,
             "max_retries": 2,
             "retry_delay_seconds": 1,
