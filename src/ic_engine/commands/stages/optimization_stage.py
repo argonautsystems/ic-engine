@@ -52,6 +52,7 @@ class OptimizationStage(PipelineStage):
                 fetch_historical_returns,
                 load_holdings,
                 optimize_sharpe_ratio,
+                optimize_min_volatility,
             )
 
             # Create temporary holdings file in CDM format
@@ -119,15 +120,29 @@ class OptimizationStage(PipelineStage):
                 symbols = equity_holdings["symbol"].tolist()
                 returns = fetch_historical_returns(symbols)
 
-                # Run optimization
-                result = optimize_sharpe_ratio(equity_holdings, returns)
+                # Run BOTH optimization methods so the narrator can answer
+                # any optimize question (max-sharpe / min-volatility) from
+                # the same envelope. Storing both under named keys instead
+                # of one root-level method/weights so the narrator can pick
+                # the right answer based on the question wording.
+                sharpe = optimize_sharpe_ratio(equity_holdings, returns)
+                minvol = optimize_min_volatility(equity_holdings, returns)
+
+                # Combined payload — keeps the legacy root-level fields for
+                # callers expecting `method/weights/performance` (uses
+                # max_sharpe by default), and adds named sub-objects so
+                # any-method questions resolve.
+                data = dict(sharpe) if isinstance(sharpe, dict) else {"max_sharpe": sharpe}
+                data["max_sharpe"] = sharpe
+                data["min_volatility"] = minvol
 
                 return StageResult(
                     stage_name=self.stage_name,
                     status="success",
-                    data=result if isinstance(result, dict) else {"optimization": result},
+                    data=data,
                     _metadata={
                         "equities_analyzed": len(symbols),
+                        "methods_computed": ["max_sharpe", "min_volatility"],
                     },
                 )
             finally:
