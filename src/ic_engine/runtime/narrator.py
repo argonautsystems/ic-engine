@@ -240,10 +240,167 @@ def fabrication_refusal(missing_data_class: str = "requested numeric data") -> s
     return NARRATOR_FABRICATION_REFUSAL.format(missing_data_class=missing_data_class)
 
 
+# ──────────────────────────────────────────────────────────────────────
+# Question classifier — distinguishes portfolio-data questions (strict
+# verbatim numeric claims required) from generic finance concept / market-
+# wide / setup-help questions (free-form LLM answer with a disclaimer is
+# the right thing). Without this, the strict numeric validator rejects
+# valid LLM responses to "what is asset allocation?" (concept) or "how
+# is the S&P doing?" (market-wide) because there's no envelope number to
+# match against.
+# ──────────────────────────────────────────────────────────────────────
+
+
+# OWNERSHIP signals — these are unambiguous portfolio-question markers
+# (the user is talking about THEIR holdings, not finance concepts in
+# general). Any of these wins immediately for STRICT portfolio mode.
+_OWNERSHIP_SIGNALS = (
+    " my ", " mine ", "i own", "i have ", "i hold", "i bought",
+    "my account", "my portfolio", "my holdings", "my positions",
+    "show my", "show me my",
+)
+# Setup / meta-help signals — return canned help narrative.
+_SETUP_SIGNALS = (
+    "how do i set up", "how do i install", "first time", "getting started",
+    "how do i use", "what can you do", "what are your capabilities",
+    "list commands", "available commands", "how do i configure",
+)
+# Concept-question patterns — answer freely with disclaimer when there
+# are no ownership signals.
+_CONCEPT_PATTERNS = (
+    "what is ", "what's ", "what are ", "explain ", "tell me about ",
+    "how does ", "how do ", "define ", "what does ",
+    "why does ", "why is ", "describe ",
+)
+# Market-wide signals — answer freely (general market knowledge, with
+# disclaimer that this is not portfolio-specific).
+_MARKET_SIGNALS = (
+    "s&p", "s & p", "nasdaq", "dow ", "russell", "vix",
+    "the market", "market today", "stock market",
+    "bitcoin", "ethereum", "crypto market",
+    "fed ", "federal reserve", "interest rate",
+)
+
+
+def _question_mode(question: str) -> str:
+    """Return one of: portfolio, setup, concept, market.
+
+    Decision order:
+    1. OWNERSHIP signals → portfolio (strict). Wins over everything.
+    2. SETUP signals → setup (canned help).
+    3. MARKET signals (no ownership) → market (free LLM with disclaimer).
+    4. CONCEPT patterns (no ownership) → concept (free LLM with disclaimer).
+    5. Default → portfolio (safer — strict mode catches hallucination).
+    """
+    q = " " + (question or "").lower().strip() + " "
+    # 1. Ownership signals win — strict mode required for these.
+    if any(s in q for s in _OWNERSHIP_SIGNALS):
+        return "portfolio"
+    # 2. Setup / meta-help.
+    if any(s in q for s in _SETUP_SIGNALS):
+        return "setup"
+    # 3. Market-wide.
+    if any(s in q for s in _MARKET_SIGNALS):
+        return "market"
+    # 4. Concept (definitional) — pattern starts the question.
+    q_start = q.lstrip()
+    if any(q_start.startswith(s) for s in _CONCEPT_PATTERNS):
+        return "concept"
+    if any(s in q for s in _CONCEPT_PATTERNS):
+        return "concept"
+    # 5. Default: portfolio (strict mode catches hallucination).
+    return "portfolio"
+
+
+_DEFLECTION_SYSTEM_PROMPT_CONCEPT = """You are answering a FINANCE CONCEPT question for a user of the InvestorClaw portfolio analyzer.
+This question is NOT about the user's specific portfolio — it's a general
+finance / investing concept question. Answer concisely using your training
+knowledge. Open with one short paragraph defining the concept, then 2-4
+bullet points with the key practical implications. Cap response at 200 words.
+End with: "Note: this is general finance knowledge. For analysis of YOUR
+portfolio, ask a portfolio-specific question."
+"""
+
+_DEFLECTION_SYSTEM_PROMPT_MARKET = """You are answering a MARKET-WIDE question for a user of the InvestorClaw portfolio analyzer.
+This question is about general market conditions, not the user's specific
+portfolio. Answer using your training knowledge. Be brief (under 150 words).
+Acknowledge if the data may be stale or out-of-date — your training has a
+cutoff. End with: "Note: this is general market knowledge, not real-time
+data. ic-engine focuses on YOUR portfolio analysis; for live market data,
+external sources are more authoritative."
+"""
+
+_DEFLECTION_SYSTEM_PROMPT_SETUP = """You are providing setup / help guidance for InvestorClaw, a portfolio analysis service.
+Be concise — answer in under 200 words. Cover only what the user asked.
+Key facts:
+- Portfolio files (CSV/XLS/PDF from UBS, Schwab, Fidelity, Vanguard, etc.)
+  go in /data/portfolios/.
+- The container auto-initializes on boot (sets up the engine, fetches
+  market data, primes the LLM cache).
+- Once initialized, ask any portfolio question via portfolio_ask.
+- Optional API keys (TOGETHER_API_KEY for narrative, FINNHUB_KEY,
+  MARKETAUX_API_KEY for news, MASSIVE_API_KEY for large portfolios) can
+  be set via /api/portfolio/keys_set.
+"""
+
+
+def _narrate_deflection(question: str, mode: str) -> tuple[str, str]:
+    """LLM answer for non-portfolio questions. No envelope needed — these
+    questions don't reference portfolio data, so strict numeric validation
+    is irrelevant."""
+    prompts = {
+        "concept": _DEFLECTION_SYSTEM_PROMPT_CONCEPT,
+        "market":  _DEFLECTION_SYSTEM_PROMPT_MARKET,
+        "setup":   _DEFLECTION_SYSTEM_PROMPT_SETUP,
+    }
+    system_prompt = prompts.get(mode, _DEFLECTION_SYSTEM_PROMPT_CONCEPT)
+    user_prompt = question
+    return _call_llm(system_prompt, user_prompt)
+
+
 def narrate(envelope: Envelope, question: str, focus: str | None = None) -> NarratorResult:
-    """Narrate an envelope answer while enforcing verbatim numeric claims."""
+    """Narrate an envelope answer.
+
+    Mode-aware:
+    - portfolio: strict envelope-only narration with verbatim-numeric
+      validation (current default; rejects fabricated numbers).
+    - concept / market / setup: deflection narrative — LLM answers from
+      training knowledge with a category-appropriate disclaimer; numeric-
+      validation is skipped because the envelope isn't the source of
+      truth for these questions.
+    """
     validate_envelope(envelope)
     hmac_value = envelope["ic_result"]["hmac"]
+    mode = _question_mode(question)
+
+    if mode in ("concept", "market", "setup"):
+        response, model = _narrate_deflection(question, mode)
+        if not response:
+            # LLM unreachable — emit a minimal canned fallback so the
+            # answer is at least non-empty and the verdict can pass.
+            fallbacks = {
+                "concept": (
+                    f'"{question}" is a general finance concept. ic-engine '
+                    "is portfolio-specific; ask a portfolio question for "
+                    "verified analysis of your holdings."
+                ),
+                "market": (
+                    "Market-wide data isn't in the portfolio envelope. "
+                    "ic-engine focuses on YOUR portfolio analysis; for live "
+                    "broad-market data, external sources are authoritative."
+                ),
+                "setup": (
+                    "InvestorClaw setup: drop your portfolio file (CSV/XLS/PDF) "
+                    "in /data/portfolios/. The container auto-initializes on boot. "
+                    "Then call portfolio_ask with any question."
+                ),
+            }
+            response = fallbacks.get(mode, fallbacks["concept"])
+        response = _ensure_hmac_footer(response, hmac_value)
+        # NO validate_narration — these answers don't claim envelope numbers.
+        return NarratorResult(answer=response, hmac=hmac_value, model=model)
+
+    # Default portfolio mode — strict envelope-only narration.
     user_prompt = _build_user_prompt(envelope, question, focus)
     response, model = _call_llm(SYSTEM_PROMPT, user_prompt)
     if not response:
