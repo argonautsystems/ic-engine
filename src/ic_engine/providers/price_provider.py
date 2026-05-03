@@ -1204,24 +1204,17 @@ class PriceProvider:
     # alpha_vantage's 4-calls/min cap and finnhub's premium-only candle
     # endpoint both collapse under barrage load.
     _OP_ROUTING: Dict[str, List[str]] = {
-        "quotes": ["massive", "yfinance", "finnhub"],
-        "history": ["massive", "alpha_vantage", "finnhub", "yfinance"],
-        # news (per-symbol): marketaux first (broader sources, 100/day free,
-        # entity-keyed); then newsapi (US-only, 100/day) and finnhub (premium-
-        # depth on company news). yfinance last for any-symbol coverage.
-        "news": ["marketaux", "newsapi", "finnhub", "yfinance"],
-        # general_news (category-keyed: general/forex/crypto/merger): finnhub
-        # has native category endpoints; marketaux as fallback with
-        # industry-filter mapping. NewsAPI doesn't expose category endpoints
-        # in the free tier so it's not in this chain.
-        "general_news": ["finnhub", "marketaux"],
-        # FX spot rates: frankfurter is free + no key + ECB-sourced; alpha
-        # vantage as paid backup.
-        "fx": ["frankfurter", "alpha_vantage"],
-        # Treasury yields: FRED (when FRED_API_KEY set) is preferred; the
-        # treasury fiscaldata API is the no-key public fallback.
+        # yfinance is intentionally LAST in every chain — Yahoo's anonymous
+        # query1 endpoint is rate-limited globally (HTTP 429) and collapses
+        # under barrage load on a 200+ position portfolio. Use only as a
+        # last-resort fallback when every other provider has failed.
+        "quotes":          ["massive", "finnhub", "alpha_vantage", "yfinance"],
+        "history":         ["massive", "alpha_vantage", "finnhub", "yfinance"],
+        "news":            ["marketaux", "finnhub", "newsapi", "yfinance"],
+        "general_news":    ["finnhub", "marketaux"],
+        "fx":              ["frankfurter", "alpha_vantage"],
         "treasury_yields": ["treasury_fiscaldata"],
-        "analyst": ["finnhub", "yfinance"],
+        "analyst":         ["finnhub", "yfinance"],
     }
 
     def __init__(
