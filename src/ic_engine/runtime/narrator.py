@@ -308,17 +308,83 @@ _SETUP_SIGNALS = (
 # Concept-question patterns — answer freely with disclaimer when there
 # are no ownership signals.
 _CONCEPT_PATTERNS = (
-    "what is ", "what's ", "what are ", "explain ", "tell me about ",
+    "what is ", "what's ", "what are ", "what about ",
+    "explain ", "tell me about ", "describe ",
     "how does ", "how do ", "define ", "what does ",
-    "why does ", "why is ", "describe ",
+    "why does ", "why is ",
 )
 # Market-wide signals — answer freely (general market knowledge, with
 # disclaimer that this is not portfolio-specific).
 _MARKET_SIGNALS = (
+    # Major indices + market terms
     "s&p", "s & p", "nasdaq", "dow ", "russell", "vix",
-    "the market", "market today", "stock market",
-    "bitcoin", "ethereum", "crypto market",
-    "fed ", "federal reserve", "interest rate",
+    "the market", "market today", "stock market", "implied volatility",
+    "put/call", "put-call", "market breadth", "advance-decline",
+    "sector rotation", "market sentiment", "support and resistance",
+    # Crypto
+    "bitcoin", "ethereum", "crypto market", "defi",
+    # Fed / rates / monetary policy
+    "fed ", "federal reserve", "interest rate", "rates", "fed's",
+    "fed decision", "rate outlook", "quantitative easing", "fed's balance sheet",
+    "reverse repo", "repo market", "swap spread",
+    # Macro / economic data
+    "inflation", "cpi", "ppi", "core inflation", "wage growth",
+    "jobs report", "unemployment", "labor force", "jobless claims",
+    "continuing claims", "gdp", "gdp growth", "consumer confidence",
+    "manufacturing data", "manufacturing pmi", "services pmi",
+    "construction spending", "housing starts", "existing home sales",
+    "home prices", "mortgage rate", "consumer spending", "retail sales",
+    "durable goods", "factory orders", "trade deficit", "export",
+    "import data", "corporate profits", "business investment",
+    "debt situation",
+    # Earnings / corporate events
+    "earnings season", "earnings reports", "earnings surprise",
+    "guidance revisions", "ipo", "ipo pipeline", "spac", "buyback",
+    "buyback announcement", "insider trading", "insider activity",
+    # Bonds / fixed income
+    "treasury yield", "treasury bond yield", "tips", "yield curve",
+    "investment grade", "high-yield", "high yield", "junk bond",
+    "junk bonds", "muni bond", "municipal bond", "corporate bond",
+    "fallen angel", "distressed credit", "convertible bond",
+    "emerging market bond", "credit spread", "bond fund flows",
+    "bond market technicals",
+    # Commodities + FX
+    "commodities", "crude oil", "oil price", "precious metals",
+    "gold", "silver", "metals trends", "dollar strength",
+    "currency correlations", "forex market", "fx market",
+    # Technical / quant analysis
+    "technical chart", "chart patterns", "technical patterns",
+    "technical analysis", "fundamental analysis", "sentiment analysis",
+    "fama-french", "capital asset pricing", "capm", "factor investing",
+    "factor tilts", "smart beta", "value investing", "growth investing",
+    "momentum investing", "mean reversion", "pairs trading",
+    "statistical arbitrage", "market microstructure",
+    "algorithmic trading", "high-frequency trading", "hft",
+    "dark pools", "bid-ask spread", "market impact",
+    # Tax / planning concepts (mostly definitional but no portfolio data)
+    "tax-loss harvesting", "wash sale", "long-term capital gains",
+    "income shifting", "charitable giving", "donor-advised funds",
+    "tax-efficient investing", "qualified dividends",
+    "qualified business income", "niit tax", "alternative minimum tax",
+    "amt tax", "net unrealized appreciation", "inherited ira",
+    "required minimum distributions", "secure act",
+    "mega backdoor roth", "1031 exchange", "opportunity zones",
+    "kiddie tax", "state tax", "foreign accounts",
+    # Risk management concepts
+    "value at risk", "var ", "expected shortfall", "efficient frontier",
+    "modern portfolio theory", "correlation breakdown", "systemic risk",
+    "stress testing", "tail risk", "liquidity risk", "counterparty risk",
+    "geopolitical exposure", "inflation protection", "credit risk management",
+    "interest rate sensitivity", "currency hedging", "black swan",
+    "scenario analysis",
+    # Bond strategies / concepts
+    "bond laddering", "barbell strategy", "duration risk", "convexity",
+    "yield to maturity",
+    # Options
+    "options trading", "calls and puts", "options for hedging",
+    "straddle", "strangle", "covered call", "put spread",
+    # Other generic finance terms
+    "diversification", "rebalance",
 )
 
 
@@ -330,7 +396,12 @@ def _question_mode(question: str) -> str:
     2. SETUP signals → setup (canned help).
     3. MARKET signals (no ownership) → market (free LLM with disclaimer).
     4. CONCEPT patterns (no ownership) → concept (free LLM with disclaimer).
-    5. Default → portfolio (safer — strict mode catches hallucination).
+    5. Default → concept (deflection). Was 'portfolio' (strict) but that
+       over-rejected generic finance/market questions without ownership
+       words ('Jobs report analysis', 'Show GDP growth', 'What about TIPS?').
+       Concept-deflection answers freely with the LLM and a clear
+       disclaimer, which is the right behavior for non-portfolio Qs.
+       Portfolio-strict still fires whenever ownership signals are present.
     """
     q = " " + (question or "").lower().strip() + " "
     # 1. Ownership signals win — strict mode required for these.
@@ -342,14 +413,14 @@ def _question_mode(question: str) -> str:
     # 3. Market-wide.
     if any(s in q for s in _MARKET_SIGNALS):
         return "market"
-    # 4. Concept (definitional) — pattern starts the question.
+    # 4. Concept (definitional) — pattern starts the question OR appears.
     q_start = q.lstrip()
     if any(q_start.startswith(s) for s in _CONCEPT_PATTERNS):
         return "concept"
     if any(s in q for s in _CONCEPT_PATTERNS):
         return "concept"
-    # 5. Default: portfolio (strict mode catches hallucination).
-    return "portfolio"
+    # 5. Default: concept-deflection. Free LLM + disclaimer.
+    return "concept"
 
 
 _DEFLECTION_SYSTEM_PROMPT_CONCEPT = """You are answering a FINANCE CONCEPT question for a user of the InvestorClaw portfolio analyzer.
