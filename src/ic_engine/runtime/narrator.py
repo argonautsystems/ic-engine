@@ -219,11 +219,51 @@ def _ensure_hmac_footer(response: str, hmac_value: str) -> str:
 
 
 def _fabricated_numeric_claims(response: str, envelope: Envelope) -> list[str]:
+    """Detect numeric claims in `response` not derivable from `envelope`.
+
+    Approximation-aware: a percentage like `109.45%` is accepted if the
+    raw decimal `1.0945` (or any 0-4 decimal rounding of it) appears in
+    the envelope; a decimal like `0.0378` is accepted if `3.78%` appears.
+    The narrator's LLM commonly converts envelope decimals to display
+    percentages (and vice-versa) and rounds — without these checks the
+    validator over-rejects valid narrations.
+    """
     envelope_text = json.dumps(envelope, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     fabricated: list[str] = []
     for match in _NUMERIC_CLAIM_RE.finditer(response):
         token = match.group(0)
-        if token not in envelope_text:
+        if token in envelope_text:
+            continue
+        # Approximation candidates — check if any of these forms appear.
+        candidates = [token]
+        try:
+            if token.endswith("%"):
+                # "109.45%" -> 1.0945, also try 1.094 / 1.09 / 1.1
+                pct = float(token[:-1].replace(",", ""))
+                dec = pct / 100.0
+                candidates.extend([
+                    f"{dec:.6f}", f"{dec:.5f}", f"{dec:.4f}", f"{dec:.3f}", f"{dec:.2f}",
+                    str(dec),
+                ])
+            elif "$" in token:
+                # "$203,075.60" -> 203075.6 / 203075 / 203076
+                num = float(token.replace("$", "").replace(",", ""))
+                candidates.extend([
+                    f"{num:.2f}", f"{num:.1f}", f"{num:.0f}",
+                    str(int(num)) if num.is_integer() else str(num),
+                ])
+            else:
+                # plain number — try percentage form (token is decimal, env may have percentage)
+                num = float(token.replace(",", "").rstrip("xX").rstrip("%"))
+                pct = num * 100.0
+                candidates.extend([
+                    f"{pct:.4f}", f"{pct:.2f}", f"{pct:.1f}",
+                    f"{num:.6f}", f"{num:.4f}", f"{num:.2f}", f"{num:.0f}",
+                ])
+        except (ValueError, AttributeError):
+            pass
+
+        if not any(c in envelope_text for c in candidates):
             fabricated.append(token)
     return fabricated
 
