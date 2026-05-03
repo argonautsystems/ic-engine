@@ -38,7 +38,16 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
-from matplotlib import pyplot as plt
+
+# matplotlib is OPTIONAL — only needed for OPT-04 frontier visualization
+# (chart rendering). The container trim drops matplotlib to keep the
+# image lean; loading it at module level breaks `import optimize` and
+# kills OPT-01/02/03/08 etc. that don't use plotting at all. Defer to
+# the chart function and treat ImportError as "rendering unavailable".
+try:
+    from matplotlib import pyplot as plt  # noqa: F401  (optional)
+except ImportError:
+    plt = None  # type: ignore[assignment]
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -446,7 +455,11 @@ def optimize_sharpe_ratio(holdings: pd.DataFrame, returns: pd.DataFrame) -> Dict
 
         return {
             "method": "max_sharpe_ratio",
-            "weights": {sym: float(w) for sym, w in zip(symbols, weights)},
+            # pyportfolioopt's max_sharpe()/min_volatility() return an
+            # OrderedDict[symbol -> weight]. zip(symbols, dict) iterates the
+            # dict's KEYS (strings like "AAPL"), so we'd float("AAPL") and
+            # die. Iterate weights.items() directly.
+            "weights": {sym: float(w) for sym, w in weights.items()},
             "performance": {
                 "annual_return": float(ret),
                 "annual_volatility": float(vol),
@@ -483,7 +496,11 @@ def optimize_min_volatility(holdings: pd.DataFrame, returns: pd.DataFrame) -> Di
 
         return {
             "method": "min_volatility",
-            "weights": {sym: float(w) for sym, w in zip(symbols, weights)},
+            # pyportfolioopt's max_sharpe()/min_volatility() return an
+            # OrderedDict[symbol -> weight]. zip(symbols, dict) iterates the
+            # dict's KEYS (strings like "AAPL"), so we'd float("AAPL") and
+            # die. Iterate weights.items() directly.
+            "weights": {sym: float(w) for sym, w in weights.items()},
             "performance": {
                 "annual_return": float(ret),
                 "annual_volatility": float(vol),
@@ -699,7 +716,11 @@ def black_litterman_optimization(
 
         return {
             "method": "black_litterman_max_sharpe",
-            "weights": {sym: float(w) for sym, w in zip(symbols, weights)},
+            # pyportfolioopt's max_sharpe()/min_volatility() return an
+            # OrderedDict[symbol -> weight]. zip(symbols, dict) iterates the
+            # dict's KEYS (strings like "AAPL"), so we'd float("AAPL") and
+            # die. Iterate weights.items() directly.
+            "weights": {sym: float(w) for sym, w in weights.items()},
             "expert_views": expert_views,
             "performance": {
                 "annual_return": float(ret),
