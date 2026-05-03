@@ -1208,6 +1208,9 @@ class PriceProvider:
         # query1 endpoint is rate-limited globally (HTTP 429) and collapses
         # under barrage load on a 200+ position portfolio. Use only as a
         # last-resort fallback when every other provider has failed.
+        # For SMALL portfolios (≲50 symbols) yfinance still works fine and
+        # is free, so the routing keeps it as a safety net rather than
+        # removing it entirely.
         "quotes":          ["massive", "finnhub", "alpha_vantage", "yfinance"],
         "history":         ["massive", "alpha_vantage", "finnhub", "yfinance"],
         "news":            ["marketaux", "finnhub", "newsapi", "yfinance"],
