@@ -52,9 +52,70 @@ class FabricationError(ValueError):
         self.response = response
 
 
+_PER_SECTION_TOP_N = 25
+_MAX_ARTICLE_FIELDS = ("title", "source", "published", "summary")
+
+
+def _compact_section(name: str, data: Any) -> Any:
+    """Trim a section's payload so the whole envelope fits in a 192k-token
+    context window. We keep:
+
+    - Any `summary` / `meta` / `as_of` / scalar top-level fields verbatim
+    - Top-N (default 25) for list-shaped fields (top_equity, top_bonds, news)
+    - Truncate news article bodies to title+source+published+summary
+    - Drop bulky raw-data fields (`output_file`, `_raw`, `raw`, `*_full`)
+
+    Numeric-fabrication validation in `validate_narration` runs against the
+    FULL envelope (not the compacted one), so dropping a position from the
+    LLM's view doesn't let the LLM invent numbers — the validator still
+    sees the original.
+    """
+    if not isinstance(data, dict):
+        return data
+    out: dict[str, Any] = {}
+    for key, value in data.items():
+        # Drop bulky raw-data pointers
+        if key in {"output_file", "_raw", "raw"} or key.endswith("_full"):
+            continue
+        if isinstance(value, list):
+            # Cap list length per top-level field
+            trimmed = value[:_PER_SECTION_TOP_N]
+            # News articles: keep only display-relevant fields
+            if name == "news" and trimmed and isinstance(trimmed[0], dict):
+                trimmed = [
+                    {k: v for k, v in item.items() if k in _MAX_ARTICLE_FIELDS}
+                    for item in trimmed
+                ]
+            out[key] = trimmed
+        elif isinstance(value, dict):
+            # Keep dict but recursively cap any nested lists
+            out[key] = _compact_section(name, value)
+        else:
+            out[key] = value
+    return out
+
+
+def compact_envelope(envelope: Envelope) -> dict:
+    """Return a narrator-friendly view of the envelope.
+
+    Mutates nothing. Caps each section to top-25 items per list field and
+    drops bulky raw-data pointers. Keeps ic_result, schema_version,
+    portfolio_id, generated_at, section_meta, failed_sections verbatim.
+    """
+    compacted: dict[str, Any] = {
+        k: v for k, v in envelope.items() if k != "sections"
+    }
+    sections = envelope.get("sections", {}) or {}
+    compacted["sections"] = {
+        name: _compact_section(name, data) for name, data in sections.items()
+    }
+    return compacted
+
+
 def _build_user_prompt(envelope: Envelope, question: str, focus: str | None = None) -> str:
     focus_line = f"\nFocus section: {focus}" if focus else ""
-    envelope_json = json.dumps(envelope, indent=2, sort_keys=True, ensure_ascii=False)
+    compacted = compact_envelope(envelope)
+    envelope_json = json.dumps(compacted, indent=2, sort_keys=True, ensure_ascii=False)
     return (
         f"User question: {question}{focus_line}\n\n"
         "JSON envelope follows. Do not use any source outside this envelope.\n"
@@ -63,11 +124,29 @@ def _build_user_prompt(envelope: Envelope, question: str, focus: str | None = No
 
 
 def _call_llm(system_prompt: str, user_prompt: str) -> tuple[str, str]:
-    """Call the configured ic-engine LLM client."""
+    """Call the configured ic-engine LLM client.
+
+    Failures here cause silent fall-through to the heuristic narrator, which
+    emits the catalog blurb "Envelope sections available: ..." that is easy
+    to mistake for a real answer in passing tests. Always log the exception
+    so a missing dep, bad endpoint, or bad key surfaces in logs even when
+    the heuristic fallback succeeds at returning *something*.
+    """
+    import logging
+    import os
+    log = logging.getLogger(__name__)
     try:
         from ic_engine.internal.litellm_consultation import LiteLLMConsultationClient
 
-        client = LiteLLMConsultationClient()
+        # Narrator prefers the NARRATIVE_* config (long-context narrative
+        # model, e.g. Together MiniMax-M2.7) over the CONSULTATION_* default
+        # (local gemma4 with 32k context — the envelope can exceed 200k
+        # tokens). Falls back to CONSULTATION_* if NARRATIVE_* is unset.
+        client = LiteLLMConsultationClient(
+            endpoint=os.environ.get("INVESTORCLAW_NARRATIVE_ENDPOINT") or None,
+            model=os.environ.get("INVESTORCLAW_NARRATIVE_MODEL") or None,
+            api_key=os.environ.get("INVESTORCLAW_NARRATIVE_API_KEY") or None,
+        )
         result = client.complete(
             messages=[
                 {"role": "system", "content": system_prompt},
@@ -78,8 +157,15 @@ def _call_llm(system_prompt: str, user_prompt: str) -> tuple[str, str]:
             top_p=1.0,
             max_tokens=1200,
         )
+        if not result.response:
+            log.warning(
+                "narrator._call_llm: empty response from %s (heuristic fallback)",
+                result.model,
+            )
         return result.response, result.model
-    except Exception:
+    except Exception as exc:
+        log.warning("narrator._call_llm: %s: %s — falling back to heuristic",
+                    type(exc).__name__, exc)
         return "", "heuristic"
 
 
