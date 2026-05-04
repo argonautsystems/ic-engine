@@ -154,7 +154,7 @@ class LiteLLMConsultationClient:
 
                 # Set custom API base for any non-default OpenAI endpoint —
                 # this includes localhost/127.0.0.1, IP-addressed local servers
-                # (e.g. CERBERUS at 192.168.207.96:8080), and OpenAI-compatible
+                # (e.g. a local vLLM endpoint), and OpenAI-compatible
                 # remotes (Together, Groq, etc.). Only the default OpenAI base
                 # may be left as None to use litellm's built-in.
                 api_base = None

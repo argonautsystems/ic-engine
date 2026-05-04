@@ -78,7 +78,7 @@ def test_tier3_not_injected_when_disabled(monkeypatch, command):
     # Also stub the endpoint probe — should_inject_tier3 falls back to a live
     # reachability check when the env var is unset, so tests that just clear
     # the env var fail on hosts that CAN reach a consultation endpoint
-    # (e.g. WSL on TYPHON sees PYTHIA at 192.168.207.67:5002). Mock the probe
+    # (e.g. WSL container sees host MNEMOS at internal-network address). Mock the probe
     # so the test asserts the env-var path in isolation.
     from ic_engine.services import consultation_policy
 
