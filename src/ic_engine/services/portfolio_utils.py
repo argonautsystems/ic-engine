@@ -21,6 +21,8 @@ Centralizes common operations: data loading, financial metrics, formatting.
 Eliminates duplication across analyze_performance_polars.py,
 fetch_historical_data.py, fetch_holdings.py, fetch_analyst_data.py, and others.
 """
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 InvestorClaw Contributors
 
 import json
 import logging

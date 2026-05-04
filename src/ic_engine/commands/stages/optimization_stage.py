@@ -1,4 +1,6 @@
 """P3: Portfolio optimization stage."""
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 InvestorClaw Contributors
 
 import asyncio
 import json

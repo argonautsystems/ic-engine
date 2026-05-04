@@ -19,6 +19,8 @@ Analyze portfolio performance: returns, risk metrics, diversification, alerts, p
 Supports YTD, 12-month rolling, and custom date ranges.
 Uses Polars for data handling and NumPy/SciPy for statistical calculations.
 """
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 InvestorClaw Contributors
 
 import json
 import os
