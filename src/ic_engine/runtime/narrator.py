@@ -388,38 +388,63 @@ _MARKET_SIGNALS = (
 )
 
 
+_CONCEPT_STEM_PATTERNS = (
+    "how do i ", "how does ", "how can i ", "how should i ",
+    "explain ", "describe ", "tell me about ",
+    "what is ", "what's the ",
+)
+# Prompts that say " my X" but where X is a metric the engine doesn't
+# compute. Routing these to portfolio-strict triggers the rejection_marker
+# even though they could be answered as concept-with-disclaimer. List
+# short — only metrics we've confirmed in cobol regression cause false
+# rejections; expand only with evidence.
+_NA_METRIC_TERMS = (
+    "hedge effectiveness", "recovery time", "geopolitical exposure",
+    "esg score",  # graceful via governance fallback but classifier still ambiguous
+)
+
+
 def _question_mode(question: str) -> str:
     """Return one of: portfolio, setup, concept, market.
 
     Decision order:
-    1. OWNERSHIP signals → portfolio (strict). Wins over everything.
-    2. SETUP signals → setup (canned help).
-    3. MARKET signals (no ownership) → market (free LLM with disclaimer).
-    4. CONCEPT patterns (no ownership) → concept (free LLM with disclaimer).
-    5. Default → concept (deflection). Was 'portfolio' (strict) but that
-       over-rejected generic finance/market questions without ownership
-       words ('Jobs report analysis', 'Show GDP growth', 'What about TIPS?').
-       Concept-deflection answers freely with the LLM and a clear
-       disclaimer, which is the right behavior for non-portfolio Qs.
-       Portfolio-strict still fires whenever ownership signals are present.
+    1. CONCEPT-STEM override — questions starting with "how do i", "explain",
+       etc. are general advice even when " my " appears later. This lets
+       "How do I optimize my taxes?" route to concept-mode instead of
+       triggering portfolio-strict on the " my " signal alone.
+    2. NA-METRIC override — questions about metrics the engine doesn't
+       compute (hedge effectiveness, recovery time, geopolitical exposure)
+       route to concept so the narrator can explain inapplicability rather
+       than emit the rejection_marker.
+    3. OWNERSHIP signals → portfolio (strict).
+    4. SETUP signals → setup (canned help).
+    5. MARKET signals → market (free LLM + disclaimer).
+    6. CONCEPT patterns → concept (free LLM + disclaimer).
+    7. Default → concept (deflection).
     """
     q = " " + (question or "").lower().strip() + " "
-    # 1. Ownership signals win — strict mode required for these.
+    q_start = q.lstrip()
+    # 1. Advice-style stems force concept mode even with ownership words.
+    if any(q_start.startswith(s) for s in _CONCEPT_STEM_PATTERNS):
+        return "concept"
+    # 2. N/A-metric routing — known engine gaps that should explain, not reject.
+    if any(t in q for t in _NA_METRIC_TERMS):
+        return "concept"
+    # 3. Ownership signals — strict mode for genuine portfolio data queries.
     if any(s in q for s in _OWNERSHIP_SIGNALS):
         return "portfolio"
-    # 2. Setup / meta-help.
+    # 4. Setup / meta-help.
     if any(s in q for s in _SETUP_SIGNALS):
         return "setup"
-    # 3. Market-wide.
+    # 5. Market-wide.
     if any(s in q for s in _MARKET_SIGNALS):
         return "market"
-    # 4. Concept (definitional) — pattern starts the question OR appears.
-    q_start = q.lstrip()
+    # 6. Concept (definitional) — pattern starts the question OR appears.
     if any(q_start.startswith(s) for s in _CONCEPT_PATTERNS):
         return "concept"
     if any(s in q for s in _CONCEPT_PATTERNS):
         return "concept"
-    # 5. Default: concept-deflection. Free LLM + disclaimer.
+    # 7. Default: concept-deflection. Free LLM + disclaimer.
     return "concept"
 
 
