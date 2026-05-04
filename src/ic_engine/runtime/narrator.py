@@ -4,6 +4,8 @@
 # you may not use this file except in compliance with the License.
 
 """Strict envelope-only narrator for v2.5 ask flow."""
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 InvestorClaw Contributors
 
 from __future__ import annotations
 

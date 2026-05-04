@@ -1,4 +1,6 @@
 """P0: Holdings loading stage."""
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 InvestorClaw Contributors
 
 import asyncio
 import sys

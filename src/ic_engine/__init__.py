@@ -6,6 +6,8 @@ This package is consumed by two adapters:
 
 The canonical agent-skill contract template lives in `contract/` (sibling to src/).
 """
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 InvestorClaw Contributors
 
 __version__ = "2.5.2"
 

@@ -7,6 +7,8 @@ Supports: Ollama, OpenAI-compatible (LMStudio, llama-server, vLLM), OpenAI, Anth
 
 This is a drop-in replacement for tier3_enrichment.ConsultationClient.
 """
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 InvestorClaw Contributors
 
 import logging
 import os

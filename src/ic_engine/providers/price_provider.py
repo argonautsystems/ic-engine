@@ -28,6 +28,8 @@ or passed explicitly to PriceProvider(primary=...).
 
 All methods return plain dicts / lists of dicts — no pandas, no external types.
 """
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 InvestorClaw Contributors
 
 import logging
 import math
