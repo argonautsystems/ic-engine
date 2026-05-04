@@ -828,6 +828,7 @@ class PerformanceAnalyzer:
                 benchmark_returns = fetch_benchmark_returns("SPY", period="1y")
 
             valid_symbols = []
+            symbol_returns: Dict[str, np.ndarray] = {}
             for symbol in symbols:
                 logger.info(f"Analyzing {symbol}")
 
@@ -838,6 +839,7 @@ class PerformanceAnalyzer:
                         returns = self.calculate_returns(
                             price_data, symbol, annual_dividend=dividend
                         )
+                        symbol_returns[symbol] = returns
 
                         vol = self.calculate_volatility(returns, symbol=symbol)
                         beta = self.calculate_beta(
@@ -959,6 +961,9 @@ class PerformanceAnalyzer:
             weighted_max_drawdown = _wsum(["volatility", "max_drawdown"])
             weighted_beta = _wsum(["beta", "beta"])
             weighted_var_95 = _wsum(["var", "var_95_annualized"])
+            # n006 "What's my total return?" — surface portfolio-level
+            # annual return so the narrator doesn't deflect.
+            weighted_annual_return = _wsum(["sharpe_ratio", "annual_return"])
 
             # Risk score — composite (0-100, lower = safer). Built from
             # vol + var + drawdown + beta. Heuristic, not a CAPM model.
@@ -1004,6 +1009,46 @@ class PerformanceAnalyzer:
                 else None
             )
 
+            # n029 correlation matrix — pairwise Pearson correlations
+            # across the per-symbol return series. We cap to top-N by
+            # weight so the JSON envelope stays small (215×215 = 46k
+            # cells would blow past payload limits).
+            correlation_matrix: Dict[str, Dict[str, float]] = {}
+            avg_pairwise_correlation: Optional[float] = None
+            try:
+                top_n = min(15, len(valid_symbols))
+                top_syms = sorted(valid_symbols, key=lambda s: -position_weights.get(s, 0))[:top_n]
+                # Align all return series to the shortest length so
+                # corrcoef has a well-formed matrix.
+                series = []
+                for s in top_syms:
+                    r = symbol_returns.get(s)
+                    if r is None or len(r) < 2:
+                        continue
+                    series.append((s, r))
+                if len(series) >= 2:
+                    min_len = min(len(r) for _, r in series)
+                    R = np.vstack([r[-min_len:] for _, r in series])
+                    C = np.corrcoef(R)
+                    syms_used = [s for s, _ in series]
+                    for i, s1 in enumerate(syms_used):
+                        correlation_matrix[s1] = {}
+                        for j, s2 in enumerate(syms_used):
+                            v = C[i, j]
+                            correlation_matrix[s1][s2] = (
+                                round(float(v), 4) if not np.isnan(v) else None
+                            )
+                    # Off-diagonal mean (exclude self-correlations of 1.0).
+                    n = C.shape[0]
+                    if n >= 2:
+                        mask = ~np.eye(n, dtype=bool)
+                        offdiag = C[mask]
+                        offdiag = offdiag[~np.isnan(offdiag)]
+                        if len(offdiag) > 0:
+                            avg_pairwise_correlation = round(float(np.mean(offdiag)), 4)
+            except Exception as e:
+                logger.warning(f"correlation_matrix failed: {e}")
+
             # Leverage ratio — weighted average debt/equity from per-symbol
             # fundamentals if available; else None.
             leverage_acc = leverage_w = 0.0
@@ -1035,8 +1080,16 @@ class PerformanceAnalyzer:
                     "weighted_max_drawdown": float(weighted_max_drawdown),
                     "weighted_beta_to_market": float(weighted_beta),
                     "weighted_var_95": float(weighted_var_95),
+                    "weighted_annual_return": float(weighted_annual_return),
                     "weighted_dividend_yield": float(weighted_dividend_yield),
                     "weighted_leverage": weighted_leverage,
+                    "correlation_matrix": correlation_matrix or None,
+                    "avg_pairwise_correlation": avg_pairwise_correlation,
+                    "correlation_matrix_note": (
+                        f"Top {len(correlation_matrix)} positions by weight; "
+                        "Pearson r in [-1, 1]; ~1.0 = move together, ~0 = independent, ~-1 = opposite."
+                        if correlation_matrix else None
+                    ),
                     "value_growth_classification": value_growth_ratio,
                     "risk_score": (
                         {"score": round(risk_score, 1),
