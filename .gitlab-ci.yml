@@ -16,10 +16,12 @@
 # standardized 2026-04-27.
 
 workflow:
+  # argonautsystems projects are off shared GitLab runners per fleet CI policy
+  # (mnemos `mem_4fcb1558224c`, 2026-04-29). Codex-only review path until a
+  # self-hosted runner is wired up. Until then, `when: never` prevents zombie
+  # pipelines that queue for hours and timeout-fail with no runner.
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "push"'
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-    - if: '$CI_COMMIT_TAG'
+    - when: never
 
 stages:
   - test
