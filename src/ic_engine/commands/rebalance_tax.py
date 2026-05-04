@@ -37,8 +37,6 @@ CLI:
         [--state-rate FLOAT]
         [output.json]
 """
-# SPDX-License-Identifier: Apache-2.0
-# Copyright 2026 InvestorClaw Contributors
 
 from __future__ import annotations
 

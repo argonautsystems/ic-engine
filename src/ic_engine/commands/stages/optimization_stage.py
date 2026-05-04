@@ -1,6 +1,4 @@
 """P3: Portfolio optimization stage."""
-# SPDX-License-Identifier: Apache-2.0
-# Copyright 2026 InvestorClaw Contributors
 
 import asyncio
 import json
@@ -53,8 +51,8 @@ class OptimizationStage(PipelineStage):
             from ic_engine.commands.optimize import (
                 fetch_historical_returns,
                 load_holdings,
-                optimize_min_volatility,
                 optimize_sharpe_ratio,
+                optimize_min_volatility,
             )
 
             # Create temporary holdings file in CDM format

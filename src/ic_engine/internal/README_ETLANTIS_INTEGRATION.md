@@ -269,7 +269,7 @@ typically converge in 2-4 rounds.
 
 | Remote | Role | URL | Auth |
 |---|---|---|---|
-| `origin` | Source of truth | `<argonas-git-remote>` | sshpass root |
+| `origin` | Source of truth | `<your-internal-git-host>:/path/to/ic-engine.git` | sshpass root |
 | `gitlab` | CI/CD canonical | `https://gitlab.com/perlowja/ic-engine.git` | personal PAT |
 | `github` | OSS surface (deferred to 2026-04-30+) | `https://github.com/perlowja/ic-engine.git` | personal PAT |
 

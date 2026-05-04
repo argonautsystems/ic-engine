@@ -27,8 +27,6 @@ OPT-08: Black-Litterman model (expert views + historical data)
 OPT-09: Sector constraints via EfficientFrontier.add_sector_constraints()
 OPT-10: Cardinality constraints (limit number of positions)
 """
-# SPDX-License-Identifier: Apache-2.0
-# Copyright 2026 InvestorClaw Contributors
 
 import io
 import json

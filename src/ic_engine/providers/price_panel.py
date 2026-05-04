@@ -29,8 +29,6 @@ PriceProvider routes history calls to ``massive`` (Polygon) first, which
 returns split-adjusted and dividend-adjusted prices. This preserves the
 historical yfinance adjusted-close semantics expected by return calculations.
 """
-# SPDX-License-Identifier: Apache-2.0
-# Copyright 2026 InvestorClaw Contributors
 
 import logging
 from typing import Dict, Iterable, List, Optional
