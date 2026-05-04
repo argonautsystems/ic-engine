@@ -396,6 +396,61 @@ def clear_benchmark_cache() -> None:
     _benchmark_cache.clear()
 
 
+# ─── ESG Sustainability Cache + Circuit Breaker ──────────────────────────────
+
+_esg_cache: Dict[str, Optional[float]] = {}
+_esg_circuit_breaker = {"trips": 0, "threshold": 5}
+
+
+def fetch_esg_total_score(symbol: str) -> Optional[float]:
+    """Fetch yfinance ESG total score for a symbol with circuit breaker.
+
+    Returns the totalEsg score (Sustainalytics 0-100, lower = better) or
+    None if unavailable. After 5 consecutive yfinance rate-limit errors
+    the circuit opens and subsequent calls return None until process restart
+    (avoids hammering yfinance during barrage runs).
+    """
+    if symbol in _esg_cache:
+        return _esg_cache[symbol]
+
+    if _esg_circuit_breaker["trips"] >= _esg_circuit_breaker["threshold"]:
+        return None
+
+    try:
+        import yfinance as yf
+
+        sus = yf.Ticker(symbol).sustainability
+        if sus is None or (hasattr(sus, "empty") and sus.empty):
+            _esg_cache[symbol] = None
+            return None
+        # yfinance returns a DataFrame with index=metric, column='Value'
+        # totalEsg row is the canonical Sustainalytics composite.
+        if hasattr(sus, "loc") and "totalEsg" in sus.index:
+            val = float(sus.loc["totalEsg"].values[0])
+            _esg_cache[symbol] = val
+            _esg_circuit_breaker["trips"] = 0  # reset on success
+            return val
+        _esg_cache[symbol] = None
+        return None
+    except Exception as e:
+        _esg_circuit_breaker["trips"] += 1
+        if _esg_circuit_breaker["trips"] >= _esg_circuit_breaker["threshold"]:
+            logger.warning(
+                f"ESG fetch circuit-breaker tripped after {_esg_circuit_breaker['threshold']} failures; "
+                "skipping remaining ESG fetches this run"
+            )
+        else:
+            logger.debug(f"ESG fetch failed for {symbol}: {e}")
+        _esg_cache[symbol] = None
+        return None
+
+
+def clear_esg_cache() -> None:
+    """Clear ESG cache and reset circuit breaker (useful for testing)."""
+    _esg_cache.clear()
+    _esg_circuit_breaker["trips"] = 0
+
+
 # ─── Formatting ─────────────────────────────────────────────────────────────
 
 

@@ -59,7 +59,7 @@ from ic_engine.internal.metrics_wrapper import (
 )
 from ic_engine.internal.performance_timer import get_timer
 from ic_engine.rendering.disclaimer_wrapper import DisclaimerWrapper
-from ic_engine.services.portfolio_utils import fetch_benchmark_returns
+from ic_engine.services.portfolio_utils import fetch_benchmark_returns, fetch_esg_total_score
 
 # Phase 9: Mode and feature enforcement
 try:
@@ -1049,6 +1049,31 @@ class PerformanceAnalyzer:
             except Exception as e:
                 logger.warning(f"correlation_matrix failed: {e}")
 
+            # n034 ESG — weighted Sustainalytics score across top-N holdings.
+            # We only fetch top-25 by weight to limit yfinance.sustainability
+            # calls (rate-limited; circuit breaker in fetch_esg_total_score).
+            esg_acc = esg_w = 0.0
+            esg_per_symbol: Dict[str, float] = {}
+            esg_top_n = sorted(valid_symbols, key=lambda s: -position_weights.get(s, 0))[:25]
+            for sym in esg_top_n:
+                score = fetch_esg_total_score(sym)
+                if score is None:
+                    continue
+                w = position_weights.get(sym, 0)
+                esg_acc += w * score
+                esg_w += w
+                esg_per_symbol[sym] = round(score, 2)
+            weighted_esg_score = (
+                round(esg_acc / esg_w, 2) if esg_w > 0 else None
+            )
+            esg_note = (
+                f"Sustainalytics ESG totalEsg score (lower = better, 0–40 typical). "
+                f"Coverage: {len(esg_per_symbol)}/{len(esg_top_n)} top-weighted holdings via yfinance."
+                if weighted_esg_score is not None
+                else "ESG unavailable — yfinance sustainability rate-limited or no data. "
+                     "For full coverage configure a Sustainalytics or MSCI provider."
+            )
+
             # Leverage ratio — weighted average debt/equity from per-symbol
             # fundamentals if available; else None.
             leverage_acc = leverage_w = 0.0
@@ -1083,6 +1108,9 @@ class PerformanceAnalyzer:
                     "weighted_annual_return": float(weighted_annual_return),
                     "weighted_dividend_yield": float(weighted_dividend_yield),
                     "weighted_leverage": weighted_leverage,
+                    "weighted_esg_score": weighted_esg_score,
+                    "esg_per_symbol": esg_per_symbol or None,
+                    "esg_note": esg_note,
                     "correlation_matrix": correlation_matrix or None,
                     "avg_pairwise_correlation": avg_pairwise_correlation,
                     "correlation_matrix_note": (
