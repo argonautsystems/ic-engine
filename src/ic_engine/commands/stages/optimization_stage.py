@@ -53,8 +53,8 @@ class OptimizationStage(PipelineStage):
             from ic_engine.commands.optimize import (
                 fetch_historical_returns,
                 load_holdings,
-                optimize_sharpe_ratio,
                 optimize_min_volatility,
+                optimize_sharpe_ratio,
             )
 
             # Create temporary holdings file in CDM format
