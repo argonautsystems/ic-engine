@@ -152,9 +152,9 @@ class LiteLLMConsultationClient:
             try:
                 model_str = self._build_model_string()
 
-                # Set custom API base for any non-default OpenAI endpoint —
-                # this includes localhost/127.0.0.1, IP-addressed local servers
-                # (e.g. CERBERUS at 192.168.207.96:8080), and OpenAI-compatible
+                # Set custom API base for any non-default OpenAI endpoint,
+                # including local servers such as localhost:8080 or
+                # <your-local-inference-endpoint>, plus OpenAI-compatible
                 # remotes (Together, Groq, etc.). Only the default OpenAI base
                 # may be left as None to use litellm's built-in.
                 api_base = None
@@ -162,16 +162,15 @@ class LiteLLMConsultationClient:
                     api_base = self.endpoint
 
                 # API key resolution chain — covers narrative, consultation,
-                # and the standard openai env var. Local servers (llama-server,
-                # ollama, vLLM) ignore the value but litellm still requires
-                # something non-empty; "sk-no-key-needed" is the convention.
+                # and the standard openai env var. Some local-LLM endpoints
+                # accept any non-empty Authorization header value.
                 # Caller-supplied override (passed to __init__) wins over env.
                 api_key = (
                     self._api_key_override
                     or os.environ.get("INVESTORCLAW_CONSULTATION_API_KEY")
                     or os.environ.get("INVESTORCLAW_NARRATIVE_API_KEY")
                     or os.environ.get("OPENAI_API_KEY")
-                    or "sk-no-key-needed"
+                    or None
                 )
 
                 response = completion(
