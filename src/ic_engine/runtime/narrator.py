@@ -393,6 +393,25 @@ _CONCEPT_STEM_PATTERNS = (
     "explain ", "describe ", "tell me about ",
     "what is ", "what's the ",
 )
+# Phrases that unambiguously refer to the user's own portfolio. When any of
+# these appears, even an advice-style stem ("what is ...") must NOT short-
+# circuit to concept-mode — the user is asking a portfolio-data question.
+# Keep this list explicit: " my " alone is too loose (matches "my taxes",
+# "my advisor"). Each entry must point at the portfolio dataset itself or
+# a portfolio-computed metric.
+_STRONG_OWNERSHIP_PHRASES = (
+    # Direct portfolio references
+    "my portfolio", "my holdings", "my positions", "my account",
+    "in my portfolio", "in my holdings",
+    # Portfolio-computed metrics — these are answered FROM the portfolio
+    # envelope, not as general concepts. Adding to strong-ownership lets
+    # "What is my Sharpe ratio?" route to portfolio-mode instead of being
+    # caught by the "what is" concept-stem.
+    "my sharpe", "my sortino", "my drawdown", "my returns", "my return",
+    "my performance", "my allocation", "my volatility", "my beta",
+    "my yield", "my exposure", "my diversification", "my pnl", "my p&l",
+    "my risk", "my concentration", "my sector",
+)
 # Prompts that say " my X" but where X is a metric the engine doesn't
 # compute. Routing these to portfolio-strict triggers the rejection_marker
 # even though they could be answered as concept-with-disclaimer. List
@@ -424,8 +443,13 @@ def _question_mode(question: str) -> str:
     """
     q = " " + (question or "").lower().strip() + " "
     q_start = q.lstrip()
-    # 1. Advice-style stems force concept mode even with ownership words.
-    if any(q_start.startswith(s) for s in _CONCEPT_STEM_PATTERNS):
+    # 1. Advice-style stems force concept mode even with ownership words —
+    #    UNLESS a strong-ownership phrase is present, in which case the
+    #    user is asking a portfolio-data question (e.g. "What is in my
+    #    portfolio?") and we must route to OWNERSHIP, not concept.
+    if any(q_start.startswith(s) for s in _CONCEPT_STEM_PATTERNS) and not any(
+        p in q for p in _STRONG_OWNERSHIP_PHRASES
+    ):
         return "concept"
     # 2. N/A-metric routing — known engine gaps that should explain, not reject.
     if any(t in q for t in _NA_METRIC_TERMS):
