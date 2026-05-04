@@ -34,30 +34,12 @@ import math
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import requests
 from ratelimit import limits, sleep_and_retry
 
 logger = logging.getLogger(__name__)
-
-# ─── .env loader (using python-dotenv) ────────────────────────────────────
-
-
-def _load_env(env_file: Optional[str] = None) -> None:
-    """Load .env from project directory if not already in environment."""
-    try:
-        from dotenv import load_dotenv
-
-        if env_file is None:
-            env_file = str(Path(__file__).parent.parent / ".env")
-        load_dotenv(env_file)
-    except ImportError:
-        pass  # python-dotenv not available; rely on environment variables
-
-
-_load_env()
 
 # ─── Provider implementations with official SDKs ──────────────────────────
 
