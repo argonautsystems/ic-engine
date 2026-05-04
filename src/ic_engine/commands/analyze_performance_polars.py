@@ -59,7 +59,11 @@ from ic_engine.internal.metrics_wrapper import (
 )
 from ic_engine.internal.performance_timer import get_timer
 from ic_engine.rendering.disclaimer_wrapper import DisclaimerWrapper
-from ic_engine.services.portfolio_utils import fetch_benchmark_returns, fetch_esg_total_score
+from ic_engine.services.portfolio_utils import (
+    fetch_benchmark_returns,
+    fetch_esg_total_score,
+    fetch_governance_risk,
+)
 
 # Phase 9: Mode and feature enforcement
 try:
@@ -1070,9 +1074,52 @@ class PerformanceAnalyzer:
                 f"Sustainalytics ESG totalEsg score (lower = better, 0–40 typical). "
                 f"Coverage: {len(esg_per_symbol)}/{len(esg_top_n)} top-weighted holdings via yfinance."
                 if weighted_esg_score is not None
-                else "ESG unavailable — yfinance sustainability rate-limited or no data. "
-                     "For full coverage configure a Sustainalytics or MSCI provider."
+                else "ESG totalEsg unavailable — Yahoo Finance gated free Sustainalytics access in 2024. "
+                     "Governance risk subset (auditRisk, boardRisk, etc.) is reported in governance_* fields. "
+                     "For full Sustainalytics ESG composite, configure an MSCI / Sustainalytics provider."
             )
+
+            # Governance risk — works even when ESG composite is gated.
+            # Same top-25 universe, separate yfinance.Ticker.info endpoint.
+            gov_overall_acc = gov_audit_acc = gov_board_acc = gov_comp_acc = gov_share_acc = 0.0
+            gov_w = 0.0
+            governance_per_symbol: Dict[str, Dict] = {}
+            for sym in esg_top_n:
+                g = fetch_governance_risk(sym)
+                if g is None or g.get("overall_risk") is None:
+                    continue
+                w = position_weights.get(sym, 0)
+                gov_overall_acc += w * g["overall_risk"]
+                if g.get("audit_risk") is not None:
+                    gov_audit_acc += w * g["audit_risk"]
+                if g.get("board_risk") is not None:
+                    gov_board_acc += w * g["board_risk"]
+                if g.get("compensation_risk") is not None:
+                    gov_comp_acc += w * g["compensation_risk"]
+                if g.get("shareholder_rights_risk") is not None:
+                    gov_share_acc += w * g["shareholder_rights_risk"]
+                gov_w += w
+                governance_per_symbol[sym] = g
+            if gov_w > 0:
+                weighted_governance_overall = round(gov_overall_acc / gov_w, 2)
+                weighted_governance_audit = round(gov_audit_acc / gov_w, 2)
+                weighted_governance_board = round(gov_board_acc / gov_w, 2)
+                weighted_governance_compensation = round(gov_comp_acc / gov_w, 2)
+                weighted_governance_shareholder_rights = round(gov_share_acc / gov_w, 2)
+                governance_note = (
+                    f"Yahoo Finance governance risk (1=best, 10=worst), value-weighted across "
+                    f"{len(governance_per_symbol)}/{len(esg_top_n)} top holdings. Source: Institutional "
+                    "Shareholder Services (ISS) governance pillars."
+                )
+            else:
+                weighted_governance_overall = None
+                weighted_governance_audit = None
+                weighted_governance_board = None
+                weighted_governance_compensation = None
+                weighted_governance_shareholder_rights = None
+                governance_note = (
+                    "Governance risk unavailable — yfinance.info throttled or no coverage."
+                )
 
             # Leverage ratio — weighted average debt/equity from per-symbol
             # fundamentals if available; else None.
@@ -1111,6 +1158,13 @@ class PerformanceAnalyzer:
                     "weighted_esg_score": weighted_esg_score,
                     "esg_per_symbol": esg_per_symbol or None,
                     "esg_note": esg_note,
+                    "weighted_governance_overall": weighted_governance_overall,
+                    "weighted_governance_audit": weighted_governance_audit,
+                    "weighted_governance_board": weighted_governance_board,
+                    "weighted_governance_compensation": weighted_governance_compensation,
+                    "weighted_governance_shareholder_rights": weighted_governance_shareholder_rights,
+                    "governance_per_symbol": governance_per_symbol or None,
+                    "governance_note": governance_note,
                     "correlation_matrix": correlation_matrix or None,
                     "avg_pairwise_correlation": avg_pairwise_correlation,
                     "correlation_matrix_note": (

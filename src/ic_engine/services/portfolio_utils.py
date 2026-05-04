@@ -445,6 +445,64 @@ def fetch_esg_total_score(symbol: str) -> Optional[float]:
         return None
 
 
+# ─── Governance Risk Cache (yfinance.Ticker.info — different endpoint) ───────
+
+_gov_cache: Dict[str, Optional[Dict]] = {}
+_gov_circuit_breaker = {"trips": 0, "threshold": 5}
+
+
+def fetch_governance_risk(symbol: str) -> Optional[Dict]:
+    """Fetch yfinance governance risk fields for a symbol.
+
+    Returns dict with audit/board/compensation/shareholder/overall risk
+    on a 1–10 scale (lower = better, sourced via Yahoo Finance from
+    Institutional Shareholder Services). Different endpoint from
+    .sustainability so it survives when full Sustainalytics ESG is gated.
+
+    Process-level cache + circuit breaker (5 failures → skip).
+    """
+    if symbol in _gov_cache:
+        return _gov_cache[symbol]
+
+    if _gov_circuit_breaker["trips"] >= _gov_circuit_breaker["threshold"]:
+        return None
+
+    try:
+        import yfinance as yf
+
+        info = yf.Ticker(symbol).info or {}
+        overall = info.get("overallRisk")
+        if overall is None:
+            _gov_cache[symbol] = None
+            return None
+        result = {
+            "overall_risk": int(overall),
+            "audit_risk": int(info["auditRisk"]) if info.get("auditRisk") is not None else None,
+            "board_risk": int(info["boardRisk"]) if info.get("boardRisk") is not None else None,
+            "compensation_risk": int(info["compensationRisk"]) if info.get("compensationRisk") is not None else None,
+            "shareholder_rights_risk": int(info["shareHolderRightsRisk"]) if info.get("shareHolderRightsRisk") is not None else None,
+        }
+        _gov_cache[symbol] = result
+        _gov_circuit_breaker["trips"] = 0
+        return result
+    except Exception as e:
+        _gov_circuit_breaker["trips"] += 1
+        if _gov_circuit_breaker["trips"] >= _gov_circuit_breaker["threshold"]:
+            logger.warning(
+                f"Governance fetch circuit-breaker tripped after {_gov_circuit_breaker['threshold']} failures"
+            )
+        else:
+            logger.debug(f"Governance fetch failed for {symbol}: {e}")
+        _gov_cache[symbol] = None
+        return None
+
+
+def clear_governance_cache() -> None:
+    """Clear governance cache and reset circuit breaker."""
+    _gov_cache.clear()
+    _gov_circuit_breaker["trips"] = 0
+
+
 def clear_esg_cache() -> None:
     """Clear ESG cache and reset circuit breaker (useful for testing)."""
     _esg_cache.clear()
