@@ -958,7 +958,8 @@ class FrankfurterFxProvider:
     def get_fx(self, from_ccy: str = "EUR", to_ccy: str = "USD") -> Optional[Dict]:
         """Latest spot rate. Returns {from, to, rate, date, provider}."""
         try:
-            import urllib.request, json as _json
+            import json as _json
+            import urllib.request
             url = f"{self.BASE_URL}/latest?from={from_ccy}&to={to_ccy}"
             req = urllib.request.Request(url, headers={"User-Agent": "ic-engine/4.1 (mnemos-ic-runtime)"})
             with urllib.request.urlopen(req, timeout=10) as resp:
@@ -980,7 +981,8 @@ class FrankfurterFxProvider:
     def get_fx_pairs(self, base: str = "USD") -> Dict[str, float]:
         """Spot rates for every supported quote currency against `base`."""
         try:
-            import urllib.request, json as _json
+            import json as _json
+            import urllib.request
             url = f"{self.BASE_URL}/latest?from={base}"
             req = urllib.request.Request(url, headers={"User-Agent": "ic-engine/4.1 (mnemos-ic-runtime)"})
             with urllib.request.urlopen(req, timeout=10) as resp:
@@ -1009,7 +1011,8 @@ class TreasuryFiscalDataProvider:
         notes, bonds, TIPS, etc.). Returns dict keyed by security_desc.
         """
         try:
-            import urllib.request, json as _json
+            import json as _json
+            import urllib.request
             # Latest record per security description
             url = (
                 f"{self.BASE_URL}/v2/accounting/od/avg_interest_rates"
@@ -1063,7 +1066,9 @@ class MarketauxNewsProvider:
     def get_news(self, symbols: List[str], days: int = 7) -> List[Dict]:
         """News articles mentioning the given symbols."""
         try:
-            import urllib.request, urllib.parse, json as _json
+            import json as _json
+            import urllib.parse
+            import urllib.request
             params = {
                 "api_token": self.api_key,
                 "symbols": ",".join(symbols[:50]),  # marketaux caps at 50
@@ -1100,7 +1105,9 @@ class MarketauxNewsProvider:
           merger  -> entity_types=organization + topic search 'merger acquisition'
         """
         try:
-            import urllib.request, urllib.parse, json as _json
+            import json as _json
+            import urllib.parse
+            import urllib.request
             params: Dict[str, str] = {
                 "api_token": self.api_key,
                 "language": "en",
