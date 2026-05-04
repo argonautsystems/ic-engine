@@ -28,20 +28,36 @@ or passed explicitly to PriceProvider(primary=...).
 
 All methods return plain dicts / lists of dicts — no pandas, no external types.
 """
-# SPDX-License-Identifier: Apache-2.0
-# Copyright 2026 InvestorClaw Contributors
 
 import logging
 import math
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import requests
 from ratelimit import limits, sleep_and_retry
 
 logger = logging.getLogger(__name__)
+
+# ─── .env loader (using python-dotenv) ────────────────────────────────────
+
+
+def _load_env(env_file: Optional[str] = None) -> None:
+    """Load .env from project directory if not already in environment."""
+    try:
+        from dotenv import load_dotenv
+
+        if env_file is None:
+            env_file = str(Path(__file__).parent.parent / ".env")
+        load_dotenv(env_file)
+    except ImportError:
+        pass  # python-dotenv not available; rely on environment variables
+
+
+_load_env()
 
 # ─── Provider implementations with official SDKs ──────────────────────────
 
@@ -958,8 +974,7 @@ class FrankfurterFxProvider:
     def get_fx(self, from_ccy: str = "EUR", to_ccy: str = "USD") -> Optional[Dict]:
         """Latest spot rate. Returns {from, to, rate, date, provider}."""
         try:
-            import json as _json
-            import urllib.request
+            import urllib.request, json as _json
             url = f"{self.BASE_URL}/latest?from={from_ccy}&to={to_ccy}"
             req = urllib.request.Request(url, headers={"User-Agent": "ic-engine/4.1 (mnemos-ic-runtime)"})
             with urllib.request.urlopen(req, timeout=10) as resp:
@@ -981,8 +996,7 @@ class FrankfurterFxProvider:
     def get_fx_pairs(self, base: str = "USD") -> Dict[str, float]:
         """Spot rates for every supported quote currency against `base`."""
         try:
-            import json as _json
-            import urllib.request
+            import urllib.request, json as _json
             url = f"{self.BASE_URL}/latest?from={base}"
             req = urllib.request.Request(url, headers={"User-Agent": "ic-engine/4.1 (mnemos-ic-runtime)"})
             with urllib.request.urlopen(req, timeout=10) as resp:
@@ -1011,8 +1025,7 @@ class TreasuryFiscalDataProvider:
         notes, bonds, TIPS, etc.). Returns dict keyed by security_desc.
         """
         try:
-            import json as _json
-            import urllib.request
+            import urllib.request, json as _json
             # Latest record per security description
             url = (
                 f"{self.BASE_URL}/v2/accounting/od/avg_interest_rates"
@@ -1066,9 +1079,7 @@ class MarketauxNewsProvider:
     def get_news(self, symbols: List[str], days: int = 7) -> List[Dict]:
         """News articles mentioning the given symbols."""
         try:
-            import json as _json
-            import urllib.parse
-            import urllib.request
+            import urllib.request, urllib.parse, json as _json
             params = {
                 "api_token": self.api_key,
                 "symbols": ",".join(symbols[:50]),  # marketaux caps at 50
@@ -1105,9 +1116,7 @@ class MarketauxNewsProvider:
           merger  -> entity_types=organization + topic search 'merger acquisition'
         """
         try:
-            import json as _json
-            import urllib.parse
-            import urllib.request
+            import urllib.request, urllib.parse, json as _json
             params: Dict[str, str] = {
                 "api_token": self.api_key,
                 "language": "en",

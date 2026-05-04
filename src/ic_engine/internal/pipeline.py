@@ -3,8 +3,6 @@ Phase 4: Async pipeline orchestrator with error handling and observability.
 Coordinates execution of portfolio analysis stages with parallelization,
 retries, and detailed metrics collection.
 """
-# SPDX-License-Identifier: Apache-2.0
-# Copyright 2026 InvestorClaw Contributors
 
 import asyncio
 import logging

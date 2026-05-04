@@ -1,5 +1,3 @@
-# SPDX-License-Identifier: Apache-2.0
-# Copyright 2026 InvestorClaw Contributors
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -53,12 +51,12 @@ def envelope() -> Envelope:
 def test_narrator_accepts_verbatim_numbers(envelope, monkeypatch):
     def _fake_llm(system_prompt, user_prompt):
         assert "Use ONLY data from this JSON envelope" in system_prompt
-        assert "Show me my allocation." in user_prompt
+        assert "What is my allocation?" in user_prompt
         return "Total value is $100.00 and equity is 60.0% with coverage 1.2x.", "fake"
 
     monkeypatch.setattr("ic_engine.runtime.narrator._call_llm", _fake_llm)
 
-    result = narrate(envelope, "Show me my allocation.")
+    result = narrate(envelope, "What is my allocation?")
 
     assert "$100.00" in result.answer
     assert envelope["ic_result"]["hmac"] in result.answer

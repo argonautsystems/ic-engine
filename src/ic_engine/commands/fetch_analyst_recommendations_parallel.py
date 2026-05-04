@@ -27,8 +27,6 @@ Features:
 Note: API calls to yfinance are network-bound, not compute-bound. ThreadPoolExecutor
 with 4-8 workers provides optimal parallelism without GPU acceleration overhead.
 """
-# SPDX-License-Identifier: Apache-2.0
-# Copyright 2026 InvestorClaw Contributors
 
 import concurrent.futures
 import json
