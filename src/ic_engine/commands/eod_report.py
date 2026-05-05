@@ -183,6 +183,15 @@ def _load_report_data(reports_dir: Path) -> Dict[str, Any]:
         "news": "portfolio_news.json",
         "bonds": "bond_analysis.json",
         "performance": "performance.json",
+        # Extended sections — added 2026-05 for institutional-grade EOD.
+        # Missing files render as omitted sections (template skips empty).
+        "whatchanged": "whatchanged.json",
+        "scenario": "scenario.json",
+        "cashflow": "cashflow.json",
+        "peer": "peer.json",
+        "optimize": "optimize.json",
+        "rebalance": "rebalance.json",
+        "synthesize": "portfolio_analysis.json",
     }
 
     data: Dict[str, Any] = {}
@@ -234,6 +243,14 @@ def _assemble_report(reports_dir: Path, run_duration_s: float = 0) -> str:
         "performance": raw_data.get("performance", {}),
         "fa_topics": fa_topics,
         "run_duration_s": run_duration_s,
+        # Extended sections (template renders an empty placeholder if dict is empty)
+        "whatchanged": raw_data.get("whatchanged", {}),
+        "scenario": raw_data.get("scenario", {}),
+        "cashflow": raw_data.get("cashflow", {}),
+        "peer": raw_data.get("peer", {}),
+        "optimize": raw_data.get("optimize", {}),
+        "rebalance": raw_data.get("rebalance", {}),
+        "synthesize": raw_data.get("synthesize", {}),
     }
 
     return render_eod_email(report_data)
