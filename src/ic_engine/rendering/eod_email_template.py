@@ -618,6 +618,101 @@ def _render_performance_summary(performance: dict) -> str:
     return _section("Performance Metrics", _card(_kpi_row(kpis)))
 
 
+def _render_whatchanged(whatchanged: Dict[str, Any]) -> str:
+    """Day-over-day attribution + top movers."""
+    if not whatchanged:
+        return ""
+    data = whatchanged.get("data", {})
+    if not data:
+        return ""
+
+    attr = data.get("attribution_summary", {}) or {}
+    total_return = float(attr.get("total_return", 0) or 0)
+    window = int(data.get("window_days", 0) or 0)
+
+    return_color = _C_POSITIVE if total_return >= 0 else _C_NEGATIVE
+    return_str = f"{total_return * 100:+.2f}%" if total_return else "—"
+
+    kpis = [
+        ("Window", f"{window}d", _C_ACCENT),
+        ("Total Return", return_str, return_color),
+        ("Holdings Analyzed", str(int(data.get("holdings_analyzed", 0) or 0)), _C_ACCENT),
+    ]
+    kpi_row = _kpi_row(kpis)
+
+    movers = data.get("top_movers", []) or []
+    if isinstance(movers, list) and movers:
+        rows = []
+        header = (
+            f"<tr>{_th('Symbol')}{_th('Contribution', 'text-align:right;')}"
+            f"{_th('Driver')}</tr>"
+        )
+        for m in movers[:10]:
+            sym = _esc(m.get("symbol", ""))
+            contrib = float(m.get("contribution", 0) or 0)
+            contrib_color = _C_POSITIVE if contrib >= 0 else _C_NEGATIVE
+            contrib_str = f"{contrib * 100:+.3f}%"
+            driver = _esc(str(m.get("driver", "—")).title())
+            rows.append(
+                f'<tr><td style="padding:6px 8px;">{sym}</td>'
+                f'<td style="padding:6px 8px;text-align:right;color:{contrib_color};font-weight:600;">'
+                f"{contrib_str}</td>"
+                f'<td style="padding:6px 8px;color:{_C_NEUTRAL};">{driver}</td></tr>'
+            )
+        movers_table = _table(rows, header)
+    else:
+        movers_table = ""
+
+    return _section(
+        "What Changed (Attribution)",
+        _card(kpi_row + ('<div style="margin-top:16px;">' + movers_table + "</div>" if movers_table else "")),
+    )
+
+
+def _render_scenario(scenario: Dict[str, Any]) -> str:
+    """Forward-looking stress tests — rate shocks, sector shocks, drawdown."""
+    if not scenario:
+        return ""
+    data = scenario.get("data", {})
+    scenarios = data.get("scenarios", []) or []
+    if not scenarios:
+        return ""
+
+    portfolio_value = float(data.get("portfolio_value", 0) or 0)
+
+    rows = []
+    header = (
+        f"<tr>{_th('Scenario')}{_th('Total Impact', 'text-align:right;')}"
+        f"{_th('Drawdown', 'text-align:right;')}{_th('VaR 95%', 'text-align:right;')}"
+        f"{_th('New Value', 'text-align:right;')}</tr>"
+    )
+    for s in scenarios[:8]:
+        name = _esc(s.get("name", "")).replace("_", " ").title()
+        impact = float(s.get("total_impact", 0) or 0)
+        impact_color = _C_POSITIVE if impact >= 0 else (_C_NEGATIVE if impact < -0.03 else _C_MEDIUM)
+        impact_str = f"{impact * 100:+.2f}%"
+        drawdown = float(s.get("drawdown_pct", 0) or 0)
+        var95 = float(s.get("var_95", 0) or 0)
+        new_value = float(s.get("new_value", 0) or 0)
+        rows.append(
+            f'<tr><td style="padding:6px 8px;">{name}</td>'
+            f'<td style="padding:6px 8px;text-align:right;color:{impact_color};font-weight:600;">{impact_str}</td>'
+            f'<td style="padding:6px 8px;text-align:right;color:{_C_NEUTRAL};">{drawdown * 100:.2f}%</td>'
+            f'<td style="padding:6px 8px;text-align:right;color:{_C_NEUTRAL};">{_currency(var95)}</td>'
+            f'<td style="padding:6px 8px;text-align:right;color:{_C_NEUTRAL};">{_currency(new_value)}</td></tr>'
+        )
+    table = _table(rows, header)
+
+    note = (
+        f'<div style="margin-top:12px;font-size:11px;color:{_C_NEUTRAL};">'
+        f"Scenarios assume current portfolio value of {_currency(portfolio_value)}. "
+        "Educational stress tests only — not predictions."
+        "</div>"
+    )
+
+    return _section("Stress Tests & Scenarios", _card(table + note))
+
+
 def _render_fa_topics(fa_topics: List[dict]) -> str:
     if not fa_topics:
         return ""
@@ -756,6 +851,9 @@ def render_eod_email(report_data: Dict[str, Any]) -> str:
     performance = report_data.get("performance", {})
     fa_topics = report_data.get("fa_topics", [])
     run_duration_s = float(report_data.get("run_duration_s", 0))
+    # Extended sections (added 2026-05). Empty dicts skip silently.
+    whatchanged = report_data.get("whatchanged", {})
+    scenario = report_data.get("scenario", {})
 
     raw = _portfolio_summary(holdings)
     total_value = float(raw.get("total_value", 0))
@@ -763,10 +861,12 @@ def render_eod_email(report_data: Dict[str, Any]) -> str:
     body_parts = [
         _render_portfolio_summary(holdings),
         _render_top_holdings(holdings, analyst),
+        _render_performance_summary(performance),
+        _render_whatchanged(whatchanged),
+        _render_scenario(scenario),
         _render_analyst_summary(analyst),
         _render_news_summary(news),
         _render_bond_summary(bonds),
-        _render_performance_summary(performance),
         _render_fa_topics(fa_topics),
         _render_disclaimer(),
         _render_footer(run_duration_s),
