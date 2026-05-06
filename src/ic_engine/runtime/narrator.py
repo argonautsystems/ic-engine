@@ -421,54 +421,86 @@ _NA_METRIC_TERMS = (
     "hedge effectiveness", "recovery time", "geopolitical exposure",
     "esg score",  # graceful via governance fallback but classifier still ambiguous
 )
+# First-person performance signals — questions that ask about the user's
+# own portfolio outcome but don't contain explicit " my X" markers. Without
+# these, "How am I doing this year?" falls through every branch and lands
+# on the default concept deflection. These are deliberately verb-anchored
+# (am/are/have/did/where + i/we) so they don't false-positive on generic
+# market questions like "How is the S&P doing?".
+_FIRST_PERSON_PERF_SIGNALS = (
+    "how am i doing", "how are we doing",
+    "how have i done", "how have we done",
+    "how was i doing", "how am i performing", "how are we performing",
+    "am i making", "am i losing", "am i up", "am i down",
+    "have i made", "have i lost",
+    "did i make", "did i lose",
+    "where do i stand", "where are we",
+)
 
 
 def _question_mode(question: str) -> str:
     """Return one of: portfolio, setup, concept, market.
 
-    Decision order:
-    1. CONCEPT-STEM override — questions starting with "how do i", "explain",
-       etc. are general advice even when " my " appears later. This lets
-       "How do I optimize my taxes?" route to concept-mode instead of
-       triggering portfolio-strict on the " my " signal alone.
-    2. NA-METRIC override — questions about metrics the engine doesn't
-       compute (hedge effectiveness, recovery time, geopolitical exposure)
-       route to concept so the narrator can explain inapplicability rather
-       than emit the rejection_marker.
-    3. OWNERSHIP signals → portfolio (strict).
-    4. SETUP signals → setup (canned help).
-    5. MARKET signals → market (free LLM + disclaimer).
-    6. CONCEPT patterns → concept (free LLM + disclaimer).
-    7. Default → concept (deflection).
+    Decision order (precedence — first match wins):
+    1. SETUP signals → setup. Setup-style "how do i install/configure/set
+       up" questions must beat the concept-stem fallback below; otherwise
+       "How do I install ic-engine?" lands on concept (the "how do i "
+       stem) and the user gets a definition instead of install steps.
+    2. STRONG-OWNERSHIP phrases → portfolio. Explicit "my portfolio /
+       my holdings / my sharpe" must win even when a concept stem is
+       present (covers "What is in my portfolio?", "What is my Sharpe?").
+    3. FIRST-PERSON-PERF signals → portfolio. Verb-anchored "how am i
+       doing / am i up / where do i stand" portfolio-status questions
+       that don't contain a literal " my X" but are still about the
+       user's own holdings.
+    4. CONCEPT-STEM override → concept. After we've ruled out setup +
+       ownership, advice-style stems ("how do i ", "what is ", "explain")
+       are general advice — so "How do I optimize my taxes?" routes to
+       concept rather than portfolio-strict on the bare " my " in
+       "my taxes".
+    5. NA-METRIC override → concept. Engine-gap metrics route to concept
+       so the narrator can explain inapplicability rather than emit the
+       rejection_marker.
+    6. OWNERSHIP signals → portfolio. Loose " my " / " i have " markers
+       for portfolio data questions that aren't already covered by
+       strong-ownership.
+    7. MARKET signals → market.
+    8. CONCEPT patterns (anywhere in the question) → concept.
+    9. Default → concept (deflection).
     """
     q = " " + (question or "").lower().strip() + " "
     q_start = q.lstrip()
-    # 1. Advice-style stems force concept mode even with ownership words —
-    #    UNLESS a strong-ownership phrase is present, in which case the
-    #    user is asking a portfolio-data question (e.g. "What is in my
-    #    portfolio?") and we must route to OWNERSHIP, not concept.
-    if any(q_start.startswith(s) for s in _CONCEPT_STEM_PATTERNS) and not any(
-        p in q for p in _STRONG_OWNERSHIP_PHRASES
-    ):
-        return "concept"
-    # 2. N/A-metric routing — known engine gaps that should explain, not reject.
-    if any(t in q for t in _NA_METRIC_TERMS):
-        return "concept"
-    # 3. Ownership signals — strict mode for genuine portfolio data queries.
-    if any(s in q for s in _OWNERSHIP_SIGNALS):
-        return "portfolio"
-    # 4. Setup / meta-help.
+    # 1. Setup-style help wins first — beats the concept-stem fallback so
+    #    "How do I install ..." gets install steps, not a definition.
     if any(s in q for s in _SETUP_SIGNALS):
         return "setup"
-    # 5. Market-wide.
+    # 2. Strong-ownership phrases — explicit portfolio markers win even
+    #    when a concept stem is present (e.g. "What is in my portfolio?").
+    if any(p in q for p in _STRONG_OWNERSHIP_PHRASES):
+        return "portfolio"
+    # 3. First-person performance signals — "how am I doing", "am I up",
+    #    etc. are portfolio-status questions even without a literal " my ".
+    if any(s in q for s in _FIRST_PERSON_PERF_SIGNALS):
+        return "portfolio"
+    # 4. Advice-style stems force concept mode (after setup + ownership).
+    if any(q_start.startswith(s) for s in _CONCEPT_STEM_PATTERNS):
+        return "concept"
+    # 5. N/A-metric routing — known engine gaps that should explain, not reject.
+    if any(t in q for t in _NA_METRIC_TERMS):
+        return "concept"
+    # 6. Loose ownership signals — strict mode for portfolio-data queries
+    #    that don't include a strong-ownership phrase.
+    if any(s in q for s in _OWNERSHIP_SIGNALS):
+        return "portfolio"
+    # 7. Market-wide.
     if any(s in q for s in _MARKET_SIGNALS):
         return "market"
-    # 6. Concept (definitional) — pattern starts the question OR appears.
+    # 8. Concept (definitional) — pattern starts the question OR appears.
     if any(q_start.startswith(s) for s in _CONCEPT_PATTERNS):
         return "concept"
     if any(s in q for s in _CONCEPT_PATTERNS):
         return "concept"
-    # 7. Default: concept-deflection. Free LLM + disclaimer.
+    # 9. Default: concept-deflection. Free LLM + disclaimer.
     return "concept"
 
 
