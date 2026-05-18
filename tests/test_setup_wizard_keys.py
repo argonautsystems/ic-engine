@@ -85,7 +85,7 @@ class TestDetectExistingKeys:
         assert result.get("finnhub") == "fh_key"
         assert result.get("newsapi") == "na_key"
         assert result.get("fred") == "fred_key"
-        assert result.get("polygon") == "poly_key"
+        assert result.get("massive") == "poly_key"
 
     def test_ignores_comment_lines(self, tmp_path):
         """Comment lines (# ...) are not interpreted as keys."""

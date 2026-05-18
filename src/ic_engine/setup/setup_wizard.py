@@ -637,7 +637,7 @@ OPTIONAL DATA PROVIDERS
 InvestorClaw can enhance analysis with data from:
   • Finnhub (stock fundamentals, insider trading)
   • NewsAPI (financial news)
-  • Polygon (market data, technicals)
+  • Massive (market data, technicals, Benzinga news, analyst ratings)
   • Alpha Vantage (time series data)
 
 These are OPTIONAL. Without them, InvestorClaw uses free/built-in data sources.
@@ -674,8 +674,8 @@ These are OPTIONAL. Without them, InvestorClaw uses free/built-in data sources.
             "CRYPTOPANIC_API_KEY": "cryptopanic",
             "ALPHA_VANTAGE_KEY": "alphavantage",
             "ALPHA_VANTAGE_API_KEY": "alphavantage",
-            "POLYGON_API_KEY": "polygon",
-            "MASSIVE_API_KEY": "polygon",
+            "POLYGON_API_KEY": "massive",
+            "MASSIVE_API_KEY": "massive",
         }
         try:
             with open(env_path, encoding="utf-8") as fh:
@@ -844,13 +844,14 @@ All recommended keys have a FREE tier.
 
         tier3 = [
             {
-                "key": "polygon",
-                "name": "Polygon.io",
-                "signup_url": "https://polygon.io/",
-                "limits": "5 req/min free, paid tiers for more",
-                "env_var": "POLYGON_API_KEY",
+                "key": "massive",
+                "name": "Massive",
+                "signup_url": "https://massive.com/",
+                "limits": "paid (subscription); polygon.io-compatible API",
+                "env_var": "MASSIVE_API_KEY",
                 "unlocks": (
                     "detailed options chains, tick-level trade data, "
+                    "Benzinga news, analyst ratings, "
                     "alternative news for tickers without Yahoo coverage"
                 ),
                 "skip_impact": "advanced options views unavailable",
@@ -928,8 +929,8 @@ All recommended keys have a FREE tier.
                 lines.append(f"FINNHUB_API_KEY={provider_keys['finnhub']}")
             if "newsapi" in provider_keys:
                 lines.append(f"NEWSAPI_KEY={provider_keys['newsapi']}")
-            if "polygon" in provider_keys:
-                lines.append(f"POLYGON_API_KEY={provider_keys['polygon']}")
+            if "massive" in provider_keys:
+                lines.append(f"MASSIVE_API_KEY={provider_keys['massive']}")
             if "alphavantage" in provider_keys:
                 lines.append(f"ALPHA_VANTAGE_API_KEY={provider_keys['alphavantage']}")
             # v2.2 additions
