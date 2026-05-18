@@ -80,8 +80,8 @@ _REQUIRED_KEYS = {
     "FINNHUB_KEY": ("Finnhub (real-time quotes & analyst ratings)", "https://finnhub.io/register"),
     "NEWSAPI_KEY": ("NewsAPI (news correlation)", "https://newsapi.org/register"),
     "MASSIVE_API_KEY": (
-        "Massive (market data, polygon.io-compatible)",
-        "https://polygon.io/dashboard/signup",
+        "Massive (market data + Benzinga news + analyst ratings; polygon.io-compatible)",
+        "https://massive.com/",
     ),
     "ALPHA_VANTAGE_KEY": (
         "Alpha Vantage (supplemental pricing)",
