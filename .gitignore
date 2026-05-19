@@ -19,6 +19,9 @@ portfolios/
 .env.backup*
 .env.provider-*
 !.env.example
+keys.env
+api-keys.env
+secrets.*
 *.key
 *.pem
 
@@ -127,4 +130,3 @@ PRODUCT_STRATEGY.md
 *INVESTOR*.md
 CLAUDE.md
 .harness/
-

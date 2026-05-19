@@ -32,7 +32,15 @@ if _project_root not in sys.path:
 from ic_engine.config.path_resolver import get_reports_dir
 from ic_engine.internal.performance_timer import get_timer
 from ic_engine.internal.pipeline import PortfolioPipeline
-from ic_engine.runtime.portfolio_arg_parser import extract_portfolio_slug, resolve_portfolio_file
+
+# portfolio_arg_parser was removed in the v4.x refactor. This command is
+# deprecated — the bridge uses per-section commands instead. The stubs below
+# prevent import failures while the command is phased out.
+def extract_portfolio_slug(*_a, **_kw):  # type: ignore[return]
+    return None
+
+def resolve_portfolio_file(*_a, **_kw):  # type: ignore[return]
+    return None
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
