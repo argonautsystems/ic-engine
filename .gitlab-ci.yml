@@ -16,12 +16,10 @@
 # standardized 2026-04-27.
 
 workflow:
-  # argonautsystems projects are off shared GitLab runners per fleet CI policy
-  # (mnemos `mem_4fcb1558224c`, 2026-04-29). Codex-only review path until a
-  # self-hosted runner is wired up. Until then, `when: never` prevents zombie
-  # pipelines that queue for hours and timeout-fail with no runner.
   rules:
-    - when: never
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH
+    - if: $CI_COMMIT_TAG
 
 stages:
   - test
@@ -33,25 +31,15 @@ variables:
   # Reproducible installs from uv.lock (not loose `uv pip install`).
   UV_FROZEN: "1"
 
-default:
-  image: python:3.13-slim
-  before_script:
-    - apt-get update -qq && apt-get install -qq -y curl git build-essential
-    - curl -LsSf https://astral.sh/uv/install.sh | sh
-    - export PATH="$HOME/.local/bin:$PATH"
-    - uv --version
-  cache:
-    key: uv-${CI_COMMIT_REF_SLUG}
-    paths:
-      - .venv/
-      - ~/.cache/uv/
-
 # ---------------------------------------------------------------------------
 # Stage: test
 # ---------------------------------------------------------------------------
 
 unit-tests:
   stage: test
+  tags: [argos, ncz-os]
+  before_script:
+    - export PATH="/home/jasonperlow/.local/bin:$PATH"
   script:
     - uv sync --frozen
     - uv run investorclaw --version
@@ -70,7 +58,10 @@ unit-tests:
 
 v13-harness:
   stage: harness
+  tags: [argos, ncz-os]
   needs: [unit-tests]
+  before_script:
+    - export PATH="/home/jasonperlow/.local/bin:$PATH"
   script:
     - uv sync --frozen
     # V13 enterprise barrage. --fast for CI to keep pipeline minutes reasonable.
