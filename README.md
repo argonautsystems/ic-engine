@@ -6,7 +6,7 @@ Python portfolio-analysis library powering the InvestorClaw skill ecosystem.
 
 `ic-engine` is the deterministic Python core (CDM 5.x/6.x models, providers, computation pipeline, runtime, the `investorclaw` CLI) that two adapters consume to surface portfolio analysis to AI agents:
 
-- **InvestorClaw v4.x (recommended)** — containerized application service via `mnemos-os/mnemos-ic-runtime`. Exposes 13 MCP tools over HTTP at `:18090` and a 17-tab browser dashboard at `:18092`. Image: `ghcr.io/argonautsystems/ic-engine:4.1.34-cpu`. This is the primary path for end users.
+- **InvestorClaw v4.x (recommended)** — containerized application service via `ncz-os/mnemos-ic-runtime`. Exposes 20 MCP tools over HTTP at `:18090` and a 17-tab browser dashboard at `:18092`. Image: `ghcr.io/argonautsystems/ic-engine:4.4.2-cpu`. This is the primary path for end users.
 - **InvestorClaude** — Claude Code marketplace plugin adapter (`argonautsystems/InvestorClaude`). Uses `/ask` and `/refresh` slash commands. Active on the v2.x line.
 
 This repo is the canonical source for the engine code. Adapters depend on it via `uv pip`. The agent-skill contract template (the canonical L2 routing rules that both adapters render their `SKILL.md` from) also lives here at `contract/`.
@@ -15,14 +15,14 @@ This repo is the canonical source for the engine code. Adapters depend on it via
 
 | Consumer | Path | Surface |
 |---|---|---|
-| **mnemos-os/mnemos-ic-runtime** (v4.x, recommended) | Docker container, MCP-HTTP | 13 MCP tools at `:18090`, 17-tab dashboard at `:18092` |
+| **ncz-os/mnemos-ic-runtime** (v4.x, recommended) | Docker container, MCP-HTTP | 20 MCP tools at `:18090`, 17-tab dashboard at `:18092` |
 | **argonautsystems/InvestorClaude** (v2.x) | Claude Code plugin, slash commands | `/ask`, `/refresh` |
 
 Most consumers should deploy via the `mnemos-ic-runtime` container rather than installing ic-engine directly.
 
 ## Install (developer / standalone testing)
 
-> **Note:** end users should deploy via the `mnemos-os/mnemos-ic-runtime` container image. The steps below are for engine developers and standalone testing only.
+> **Note:** end users should deploy via the `ncz-os/mnemos-ic-runtime` container image. The steps below are for engine developers and standalone testing only.
 
 When published to PyPI:
 
