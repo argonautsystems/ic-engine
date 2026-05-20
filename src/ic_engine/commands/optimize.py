@@ -526,10 +526,21 @@ def discretize_allocation(
 
     try:
         symbols = list(weights.keys())
-        latest_prices = {sym: current_prices.get(sym, 0) for sym in symbols}
+        _all_prices = {sym: current_prices.get(sym, 0) for sym in symbols}
+        # Filter out zero-price symbols (bonds/CUSIPs/delisted) — DiscreteAllocation requires no zeros/NaNs
+        latest_prices = {sym: price for sym, price in _all_prices.items() if price > 0}
+        if not latest_prices:
+            return {"error": "OPT-03_NO_VALID_PRICES: all symbols have zero price"}
+        # Restrict weights to symbols with valid prices and renormalize
+        _valid_weights = {sym: weights[sym] for sym in latest_prices if sym in weights}
+        _total = sum(_valid_weights.values())
+        if _total > 0:
+            _valid_weights = {sym: w / _total for sym, w in _valid_weights.items()}
+        import pandas as _pd
+        _prices_series = _pd.Series(latest_prices)
 
         # Use LinearProgramming solver for optimal integer allocation
-        da = DiscreteAllocation(weights, latest_prices, total_portfolio_value=total_value)
+        da = DiscreteAllocation(_valid_weights, _prices_series, total_portfolio_value=total_value)
         allocation_dict, leftover_cash = da.lp_portfolio()
 
         # Build output structure
@@ -884,8 +895,38 @@ def main():
         )
         sys.exit(1)
 
-    holdings_file = sys.argv[1]
-    method = sys.argv[2] if len(sys.argv) > 2 else "sharpe"
+    # Pre-process argv: separate positional args (holdings_file, output_file, method)
+    # from --flag args (--max-positions, --expert-views, etc.).
+    # This allows flags to appear anywhere in argv including before positionals.
+    _positionals = []
+    _all_args = list(sys.argv[1:])
+    _i = 0
+    while _i < len(_all_args):
+        a = _all_args[_i]
+        if a.startswith("--") and _i + 1 < len(_all_args) and not _all_args[_i + 1].startswith("--"):
+            # Flag with value — keep for later processing, skip both
+            _i += 2
+        elif a.startswith("--"):
+            # Flag without value
+            _i += 1
+        else:
+            # Positional
+            _positionals.append(a)
+            _i += 1
+
+    if not _positionals:
+        print(json.dumps({"error": "Usage: investorclaw optimize <holdings_file> [method]"}))
+        sys.exit(1)
+
+    holdings_file = _positionals[0]
+    # _positionals[1] may be output_file or method
+    _pos1 = _positionals[1] if len(_positionals) > 1 else None
+    if _pos1 and (_pos1.endswith(".json") or "/" in _pos1):
+        output_file_path = _pos1
+        method = _positionals[2] if len(_positionals) > 2 else "sharpe"
+    else:
+        output_file_path = None
+        method = _pos1 or "sharpe"
 
     if not Path(holdings_file).exists():
         print(json.dumps({"error": f"Holdings file not found: {holdings_file}"}))
@@ -893,10 +934,8 @@ def main():
 
     try:
         holdings, total_value = load_holdings(holdings_file)
-        symbols = holdings["symbol"].tolist()
-        returns = fetch_historical_returns(symbols)
 
-        # Parse options
+        # Parse options early so max_positions can pre-filter before fetching returns
         expert_views = None
         sector_caps = None
         sector_map = None
@@ -908,24 +947,41 @@ def main():
                     expert_views = json.loads(sys.argv[i + 1])
                 except json.JSONDecodeError:
                     logger.warning(f"Invalid expert views JSON: {sys.argv[i + 1]}")
-
             elif arg == "--sector-caps" and i + 1 < len(sys.argv):
                 try:
                     sector_caps = json.loads(sys.argv[i + 1])
                 except json.JSONDecodeError:
                     logger.warning(f"Invalid sector caps JSON: {sys.argv[i + 1]}")
-
             elif arg == "--sector-map" and i + 1 < len(sys.argv):
                 try:
                     sector_map = json.loads(sys.argv[i + 1])
                 except json.JSONDecodeError:
                     logger.warning(f"Invalid sector map JSON: {sys.argv[i + 1]}")
-
             elif arg == "--max-positions" and i + 1 < len(sys.argv):
                 try:
                     max_positions = int(sys.argv[i + 1])
                 except ValueError:
                     logger.warning(f"Invalid max-positions: {sys.argv[i + 1]}")
+
+        # Pre-filter to top N positions by weight BEFORE fetching returns.
+        # This avoids running a huge covariance matrix that hits solver limits.
+        # Filter equity-only (bonds have no price history) then take top N by current_price.
+        if max_positions and max_positions > 0:
+            # Filter to equity positions only (bonds/CUSIPs have no price history)
+            equity_hold = holdings[holdings["symbol"].apply(lambda s: not is_bond_ticker(str(s)))]
+            if len(equity_hold) > max_positions:
+                # Sort by value (current_price * quantity) descending, take top N
+                if "current_price" in equity_hold.columns and "quantity" in equity_hold.columns:
+                    equity_hold = equity_hold.copy()
+                    equity_hold["_val"] = equity_hold["current_price"] * equity_hold["quantity"]
+                    equity_hold = equity_hold.nlargest(max_positions, "_val").drop("_val", axis=1)
+                else:
+                    equity_hold = equity_hold.head(max_positions)
+            holdings = equity_hold
+            logger.info(f"Pre-filtered to {len(holdings)} equity positions for optimization")
+
+        symbols = holdings["symbol"].tolist()
+        returns = fetch_historical_returns(symbols)
 
         # Run base optimization
         if method == "sharpe":
