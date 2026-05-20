@@ -281,7 +281,8 @@ def synthesize_command_args(
         holdings_file = _find_holdings_file(reports_dir)
         if holdings_file:
             output_file = str(reports_dir / "optimize.json")
-            return [holdings_file, output_file], 0
+            # Limit to 30 positions to avoid solver limit on large portfolios (>200 holdings)
+            return [holdings_file, output_file, "--max-positions", "30"], 0
         else:
             print(f"❌ {_ERR_NO_HOLDINGS}")
             return [], 1
