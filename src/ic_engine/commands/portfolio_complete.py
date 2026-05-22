@@ -36,11 +36,18 @@ from ic_engine.internal.pipeline import PortfolioPipeline
 # portfolio_arg_parser was removed in the v4.x refactor. This command is
 # deprecated — the bridge uses per-section commands instead. The stubs below
 # prevent import failures while the command is phased out.
-def extract_portfolio_slug(*_a, **_kw):  # type: ignore[return]
-    return None
+def extract_portfolio_slug(argv, *_a, **_kw):
+    """Stub: return (None, argv) — slug extraction removed in v4.x refactor."""
+    return None, list(argv) if argv is not None else []
 
-def resolve_portfolio_file(*_a, **_kw):  # type: ignore[return]
-    return None
+def resolve_portfolio_file(explicit_slug=None, input_file=None, *_a, **_kw):
+    """Stub: fall back to default reports-dir portfolio file."""
+    from ic_engine.config.path_resolver import get_reports_dir
+    reports = get_reports_dir()
+    candidates = list(reports.glob("holdings_summary.json"))
+    if not candidates:
+        raise FileNotFoundError(f"No portfolio found in {reports}")
+    return candidates[0]
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
