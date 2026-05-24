@@ -44,15 +44,34 @@ _DASHBOARD_TRIGGER_COMMANDS = frozenset(
 def _maybe_auto_dashboard(command: str, skill_dir: Path) -> None:
     """Auto-generate dashboard after a data-producing command.
 
-    Runs dashboard.py as a subprocess and prints a reminder JSON block to stdout
-    with the artifact_path. Failures log errors but never break the main command pipeline.
+    Resolves the engine-bundled dashboard implementation
+    (commands/dashboard_deferred.py — the only dashboard module actually
+    shipped) and runs it as a subprocess after data-producing commands.
+    Falls back to legacy commands/dashboard.py for older layouts that
+    still ship that name. If neither exists the function silently
+    no-ops — the dashboard is regenerable on demand via the deferred
+    flow + dashboard-launch.sh, so missing auto-generation is not a
+    pipeline failure.
     """
     try:
-        # Resolve dashboard script (skill_dir is the InvestorClaw root)
-        dashboard_script = skill_dir / "commands" / "dashboard.py"
+        # Prefer the actual shipped name (dashboard_deferred.py — the
+        # 'deferred' suffix reflects that artifact generation is opt-in
+        # and operator-launched via dashboard-launch.sh under normal
+        # operation). Fall back to commands/dashboard.py only for
+        # legacy out-of-tree layouts that still carry that name.
+        dashboard_script = skill_dir / "commands" / "dashboard_deferred.py"
         if not dashboard_script.exists():
-            logger.warning(f"Dashboard script not found at {dashboard_script}")
-            return
+            legacy_script = skill_dir / "commands" / "dashboard.py"
+            if legacy_script.exists():
+                dashboard_script = legacy_script
+            else:
+                logger.debug(
+                    "Auto-dashboard skipped — no dashboard module "
+                    "shipped at %s (or %s). Operator regenerates via "
+                    "dashboard-launch.sh on demand.",
+                    dashboard_script, legacy_script,
+                )
+                return
 
         # Build args via the same synthesizer used by investorclaw.py
         # Use the actual reports_dir, not skill_dir
