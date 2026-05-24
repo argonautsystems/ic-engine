@@ -728,6 +728,22 @@ def synthesize_args(
     _auto_bootstrap_holdings(effective_command, skill_dir, reports_dir)
     args = list(user_args)
 
+    # Optimizer method pass-through. The wrapper_legacy_map collapses all three
+    # compute optimizer sections to 'optimize' so they share the holdings /
+    # output / --max-positions synthesis. But optimize.py uses the third
+    # positional arg as the method (sharpe | min_volatility | black_litterman),
+    # defaulting to sharpe — without explicit injection here, --section=
+    # optimize-minvol and optimize-blacklitterman silently fall back to
+    # sharpe. Record the requested method for command_builders to consume
+    # alongside the holdings/output positionals.
+    _optimize_method_override: Optional[str] = None
+    if (command, sec) == ("compute", "optimize-minvol"):
+        _optimize_method_override = "min_volatility"
+    elif (command, sec) == ("compute", "optimize-blacklitterman"):
+        _optimize_method_override = "black_litterman"
+    elif (command, sec) == ("compute", "optimize-sharpe"):
+        _optimize_method_override = "sharpe"
+
     # Agents frequently re-pass the portfolio CSV to every subcommand, but
     # only `holdings` takes the CSV as a positional arg. Downstream scripts
     # (performance/analyst/news/analysis) would then json.load() the CSV
@@ -805,6 +821,33 @@ def synthesize_args(
         args, error_code = synthesize_command_args(effective_command, args, reports_dir)
         if error_code != 0:
             return [], error_code
+
+        # Optimize method pass-through. synthesize_command_args returned the
+        # ["optimize"] command shape: [holdings_file, output_file,
+        # "--max-positions", "30"]. The optimizer's third positional is the
+        # method (defaulting to 'sharpe'); inject it for the optimize-minvol
+        # and optimize-blacklitterman wrappers so they actually run the
+        # requested optimizer. The positional must precede the --flag args
+        # since optimize.py's flag-vs-positional pre-processing keeps order.
+        if (
+            effective_command == "optimize"
+            and _optimize_method_override is not None
+            and args
+            and not any(a in (_optimize_method_override,
+                              "min_volatility", "black_litterman", "sharpe")
+                        for a in args)
+        ):
+            # Insert at index 2 (after holdings_file + output_file) so the
+            # method lands in the right positional slot before --max-positions.
+            holdings_file = args[0]
+            output_file = args[1] if len(args) > 1 else None
+            tail = args[2:]
+            new_args = [holdings_file]
+            if output_file is not None:
+                new_args.append(output_file)
+            new_args.append(_optimize_method_override)
+            new_args.extend(tail)
+            args = new_args
 
     # Tier-3 consultation injection — consultation_policy is the single authority
     if should_inject_tier3(effective_command) and "--tier3" not in args:
