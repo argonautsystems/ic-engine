@@ -709,10 +709,14 @@ def synthesize_args(
             ("scenario", "rebalance"): "scenario",
             ("scenario", "stress"): "stress-test",
             ("scenario", "tax-aware"): "rebalance-tax",
-            (
-                "market",
-                "news",
-            ): "market",  # v2.2 fetch_market_news.py — treat as market for gate purposes
+            # v2.2 fetch_market_news.py uses its own argparse (--topic /
+            # --max-articles / --verbose) and rejects positional args, so it
+            # MUST NOT collapse to legacy 'market' identity (which would later
+            # inject ["market"] as a positional via the market-wide synthesis
+            # block and crash argparse with "unrecognized arguments: market").
+            # Keep it as a distinct effective identity that opts out of
+            # market-wide arg injection below.
+            ("market", "news"): "market-news",
             ("market", "concept"): "concept",
             ("market", "market"): "market",
             ("bonds", "analysis"): "bonds",
