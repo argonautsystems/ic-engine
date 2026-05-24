@@ -734,6 +734,16 @@ class HoldingsLoader:
     ) -> str:
         """Unified asset-class classifier replacing per-loader heuristics."""
         haystack = f"{security_type} {asset_class} {top_type}".lower()
+        # Margin checked before cash/equity fallbacks: legacy keyed
+        # portfolios store positions under portfolio.margin, and CDM
+        # positions can carry asset_type='margin' / security_type='margin
+        # loan'. Without an explicit branch, those positions fall through
+        # to the symbol-based infer_asset_class() heuristic and typically
+        # end up classified as 'cash' (CASH/USD short-circuit) or 'equity'
+        # (symbol heuristic), which understates leverage and distorts
+        # downstream risk + news + allocation consumers.
+        if "margin" in haystack:
+            return "margin"
         if "cash" in haystack:
             return "cash"
         if symbol.upper() in ("CASH", "USD", "CASH_USD"):
