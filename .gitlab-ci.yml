@@ -39,7 +39,15 @@ unit-tests:
   stage: test
   tags: [argos, ncz-os]
   before_script:
-    - export PATH="/home/jasonperlow/.local/bin:$PATH"
+    # uv + ruff now system-wide on ARGOS runner; PATH export kept as
+    # belt+suspenders for hosts where /usr/local/bin lags.
+    - export PATH="/usr/local/bin:/home/jasonperlow/.local/bin:$PATH"
+    # ic-engine pulls clio @ git+https://gitlab.com/argonautsystems/clio.git
+    # (private). Rewrite gitlab.com URLs to use the runner's
+    # CI_JOB_TOKEN so uv git+ fetches succeed without prompting for
+    # credentials. Requires argonautsystems/clio → Settings → CI/CD →
+    # Job Token Permissions → Allow argonautsystems/ic-engine.
+    - git config --global url."https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.com/".insteadOf "https://gitlab.com/"
   script:
     - uv sync --frozen
     - uv run investorclaw --version
@@ -61,7 +69,8 @@ v13-harness:
   tags: [argos, ncz-os]
   needs: [unit-tests]
   before_script:
-    - export PATH="/home/jasonperlow/.local/bin:$PATH"
+    - export PATH="/usr/local/bin:/home/jasonperlow/.local/bin:$PATH"
+    - git config --global url."https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.com/".insteadOf "https://gitlab.com/"
   script:
     - uv sync --frozen
     # V13 enterprise barrage. --fast for CI to keep pipeline minutes reasonable.
