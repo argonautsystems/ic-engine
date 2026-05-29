@@ -334,6 +334,18 @@ def cdm5_holding_to_cdm6_trade(holding) -> Trade:
 
     product_type = asset_type_map.get(holding.asset_type.lower(), ProductType.EQUITY)
 
+    # Futures: fall back to the curated product multiplier when the import did
+    # not carry an explicit contract_size, so notional valuation is correct
+    # once CDM6 is wired into the pipeline.
+    _contract_size = getattr(holding, "contract_size", None)
+    if _contract_size is None and product_type == ProductType.FUTURE:
+        from ic_engine.providers.futures_spec import contract_multiplier
+
+        _mult = contract_multiplier(
+            getattr(holding, "contract_symbol", None) or holding.symbol or ""
+        )
+        _contract_size = _mult if _mult != 1.0 else None
+
     # Create ProductIdentifier
     identifiers = [
         ProductIdentifier(
@@ -353,7 +365,7 @@ def cdm5_holding_to_cdm6_trade(holding) -> Trade:
         sector=holding.sector if hasattr(holding, "sector") else None,
         issuer_name=getattr(holding, "bond_name", None),
         credit_rating=getattr(holding, "credit_quality", None),
-        contract_size=getattr(holding, "contract_size", None),
+        contract_size=_contract_size,
         blockchain=getattr(holding, "blockchain", None),
     )
 
