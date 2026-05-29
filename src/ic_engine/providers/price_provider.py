@@ -1337,6 +1337,8 @@ class PriceProvider:
         # removing it entirely.
         "quotes":          ["massive", "finnhub", "alpha_vantage", "yfinance"],
         "history":         ["massive", "alpha_vantage", "finnhub", "yfinance"],
+        # Futures are CME contract tickers only Massive serves (/futures/vX).
+        "futures":         ["massive"],
         "news":            ["marketaux", "finnhub", "newsapi", "yfinance"],
         "general_news":    ["finnhub", "marketaux"],
         "fx":              ["frankfurter", "alpha_vantage"],
@@ -1446,13 +1448,49 @@ class PriceProvider:
         result = self._try_op("quotes", "get_quote", symbol)
         return result if result else None
 
+    def _futures_provider(self):
+        """First routed provider exposing the futures snapshot surface."""
+        for provider in self._providers_for_op("futures"):
+            if hasattr(provider, "get_futures_snapshot"):
+                return provider
+        return None
+
+    def get_futures_quotes(self, tickers: List[str]) -> Dict[str, Dict]:
+        """Batch snapshot quotes for futures contract tickers (Massive)."""
+        provider = self._futures_provider()
+        out: Dict[str, Dict] = {}
+        if provider is None or not tickers:
+            return out
+        for t in tickers:
+            try:
+                snap = provider.get_futures_snapshot(t)
+            except Exception as e:
+                logger.warning("futures snapshot %s: %s", t, e)
+                snap = None
+            if snap:
+                out[t] = snap
+        if tickers:
+            self._use_quota(getattr(provider, "NAME", "massive"), len(tickers))
+        return out
+
     def get_quotes(self, symbols: List[str]) -> Dict[str, Dict]:
-        """Batch current prices for all symbols."""
+        """Batch current prices for all symbols.
+
+        Futures contract tickers (CME, e.g. ``ESZ25``) are split out and priced
+        via Massive's futures snapshot — the equity quote providers don't carry
+        them — then merged back with the equity/ETF/bond quotes.
+        """
         if not symbols:
             return {}
 
-        remaining = [s for s in symbols if s is not None and str(s).strip()]
+        from ic_engine.providers.futures_spec import is_futures_ticker
+
+        clean = [s for s in symbols if s is not None and str(s).strip()]
+        futures_syms = [s for s in clean if is_futures_ticker(s)]
         results: Dict[str, Dict] = {}
+        if futures_syms:
+            results.update(self.get_futures_quotes(futures_syms))
+        remaining = [s for s in clean if s not in results]
 
         for provider in self._providers_for_op("quotes"):
             if not remaining:
@@ -1482,8 +1520,40 @@ class PriceProvider:
         return results
 
     def get_history(self, symbol: str, days: int = 365) -> List[Dict]:
-        """Daily OHLCV history."""
+        """Daily OHLCV history.
+
+        Futures contract tickers route to Massive's futures aggregates; equities
+        use the standard history chain.
+        """
+        from ic_engine.providers.futures_spec import is_futures_ticker
+
+        if is_futures_ticker(symbol):
+            provider = self._futures_provider()
+            if provider is not None and hasattr(provider, "get_futures_history"):
+                try:
+                    rows = provider.get_futures_history(symbol, days=days)
+                    self._use_quota(getattr(provider, "NAME", "massive"), 1)
+                    if rows:
+                        return rows
+                except Exception as e:
+                    logger.warning("futures history %s: %s", symbol, e)
+            return []
         return self._try_op("history", "get_history", symbol, days=days)
+
+    def get_futures_contracts(
+        self, product_code: Optional[str] = None, active: Optional[bool] = True, limit: int = 100
+    ) -> List[Dict]:
+        """List futures contracts via the routed futures provider (Massive)."""
+        provider = self._futures_provider()
+        if provider is None or not hasattr(provider, "get_futures_contracts"):
+            return []
+        try:
+            return provider.get_futures_contracts(
+                product_code=product_code, active=active, limit=limit
+            )
+        except Exception as e:
+            logger.warning("futures contracts: %s", e)
+            return []
 
     def get_news(self, symbols: List[str], days: int = 7) -> List[Dict]:
         """News headlines. Aggregates from NewsAPI AND Finnhub."""
