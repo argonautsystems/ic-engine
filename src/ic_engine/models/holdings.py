@@ -142,15 +142,15 @@ class Holding:
         """Current market value of the holding.
 
         Futures report NOTIONAL exposure (price × multiplier × contracts).
+        An explicitly supplied ``market_value`` is authoritative and wins —
+        callers that already store true notional (legacy/summary bucket
+        shapes) must not be re-multiplied. Only when ``market_value`` is unset
+        do futures recompute notional from live price × multiplier × contracts.
         """
-        # Futures take precedence over any stored market_value: the equity
-        # ingestion pipeline populates market_value as price × shares (no
-        # contract multiplier), so honoring it here would silently drop the
-        # notional multiplier. Recompute from the live price + multiplier.
-        if self.asset_type in self._FUTURES_ASSET_TYPES:
-            return self.shares * self.current_price * self._futures_multiplier()
         if self.market_value is not None:
             return self.market_value
+        if self.asset_type in self._FUTURES_ASSET_TYPES:
+            return self.shares * self.current_price * self._futures_multiplier()
         return self.shares * self.current_price
 
     # Bond asset types whose prices are quoted as % of par (e.g. 99.769 = $99.769 per $100 face)
