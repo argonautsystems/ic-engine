@@ -2102,6 +2102,12 @@ class PortfolioFetcher:
                     # Preserve raw broker contract symbol if available
                     if _h.contract_symbol is None:
                         _h.contract_symbol = _h.symbol
+                    # The equity pipeline stored market_value as price × shares
+                    # (no contract multiplier). Clear it so Holding.value
+                    # recomputes the correct NOTIONAL (price × multiplier ×
+                    # contracts). Holding.value keeps honoring an explicit
+                    # market_value for every other (non-ingest) caller.
+                    _h.market_value = None
                 self.futures_data = _futures
             if len(metals_df) > 0:
                 _metals = self.fetch_equity_holdings(metals_df)
