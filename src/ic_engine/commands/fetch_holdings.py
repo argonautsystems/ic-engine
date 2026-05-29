@@ -803,13 +803,20 @@ class PortfolioFetcher:
                 else pl.lit(False)
             )
 
-            # Futures: symbol matches /ESZ25, @GCZ25, ESZ25 style
-            # Pattern: optional '/' or '@' prefix, 1-3 alpha, month code letter, 2 digit year
-            _futures_pattern = r"^[/@]?[A-Z]{1,3}[FGHJKMNQUVXZ]\d{2}$"
+            # Futures: classify via the canonical futures_spec parser so the
+            # asset_type bucket matches EXACTLY what the price aggregator routes
+            # to Massive's /futures/vX feed. A bare regex would diverge from the
+            # pricing split — e.g. Massive serves 1-digit-year CME tickers
+            # (ESH7, GCF7) that a `\d{2}` pattern rejects, leaving real futures
+            # misclassified as equity and unpriced. is_futures_ticker also guards
+            # on product membership in FUTURES_MULTIPLIERS, avoiding false hits
+            # on equity tickers that merely end in a month-letter + digit.
+            from ic_engine.providers.futures_spec import is_futures_ticker
+
             futures_by_symbol = (
-                (
-                    pl.col("symbol").is_not_null()
-                    & pl.col("symbol").str.to_uppercase().str.contains(_futures_pattern)
+                pl.col("symbol").map_elements(
+                    lambda s: bool(s) and is_futures_ticker(str(s)),
+                    return_dtype=pl.Boolean,
                 )
                 if has_symbol
                 else pl.lit(False)
