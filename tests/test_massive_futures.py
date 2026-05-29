@@ -10,9 +10,8 @@ from __future__ import annotations
 
 import pytest
 
-from ic_engine.providers import futures_spec as fs
 from ic_engine.models.holdings import Holding
-
+from ic_engine.providers import futures_spec as fs
 
 # ---- futures_spec ----------------------------------------------------------
 
@@ -39,6 +38,22 @@ def test_parse_contract_ticker(ticker, product, month, year):
 def test_non_futures_rejected(sym):
     assert fs.parse_contract_ticker(sym) is None
     assert not fs.is_futures_ticker(sym)
+
+
+@pytest.mark.parametrize(
+    "sym,expected_product,expected_multiplier",
+    [
+        (None, None, fs.DEFAULT_MULTIPLIER),
+        ("ESZ25", "ES", 50.0),
+        ("/ESZ25", "ES", 50.0),
+        ("@GCZ25", "GC", 100.0),
+        ("AAPL", None, fs.DEFAULT_MULTIPLIER),
+    ],
+)
+def test_futures_prefix_parse_classify_and_multiplier(sym, expected_product, expected_multiplier):
+    assert fs.product_code(sym) == expected_product
+    assert fs.is_futures_ticker(sym) is (expected_product is not None)
+    assert fs.contract_multiplier(sym) == expected_multiplier
 
 
 def test_multipliers_and_notional():
@@ -88,8 +103,11 @@ def test_explicit_market_value_short_circuits():
 
 def test_equity_unaffected():
     eq = Holding(
-        symbol="AAPL", asset_type="equity", shares=10,
-        current_price=200.0, purchase_price=150.0,
+        symbol="AAPL",
+        asset_type="equity",
+        shares=10,
+        current_price=200.0,
+        purchase_price=150.0,
     )
     assert eq.value == 2000.0  # plain shares*price, no multiplier
     assert eq.cost_basis == 1500.0

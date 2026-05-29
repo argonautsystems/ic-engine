@@ -47,6 +47,14 @@ logger = logging.getLogger(__name__)
 # fix removing repo-internal .env loading and risked pulling secrets from
 # an unexpected package path. The bootstrap path is the only source.
 
+
+def _canonical_futures_api_ticker(ticker: str) -> str:
+    normalized = str(ticker).strip().upper()
+    if normalized[:1] in {"/", "@"}:
+        normalized = normalized[1:]
+    return normalized
+
+
 # ─── Provider implementations with official SDKs ──────────────────────────
 
 
@@ -548,16 +556,26 @@ class PolygonProvider:
                         continue
                     price = (
                         (getattr(day, "close", None) or getattr(day, "c", None) if day else None)
-                        or (getattr(last, "price", None) or getattr(last, "p", None) if last else None)
+                        or (
+                            getattr(last, "price", None) or getattr(last, "p", None)
+                            if last
+                            else None
+                        )
                         or 0
                     )
                     results[ticker] = {
                         "symbol": ticker,
                         "price": price,
-                        "open": (getattr(day, "open", None) or getattr(day, "o", None)) if day else 0,
-                        "high": (getattr(day, "high", None) or getattr(day, "h", None)) if day else 0,
+                        "open": (getattr(day, "open", None) or getattr(day, "o", None))
+                        if day
+                        else 0,
+                        "high": (getattr(day, "high", None) or getattr(day, "h", None))
+                        if day
+                        else 0,
                         "low": (getattr(day, "low", None) or getattr(day, "l", None)) if day else 0,
-                        "volume": (getattr(day, "volume", None) or getattr(day, "v", None)) if day else 0,
+                        "volume": (getattr(day, "volume", None) or getattr(day, "v", None))
+                        if day
+                        else 0,
                         "provider": self.NAME,
                     }
                 if results:
@@ -678,9 +696,7 @@ class PolygonProvider:
                 if v is not None:
                     rows[i][fld] = v * cf
 
-        logger.debug(
-            f"Polygon div adj({symbol}): applied {len(factors)} dividends across {n} rows"
-        )
+        logger.debug(f"Polygon div adj({symbol}): applied {len(factors)} dividends across {n} rows")
         return rows
 
     def get_history(self, symbol: str, days: int = 365) -> List[Dict]:
@@ -707,9 +723,7 @@ class PolygonProvider:
 
             rows = [
                 {
-                    "date": datetime.fromtimestamp(a.timestamp / 1000).strftime(
-                        "%Y-%m-%d"
-                    ),
+                    "date": datetime.fromtimestamp(a.timestamp / 1000).strftime("%Y-%m-%d"),
                     "open": a.open,
                     "high": a.high,
                     "low": a.low,
@@ -835,7 +849,8 @@ class PolygonProvider:
         Returns a normalised quote: last/settlement price, session OHLCV,
         change, plus contract details (product_code, settlement_date).
         """
-        data = self._futures_get("/snapshot", {"ticker": ticker})
+        api_ticker = _canonical_futures_api_ticker(ticker)
+        data = self._futures_get("/snapshot", {"ticker": api_ticker})
         results = (data or {}).get("results") or []
         if not results:
             return None
@@ -846,7 +861,7 @@ class PolygonProvider:
         settlement = session.get("settlement_price")
         price = close if close not in (None, 0) else settlement
         return {
-            "symbol": ticker,
+            "symbol": api_ticker,
             "price": price or 0,
             "open": session.get("open") or 0,
             "high": session.get("high") or 0,
@@ -878,10 +893,11 @@ class PolygonProvider:
         ``1hour``, ``1minute`` ...). Returns oldest-first OHLCV rows; empty when
         the contract has no bars in range or the plan lacks futures history.
         """
+        api_ticker = _canonical_futures_api_ticker(ticker)
         start = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
         end = datetime.now().strftime("%Y-%m-%d")
         data = self._futures_get(
-            f"/aggs/{ticker}",
+            f"/aggs/{api_ticker}",
             {"resolution": resolution, "window_start": start, "window_end": end, "limit": 50000},
         )
         rows: List[Dict] = []
@@ -1085,6 +1101,7 @@ PROVIDER_CLASSES = {
 # https://www.frankfurter.app — free EUR/USD/etc. spot rates. Used when the
 # user asks about FX (news-forex). No API key required, ECM data provenance.
 
+
 class FrankfurterFxProvider:
     """FX spot rates from frankfurter.app (free, no key)."""
 
@@ -1099,8 +1116,11 @@ class FrankfurterFxProvider:
         """Latest spot rate. Returns {from, to, rate, date, provider}."""
         try:
             import urllib.request, json as _json
+
             url = f"{self.BASE_URL}/latest?from={from_ccy}&to={to_ccy}"
-            req = urllib.request.Request(url, headers={"User-Agent": "ic-engine/4.1 (mnemos-ic-runtime)"})
+            req = urllib.request.Request(
+                url, headers={"User-Agent": "ic-engine/4.1 (mnemos-ic-runtime)"}
+            )
             with urllib.request.urlopen(req, timeout=10) as resp:
                 data = _json.loads(resp.read().decode())
             rate = (data.get("rates") or {}).get(to_ccy.upper())
@@ -1121,8 +1141,11 @@ class FrankfurterFxProvider:
         """Spot rates for every supported quote currency against `base`."""
         try:
             import urllib.request, json as _json
+
             url = f"{self.BASE_URL}/latest?from={base}"
-            req = urllib.request.Request(url, headers={"User-Agent": "ic-engine/4.1 (mnemos-ic-runtime)"})
+            req = urllib.request.Request(
+                url, headers={"User-Agent": "ic-engine/4.1 (mnemos-ic-runtime)"}
+            )
             with urllib.request.urlopen(req, timeout=10) as resp:
                 data = _json.loads(resp.read().decode())
             return data.get("rates") or {}
@@ -1134,6 +1157,7 @@ class FrankfurterFxProvider:
 # ─── Treasury.gov fiscal-data yield provider (no-key FRED fallback) ───────
 # https://api.fiscaldata.treasury.gov — public Treasury yield data. Used when
 # FRED_API_KEY is not set. No registration required.
+
 
 class TreasuryFiscalDataProvider:
     """US Treasury yield curve via fiscaldata.treasury.gov (free, no key)."""
@@ -1150,6 +1174,7 @@ class TreasuryFiscalDataProvider:
         """
         try:
             import urllib.request, json as _json
+
             # Latest record per security description
             url = (
                 f"{self.BASE_URL}/v2/accounting/od/avg_interest_rates"
@@ -1157,7 +1182,9 @@ class TreasuryFiscalDataProvider:
                 "&sort=-record_date"
                 "&page[size]=200"
             )
-            req = urllib.request.Request(url, headers={"User-Agent": "ic-engine/4.1 (mnemos-ic-runtime)"})
+            req = urllib.request.Request(
+                url, headers={"User-Agent": "ic-engine/4.1 (mnemos-ic-runtime)"}
+            )
             with urllib.request.urlopen(req, timeout=10) as resp:
                 data = _json.loads(resp.read().decode())
             rows = data.get("data") or []
@@ -1189,6 +1216,7 @@ PROVIDER_CLASSES["treasury_fiscaldata"] = TreasuryFiscalDataProvider
 # https://www.marketaux.com — financial news with broader category filters
 # than NewsAPI (forex, crypto, M&A, country/sector). Free tier 100/day.
 
+
 class MarketauxNewsProvider:
     """Financial news via marketaux.com (free tier, MARKETAUX_API_KEY)."""
 
@@ -1204,6 +1232,7 @@ class MarketauxNewsProvider:
         """News articles mentioning the given symbols."""
         try:
             import urllib.request, urllib.parse, json as _json
+
             params = {
                 "api_token": self.api_key,
                 "symbols": ",".join(symbols[:50]),  # marketaux caps at 50
@@ -1212,19 +1241,23 @@ class MarketauxNewsProvider:
                 "limit": "10",
             }
             url = f"{self.BASE_URL}/news/all?{urllib.parse.urlencode(params)}"
-            req = urllib.request.Request(url, headers={"User-Agent": "ic-engine/4.1 (mnemos-ic-runtime)"})
+            req = urllib.request.Request(
+                url, headers={"User-Agent": "ic-engine/4.1 (mnemos-ic-runtime)"}
+            )
             with urllib.request.urlopen(req, timeout=10) as resp:
                 data = _json.loads(resp.read().decode())
             articles = []
-            for item in (data.get("data") or []):
-                articles.append({
-                    "title": item.get("title", ""),
-                    "summary": item.get("description") or item.get("snippet", ""),
-                    "source": item.get("source", ""),
-                    "url": item.get("url", ""),
-                    "datetime": (item.get("published_at") or "")[:16].replace("T", " "),
-                    "provider": self.NAME,
-                })
+            for item in data.get("data") or []:
+                articles.append(
+                    {
+                        "title": item.get("title", ""),
+                        "summary": item.get("description") or item.get("snippet", ""),
+                        "source": item.get("source", ""),
+                        "url": item.get("url", ""),
+                        "datetime": (item.get("published_at") or "")[:16].replace("T", " "),
+                        "provider": self.NAME,
+                    }
+                )
             return articles
         except Exception as e:
             logger.warning(f"Marketaux news({len(symbols)} symbols): {e}")
@@ -1241,6 +1274,7 @@ class MarketauxNewsProvider:
         """
         try:
             import urllib.request, urllib.parse, json as _json
+
             params: Dict[str, str] = {
                 "api_token": self.api_key,
                 "language": "en",
@@ -1255,20 +1289,24 @@ class MarketauxNewsProvider:
                 params["search"] = "merger OR acquisition"
             # general: no filter — full feed
             url = f"{self.BASE_URL}/news/all?{urllib.parse.urlencode(params)}"
-            req = urllib.request.Request(url, headers={"User-Agent": "ic-engine/4.1 (mnemos-ic-runtime)"})
+            req = urllib.request.Request(
+                url, headers={"User-Agent": "ic-engine/4.1 (mnemos-ic-runtime)"}
+            )
             with urllib.request.urlopen(req, timeout=10) as resp:
                 data = _json.loads(resp.read().decode())
             articles = []
-            for item in (data.get("data") or []):
-                articles.append({
-                    "category": cat,
-                    "title": item.get("title", ""),
-                    "summary": item.get("description") or item.get("snippet", ""),
-                    "source": item.get("source", ""),
-                    "url": item.get("url", ""),
-                    "datetime": (item.get("published_at") or "")[:16].replace("T", " "),
-                    "provider": self.NAME,
-                })
+            for item in data.get("data") or []:
+                articles.append(
+                    {
+                        "category": cat,
+                        "title": item.get("title", ""),
+                        "summary": item.get("description") or item.get("snippet", ""),
+                        "source": item.get("source", ""),
+                        "url": item.get("url", ""),
+                        "datetime": (item.get("published_at") or "")[:16].replace("T", " "),
+                        "provider": self.NAME,
+                    }
+                )
             return articles
         except Exception as e:
             logger.warning(f"Marketaux general_news({category}): {e}")
@@ -1318,8 +1356,8 @@ class PriceProvider:
         "polygon": 999_999,
         "alpha_vantage": 500,
         "newsapi": 100,
-        "marketaux": 100,                # free tier 100/day
-        "frankfurter": 999_999,          # no quota (no key, ECB-sourced)
+        "marketaux": 100,  # free tier 100/day
+        "frankfurter": 999_999,  # no quota (no key, ECB-sourced)
         "treasury_fiscaldata": 999_999,  # no quota (public Treasury API)
     }
 
@@ -1335,15 +1373,15 @@ class PriceProvider:
         # For SMALL portfolios (≲50 symbols) yfinance still works fine and
         # is free, so the routing keeps it as a safety net rather than
         # removing it entirely.
-        "quotes":          ["massive", "finnhub", "alpha_vantage", "yfinance"],
-        "history":         ["massive", "alpha_vantage", "finnhub", "yfinance"],
+        "quotes": ["massive", "finnhub", "alpha_vantage", "yfinance"],
+        "history": ["massive", "alpha_vantage", "finnhub", "yfinance"],
         # Futures are CME contract tickers only Massive serves (/futures/vX).
-        "futures":         ["massive"],
-        "news":            ["marketaux", "finnhub", "newsapi", "yfinance"],
-        "general_news":    ["finnhub", "marketaux"],
-        "fx":              ["frankfurter", "alpha_vantage"],
+        "futures": ["massive"],
+        "news": ["marketaux", "finnhub", "newsapi", "yfinance"],
+        "general_news": ["finnhub", "marketaux"],
+        "fx": ["frankfurter", "alpha_vantage"],
         "treasury_yields": ["treasury_fiscaldata"],
-        "analyst":         ["finnhub", "yfinance"],
+        "analyst": ["finnhub", "yfinance"],
     }
 
     def __init__(
@@ -1462,8 +1500,9 @@ class PriceProvider:
         if provider is None or not tickers:
             return out
         for t in tickers:
+            api_ticker = _canonical_futures_api_ticker(t)
             try:
-                snap = provider.get_futures_snapshot(t)
+                snap = provider.get_futures_snapshot(api_ticker)
             except Exception as e:
                 logger.warning("futures snapshot %s: %s", t, e)
                 snap = None
@@ -1531,7 +1570,9 @@ class PriceProvider:
             provider = self._futures_provider()
             if provider is not None and hasattr(provider, "get_futures_history"):
                 try:
-                    rows = provider.get_futures_history(symbol, days=days)
+                    rows = provider.get_futures_history(
+                        _canonical_futures_api_ticker(symbol), days=days
+                    )
                     self._use_quota(getattr(provider, "NAME", "massive"), 1)
                     if rows:
                         return rows
