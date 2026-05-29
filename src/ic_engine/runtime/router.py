@@ -690,6 +690,11 @@ def synthesize_args(
     # presentation; the deterministic system below operates on the legacy
     # command identity.
     effective_command = command
+    # `sec` must be bound for ALL commands — legacy direct commands (e.g.
+    # `holdings`) are not in SECTION_DISPATCH and never set it inside the block
+    # below, yet the (command, sec) checks further down reference it
+    # unconditionally. Default to the raw section (None for legacy commands).
+    sec = section
     if command in SECTION_DISPATCH:
         sec = section if section is not None else DEFAULT_SECTIONS.get(command)
         # Map (wrapper, section) → legacy command name used by downstream gates
@@ -833,9 +838,10 @@ def synthesize_args(
             effective_command == "optimize"
             and _optimize_method_override is not None
             and args
-            and not any(a in (_optimize_method_override,
-                              "min_volatility", "black_litterman", "sharpe")
-                        for a in args)
+            and not any(
+                a in (_optimize_method_override, "min_volatility", "black_litterman", "sharpe")
+                for a in args
+            )
         ):
             # Insert at index 2 (after holdings_file + output_file) so the
             # method lands in the right positional slot before --max-positions.

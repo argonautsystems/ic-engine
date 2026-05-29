@@ -143,10 +143,14 @@ class Holding:
 
         Futures report NOTIONAL exposure (price × multiplier × contracts).
         """
-        if self.market_value is not None:
-            return self.market_value
+        # Futures take precedence over any stored market_value: the equity
+        # ingestion pipeline populates market_value as price × shares (no
+        # contract multiplier), so honoring it here would silently drop the
+        # notional multiplier. Recompute from the live price + multiplier.
         if self.asset_type in self._FUTURES_ASSET_TYPES:
             return self.shares * self.current_price * self._futures_multiplier()
+        if self.market_value is not None:
+            return self.market_value
         return self.shares * self.current_price
 
     # Bond asset types whose prices are quoted as % of par (e.g. 99.769 = $99.769 per $100 face)
