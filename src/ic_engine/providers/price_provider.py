@@ -508,12 +508,16 @@ class MassiveProvider:
         if not self.api_key:
             raise ValueError("MASSIVE_API_KEY not set")
 
+        # Base MUST point at Massive — never fall back to the SDK's default
+        # endpoint (legacy domain). If the installed SDK can't honor the base
+        # override, fail loudly rather than silently routing off-Massive.
         try:
             self._client = RESTClient(api_key=self.api_key, base=self.API_BASE, trace=False)
-        except TypeError:
-            # Older SDKs may not expose the stocks API base override. Futures
-            # REST calls below still use Massive directly via FUTURES_API_BASE.
-            self._client = RESTClient(api_key=self.api_key)
+        except TypeError as e:
+            raise RuntimeError(
+                "Installed polygon-api-client does not support base= override; "
+                "upgrade so the Massive base endpoint can be enforced."
+            ) from e
 
     def get_quote(self, symbol: str) -> Optional[Dict]:
         """Previous-day close (free tier).
