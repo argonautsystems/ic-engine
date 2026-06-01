@@ -47,6 +47,14 @@ logger = logging.getLogger(__name__)
 # fix removing repo-internal .env loading and risked pulling secrets from
 # an unexpected package path. The bootstrap path is the only source.
 
+
+def _canonical_futures_api_ticker(ticker: str) -> str:
+    normalized = str(ticker).strip().upper()
+    if normalized[:1] in {"/", "@"}:
+        normalized = normalized[1:]
+    return normalized
+
+
 # ─── Provider implementations with official SDKs ──────────────────────────
 
 
@@ -548,16 +556,26 @@ class PolygonProvider:
                         continue
                     price = (
                         (getattr(day, "close", None) or getattr(day, "c", None) if day else None)
-                        or (getattr(last, "price", None) or getattr(last, "p", None) if last else None)
+                        or (
+                            getattr(last, "price", None) or getattr(last, "p", None)
+                            if last
+                            else None
+                        )
                         or 0
                     )
                     results[ticker] = {
                         "symbol": ticker,
                         "price": price,
-                        "open": (getattr(day, "open", None) or getattr(day, "o", None)) if day else 0,
-                        "high": (getattr(day, "high", None) or getattr(day, "h", None)) if day else 0,
+                        "open": (getattr(day, "open", None) or getattr(day, "o", None))
+                        if day
+                        else 0,
+                        "high": (getattr(day, "high", None) or getattr(day, "h", None))
+                        if day
+                        else 0,
                         "low": (getattr(day, "low", None) or getattr(day, "l", None)) if day else 0,
-                        "volume": (getattr(day, "volume", None) or getattr(day, "v", None)) if day else 0,
+                        "volume": (getattr(day, "volume", None) or getattr(day, "v", None))
+                        if day
+                        else 0,
                         "provider": self.NAME,
                     }
                 if results:
@@ -678,9 +696,7 @@ class PolygonProvider:
                 if v is not None:
                     rows[i][fld] = v * cf
 
-        logger.debug(
-            f"Polygon div adj({symbol}): applied {len(factors)} dividends across {n} rows"
-        )
+        logger.debug(f"Polygon div adj({symbol}): applied {len(factors)} dividends across {n} rows")
         return rows
 
     def get_history(self, symbol: str, days: int = 365) -> List[Dict]:
@@ -707,9 +723,7 @@ class PolygonProvider:
 
             rows = [
                 {
-                    "date": datetime.fromtimestamp(a.timestamp / 1000).strftime(
-                        "%Y-%m-%d"
-                    ),
+                    "date": datetime.fromtimestamp(a.timestamp / 1000).strftime("%Y-%m-%d"),
                     "open": a.open,
                     "high": a.high,
                     "low": a.low,
@@ -772,6 +786,144 @@ class PolygonProvider:
         raise NotImplementedError(
             "Polygon does not provide analyst recommendations — use Finnhub or yfinance"
         )
+
+    # ── Futures (Massive Futures API, launched 2026) ─────────────────────────
+    # CME Globex (CBOT/CME/NYMEX/COMEX). The polygon-api-client SDK does not
+    # wrap the /futures/vX/ surface yet, so these call the REST endpoints
+    # directly. Verified live against the Massive partner key 2026-05-29.
+    FUTURES_API_BASE = "https://api.polygon.io/futures/vX"
+
+    def _futures_get(self, path: str, params: Optional[dict] = None) -> Optional[dict]:
+        """GET a /futures/vX endpoint; returns the parsed JSON body or None."""
+        url = f"{self.FUTURES_API_BASE}{path}"
+        q = dict(params or {})
+        q["apiKey"] = self.api_key
+        try:
+            resp = requests.get(url, params=q, timeout=15)
+            resp.raise_for_status()
+            data = resp.json()
+            if isinstance(data, dict) and data.get("status") not in (None, "OK", "DELAYED"):
+                logger.warning("Massive futures %s: status=%s", path, data.get("status"))
+            return data
+        except Exception as e:
+            logger.warning("Massive futures GET %s: %s", path, e)
+            return None
+
+    def get_futures_contracts(
+        self,
+        product_code: Optional[str] = None,
+        active: Optional[bool] = True,
+        limit: int = 100,
+    ) -> List[Dict]:
+        """List futures contracts, newest first.
+
+        ``product_code`` filters to one product family (e.g. ``ES``, ``CL``).
+        ``active`` filters to currently-tradeable contracts when True.
+        """
+        params: dict = {"limit": max(1, min(int(limit), 1000)), "order": "desc"}
+        if product_code:
+            params["product_code"] = product_code.upper()
+        if active is not None:
+            params["active"] = "true" if active else "false"
+        data = self._futures_get("/contracts", params)
+        out: List[Dict] = []
+        for r in (data or {}).get("results", []) or []:
+            out.append(
+                {
+                    "ticker": r.get("ticker"),
+                    "name": r.get("name"),
+                    "product_code": r.get("product_code"),
+                    "trading_venue": r.get("trading_venue"),
+                    "first_trade_date": r.get("first_trade_date"),
+                    "last_trade_date": r.get("last_trade_date"),
+                    "active": r.get("active"),
+                    "group_code": r.get("group_code"),
+                    "provider": self.NAME,
+                }
+            )
+        return out
+
+    def get_futures_snapshot(self, ticker: str) -> Optional[Dict]:
+        """Current market snapshot for a futures contract.
+
+        Returns a normalised quote: last/settlement price, session OHLCV,
+        change, plus contract details (product_code, settlement_date).
+        """
+        api_ticker = _canonical_futures_api_ticker(ticker)
+        data = self._futures_get("/snapshot", {"ticker": api_ticker})
+        results = (data or {}).get("results") or []
+        if not results:
+            return None
+        r = results[0]
+        session = r.get("session") or {}
+        details = r.get("details") or {}
+        close = session.get("close")
+        settlement = session.get("settlement_price")
+        price = close if close not in (None, 0) else settlement
+        return {
+            "symbol": api_ticker,
+            "price": price or 0,
+            "open": session.get("open") or 0,
+            "high": session.get("high") or 0,
+            "low": session.get("low") or 0,
+            "close": close or 0,
+            "volume": session.get("volume") or 0,
+            "settlement_price": settlement or 0,
+            "previous_settlement": session.get("previous_settlement") or 0,
+            "change": session.get("change") or 0,
+            "change_percent": session.get("change_percent") or 0,
+            "product_code": details.get("product_code"),
+            "settlement_date": details.get("settlement_date"),
+            "provider": self.NAME,
+        }
+
+    def get_futures_quote(self, ticker: str) -> Optional[Dict]:
+        """Alias for :meth:`get_futures_snapshot` — quote-shaped access."""
+        return self.get_futures_snapshot(ticker)
+
+    def get_futures_history(
+        self,
+        ticker: str,
+        days: int = 365,
+        resolution: str = "1day",
+    ) -> List[Dict]:
+        """Historical aggregate bars for a futures contract.
+
+        ``resolution`` is a Massive futures resolution string (``1day``,
+        ``1hour``, ``1minute`` ...). Returns oldest-first OHLCV rows; empty when
+        the contract has no bars in range or the plan lacks futures history.
+        """
+        api_ticker = _canonical_futures_api_ticker(ticker)
+        start = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+        end = datetime.now().strftime("%Y-%m-%d")
+        data = self._futures_get(
+            f"/aggs/{api_ticker}",
+            {"resolution": resolution, "window_start": start, "window_end": end, "limit": 50000},
+        )
+        rows: List[Dict] = []
+        for r in (data or {}).get("results", []) or []:
+            ts = r.get("window_start") or r.get("timestamp") or r.get("t")
+            dt = None
+            if isinstance(ts, (int, float)):
+                # futures feed timestamps are nanoseconds since epoch.
+                secs = ts / 1e9 if ts > 1e12 else ts / 1000 if ts > 1e10 else ts
+                try:
+                    dt = datetime.fromtimestamp(secs).strftime("%Y-%m-%d")
+                except (OverflowError, OSError, ValueError):
+                    dt = None
+            rows.append(
+                {
+                    "date": dt,
+                    "open": r.get("open") or r.get("o") or 0,
+                    "high": r.get("high") or r.get("h") or 0,
+                    "low": r.get("low") or r.get("l") or 0,
+                    "close": r.get("close") or r.get("c") or 0,
+                    "volume": r.get("volume") or r.get("v") or 0,
+                    "provider": self.NAME,
+                }
+            )
+        rows.sort(key=lambda x: x["date"] or "")
+        return rows
 
 
 # Backwards-compat alias
@@ -949,6 +1101,7 @@ PROVIDER_CLASSES = {
 # https://www.frankfurter.app — free EUR/USD/etc. spot rates. Used when the
 # user asks about FX (news-forex). No API key required, ECM data provenance.
 
+
 class FrankfurterFxProvider:
     """FX spot rates from frankfurter.app (free, no key)."""
 
@@ -963,8 +1116,11 @@ class FrankfurterFxProvider:
         """Latest spot rate. Returns {from, to, rate, date, provider}."""
         try:
             import urllib.request, json as _json
+
             url = f"{self.BASE_URL}/latest?from={from_ccy}&to={to_ccy}"
-            req = urllib.request.Request(url, headers={"User-Agent": "ic-engine/4.1 (mnemos-ic-runtime)"})
+            req = urllib.request.Request(
+                url, headers={"User-Agent": "ic-engine/4.1 (mnemos-ic-runtime)"}
+            )
             with urllib.request.urlopen(req, timeout=10) as resp:
                 data = _json.loads(resp.read().decode())
             rate = (data.get("rates") or {}).get(to_ccy.upper())
@@ -985,8 +1141,11 @@ class FrankfurterFxProvider:
         """Spot rates for every supported quote currency against `base`."""
         try:
             import urllib.request, json as _json
+
             url = f"{self.BASE_URL}/latest?from={base}"
-            req = urllib.request.Request(url, headers={"User-Agent": "ic-engine/4.1 (mnemos-ic-runtime)"})
+            req = urllib.request.Request(
+                url, headers={"User-Agent": "ic-engine/4.1 (mnemos-ic-runtime)"}
+            )
             with urllib.request.urlopen(req, timeout=10) as resp:
                 data = _json.loads(resp.read().decode())
             return data.get("rates") or {}
@@ -998,6 +1157,7 @@ class FrankfurterFxProvider:
 # ─── Treasury.gov fiscal-data yield provider (no-key FRED fallback) ───────
 # https://api.fiscaldata.treasury.gov — public Treasury yield data. Used when
 # FRED_API_KEY is not set. No registration required.
+
 
 class TreasuryFiscalDataProvider:
     """US Treasury yield curve via fiscaldata.treasury.gov (free, no key)."""
@@ -1014,6 +1174,7 @@ class TreasuryFiscalDataProvider:
         """
         try:
             import urllib.request, json as _json
+
             # Latest record per security description
             url = (
                 f"{self.BASE_URL}/v2/accounting/od/avg_interest_rates"
@@ -1021,7 +1182,9 @@ class TreasuryFiscalDataProvider:
                 "&sort=-record_date"
                 "&page[size]=200"
             )
-            req = urllib.request.Request(url, headers={"User-Agent": "ic-engine/4.1 (mnemos-ic-runtime)"})
+            req = urllib.request.Request(
+                url, headers={"User-Agent": "ic-engine/4.1 (mnemos-ic-runtime)"}
+            )
             with urllib.request.urlopen(req, timeout=10) as resp:
                 data = _json.loads(resp.read().decode())
             rows = data.get("data") or []
@@ -1053,6 +1216,7 @@ PROVIDER_CLASSES["treasury_fiscaldata"] = TreasuryFiscalDataProvider
 # https://www.marketaux.com — financial news with broader category filters
 # than NewsAPI (forex, crypto, M&A, country/sector). Free tier 100/day.
 
+
 class MarketauxNewsProvider:
     """Financial news via marketaux.com (free tier, MARKETAUX_API_KEY)."""
 
@@ -1068,6 +1232,7 @@ class MarketauxNewsProvider:
         """News articles mentioning the given symbols."""
         try:
             import urllib.request, urllib.parse, json as _json
+
             params = {
                 "api_token": self.api_key,
                 "symbols": ",".join(symbols[:50]),  # marketaux caps at 50
@@ -1076,19 +1241,23 @@ class MarketauxNewsProvider:
                 "limit": "10",
             }
             url = f"{self.BASE_URL}/news/all?{urllib.parse.urlencode(params)}"
-            req = urllib.request.Request(url, headers={"User-Agent": "ic-engine/4.1 (mnemos-ic-runtime)"})
+            req = urllib.request.Request(
+                url, headers={"User-Agent": "ic-engine/4.1 (mnemos-ic-runtime)"}
+            )
             with urllib.request.urlopen(req, timeout=10) as resp:
                 data = _json.loads(resp.read().decode())
             articles = []
-            for item in (data.get("data") or []):
-                articles.append({
-                    "title": item.get("title", ""),
-                    "summary": item.get("description") or item.get("snippet", ""),
-                    "source": item.get("source", ""),
-                    "url": item.get("url", ""),
-                    "datetime": (item.get("published_at") or "")[:16].replace("T", " "),
-                    "provider": self.NAME,
-                })
+            for item in data.get("data") or []:
+                articles.append(
+                    {
+                        "title": item.get("title", ""),
+                        "summary": item.get("description") or item.get("snippet", ""),
+                        "source": item.get("source", ""),
+                        "url": item.get("url", ""),
+                        "datetime": (item.get("published_at") or "")[:16].replace("T", " "),
+                        "provider": self.NAME,
+                    }
+                )
             return articles
         except Exception as e:
             logger.warning(f"Marketaux news({len(symbols)} symbols): {e}")
@@ -1105,6 +1274,7 @@ class MarketauxNewsProvider:
         """
         try:
             import urllib.request, urllib.parse, json as _json
+
             params: Dict[str, str] = {
                 "api_token": self.api_key,
                 "language": "en",
@@ -1119,20 +1289,24 @@ class MarketauxNewsProvider:
                 params["search"] = "merger OR acquisition"
             # general: no filter — full feed
             url = f"{self.BASE_URL}/news/all?{urllib.parse.urlencode(params)}"
-            req = urllib.request.Request(url, headers={"User-Agent": "ic-engine/4.1 (mnemos-ic-runtime)"})
+            req = urllib.request.Request(
+                url, headers={"User-Agent": "ic-engine/4.1 (mnemos-ic-runtime)"}
+            )
             with urllib.request.urlopen(req, timeout=10) as resp:
                 data = _json.loads(resp.read().decode())
             articles = []
-            for item in (data.get("data") or []):
-                articles.append({
-                    "category": cat,
-                    "title": item.get("title", ""),
-                    "summary": item.get("description") or item.get("snippet", ""),
-                    "source": item.get("source", ""),
-                    "url": item.get("url", ""),
-                    "datetime": (item.get("published_at") or "")[:16].replace("T", " "),
-                    "provider": self.NAME,
-                })
+            for item in data.get("data") or []:
+                articles.append(
+                    {
+                        "category": cat,
+                        "title": item.get("title", ""),
+                        "summary": item.get("description") or item.get("snippet", ""),
+                        "source": item.get("source", ""),
+                        "url": item.get("url", ""),
+                        "datetime": (item.get("published_at") or "")[:16].replace("T", " "),
+                        "provider": self.NAME,
+                    }
+                )
             return articles
         except Exception as e:
             logger.warning(f"Marketaux general_news({category}): {e}")
@@ -1182,8 +1356,8 @@ class PriceProvider:
         "polygon": 999_999,
         "alpha_vantage": 500,
         "newsapi": 100,
-        "marketaux": 100,                # free tier 100/day
-        "frankfurter": 999_999,          # no quota (no key, ECB-sourced)
+        "marketaux": 100,  # free tier 100/day
+        "frankfurter": 999_999,  # no quota (no key, ECB-sourced)
         "treasury_fiscaldata": 999_999,  # no quota (public Treasury API)
     }
 
@@ -1199,13 +1373,15 @@ class PriceProvider:
         # For SMALL portfolios (≲50 symbols) yfinance still works fine and
         # is free, so the routing keeps it as a safety net rather than
         # removing it entirely.
-        "quotes":          ["massive", "finnhub", "alpha_vantage", "yfinance"],
-        "history":         ["massive", "alpha_vantage", "finnhub", "yfinance"],
-        "news":            ["marketaux", "finnhub", "newsapi", "yfinance"],
-        "general_news":    ["finnhub", "marketaux"],
-        "fx":              ["frankfurter", "alpha_vantage"],
+        "quotes": ["massive", "finnhub", "alpha_vantage", "yfinance"],
+        "history": ["massive", "alpha_vantage", "finnhub", "yfinance"],
+        # Futures are CME contract tickers only Massive serves (/futures/vX).
+        "futures": ["massive"],
+        "news": ["marketaux", "finnhub", "newsapi", "yfinance"],
+        "general_news": ["finnhub", "marketaux"],
+        "fx": ["frankfurter", "alpha_vantage"],
         "treasury_yields": ["treasury_fiscaldata"],
-        "analyst":         ["finnhub", "yfinance"],
+        "analyst": ["finnhub", "yfinance"],
     }
 
     def __init__(
@@ -1310,13 +1486,50 @@ class PriceProvider:
         result = self._try_op("quotes", "get_quote", symbol)
         return result if result else None
 
+    def _futures_provider(self):
+        """First routed provider exposing the futures snapshot surface."""
+        for provider in self._providers_for_op("futures"):
+            if hasattr(provider, "get_futures_snapshot"):
+                return provider
+        return None
+
+    def get_futures_quotes(self, tickers: List[str]) -> Dict[str, Dict]:
+        """Batch snapshot quotes for futures contract tickers (Massive)."""
+        provider = self._futures_provider()
+        out: Dict[str, Dict] = {}
+        if provider is None or not tickers:
+            return out
+        for t in tickers:
+            api_ticker = _canonical_futures_api_ticker(t)
+            try:
+                snap = provider.get_futures_snapshot(api_ticker)
+            except Exception as e:
+                logger.warning("futures snapshot %s: %s", t, e)
+                snap = None
+            if snap:
+                out[t] = snap
+        if tickers:
+            self._use_quota(getattr(provider, "NAME", "massive"), len(tickers))
+        return out
+
     def get_quotes(self, symbols: List[str]) -> Dict[str, Dict]:
-        """Batch current prices for all symbols."""
+        """Batch current prices for all symbols.
+
+        Futures contract tickers (CME, e.g. ``ESZ25``) are split out and priced
+        via Massive's futures snapshot — the equity quote providers don't carry
+        them — then merged back with the equity/ETF/bond quotes.
+        """
         if not symbols:
             return {}
 
-        remaining = [s for s in symbols if s is not None and str(s).strip()]
+        from ic_engine.providers.futures_spec import is_futures_ticker
+
+        clean = [s for s in symbols if s is not None and str(s).strip()]
+        futures_syms = [s for s in clean if is_futures_ticker(s)]
         results: Dict[str, Dict] = {}
+        if futures_syms:
+            results.update(self.get_futures_quotes(futures_syms))
+        remaining = [s for s in clean if s not in results]
 
         for provider in self._providers_for_op("quotes"):
             if not remaining:
@@ -1346,8 +1559,42 @@ class PriceProvider:
         return results
 
     def get_history(self, symbol: str, days: int = 365) -> List[Dict]:
-        """Daily OHLCV history."""
+        """Daily OHLCV history.
+
+        Futures contract tickers route to Massive's futures aggregates; equities
+        use the standard history chain.
+        """
+        from ic_engine.providers.futures_spec import is_futures_ticker
+
+        if is_futures_ticker(symbol):
+            provider = self._futures_provider()
+            if provider is not None and hasattr(provider, "get_futures_history"):
+                try:
+                    rows = provider.get_futures_history(
+                        _canonical_futures_api_ticker(symbol), days=days
+                    )
+                    self._use_quota(getattr(provider, "NAME", "massive"), 1)
+                    if rows:
+                        return rows
+                except Exception as e:
+                    logger.warning("futures history %s: %s", symbol, e)
+            return []
         return self._try_op("history", "get_history", symbol, days=days)
+
+    def get_futures_contracts(
+        self, product_code: Optional[str] = None, active: Optional[bool] = True, limit: int = 100
+    ) -> List[Dict]:
+        """List futures contracts via the routed futures provider (Massive)."""
+        provider = self._futures_provider()
+        if provider is None or not hasattr(provider, "get_futures_contracts"):
+            return []
+        try:
+            return provider.get_futures_contracts(
+                product_code=product_code, active=active, limit=limit
+            )
+        except Exception as e:
+            logger.warning("futures contracts: %s", e)
+            return []
 
     def get_news(self, symbols: List[str], days: int = 7) -> List[Dict]:
         """News headlines. Aggregates from NewsAPI AND Finnhub."""

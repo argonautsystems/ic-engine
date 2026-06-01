@@ -120,11 +120,37 @@ class Holding:
 
     # ==================== PROPERTIES ====================
 
+    # Futures asset types: value is NOTIONAL (price × contract multiplier ×
+    # contracts), not price × shares. Mirrors schema.py FUTURES aliases.
+    _FUTURES_ASSET_TYPES = frozenset(("futures", "futures_contract", "future"))
+
+    def _futures_multiplier(self) -> float:
+        """Dollar multiplier for this futures contract.
+
+        Prefers an explicit ``contract_size`` from the holding/import; falls
+        back to the curated product map keyed off the contract symbol so a
+        bare ``ESZ25`` still values correctly.
+        """
+        if self.contract_size:
+            return float(self.contract_size)
+        from ic_engine.providers.futures_spec import contract_multiplier
+
+        return contract_multiplier(self.contract_symbol or self.symbol or "")
+
     @property
     def value(self) -> float:
-        """Current market value of the holding."""
+        """Current market value of the holding.
+
+        Futures report NOTIONAL exposure (price × multiplier × contracts).
+        An explicitly supplied ``market_value`` is authoritative and wins —
+        callers that already store true notional (legacy/summary bucket
+        shapes) must not be re-multiplied. Only when ``market_value`` is unset
+        do futures recompute notional from live price × multiplier × contracts.
+        """
         if self.market_value is not None:
             return self.market_value
+        if self.asset_type in self._FUTURES_ASSET_TYPES:
+            return self.shares * self.current_price * self._futures_multiplier()
         return self.shares * self.current_price
 
     # Bond asset types whose prices are quoted as % of par (e.g. 99.769 = $99.769 per $100 face)
@@ -137,11 +163,15 @@ class Holding:
         """Total cost to acquire this holding.
 
         For bonds, purchase_price is expressed as % of par (e.g. 99.769), so
-        the dollar cost is shares × purchase_price / 100.  For all other asset
-        types, purchase_price is already in dollars-per-unit.
+        the dollar cost is shares × purchase_price / 100.  Futures use the same
+        contract multiplier as :attr:`value` so unrealized P&L is
+        (price − entry) × multiplier × contracts.  For all other asset types,
+        purchase_price is already in dollars-per-unit.
         """
         if self.asset_type in self._BOND_ASSET_TYPES:
             return self.shares * self.purchase_price / 100.0
+        if self.asset_type in self._FUTURES_ASSET_TYPES:
+            return self.shares * self.purchase_price * self._futures_multiplier()
         return self.shares * self.purchase_price
 
     @property
