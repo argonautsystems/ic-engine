@@ -59,7 +59,7 @@
             }
         },
         {
-            "source": "polygon_aggs",
+            "source": "massive_aggs",
             "field_mappings": {
                 "o": "open",
                 "h": "high",
@@ -83,7 +83,7 @@
             },
             "drop_columns": ["n"],
             "add_columns": {
-                "source": "polygon"
+                "source": "massive"
             }
         },
         {

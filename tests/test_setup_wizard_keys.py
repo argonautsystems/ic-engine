@@ -78,14 +78,14 @@ class TestDetectExistingKeys:
             "FINNHUB_API_KEY=fh_key\n"
             "NEWSAPI_KEY=na_key\n"
             "FRED_API_KEY=fred_key\n"
-            "POLYGON_API_KEY=poly_key\n",
+            "MASSIVE_API_KEY=massive_key\n",
             encoding="utf-8",
         )
         result = SetupWizard._detect_existing_keys(env_file)
         assert result.get("finnhub") == "fh_key"
         assert result.get("newsapi") == "na_key"
         assert result.get("fred") == "fred_key"
-        assert result.get("massive") == "poly_key"
+        assert result.get("massive") == "massive_key"
 
     def test_ignores_comment_lines(self, tmp_path):
         """Comment lines (# ...) are not interpreted as keys."""

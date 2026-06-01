@@ -674,7 +674,6 @@ These are OPTIONAL. Without them, InvestorClaw uses free/built-in data sources.
             "CRYPTOPANIC_API_KEY": "cryptopanic",
             "ALPHA_VANTAGE_KEY": "alphavantage",
             "ALPHA_VANTAGE_API_KEY": "alphavantage",
-            "POLYGON_API_KEY": "massive",
             "MASSIVE_API_KEY": "massive",
         }
         try:
@@ -847,7 +846,7 @@ All recommended keys have a FREE tier.
                 "key": "massive",
                 "name": "Massive",
                 "signup_url": "https://massive.com/",
-                "limits": "paid (subscription); polygon.io-compatible API",
+                "limits": "paid (subscription)",
                 "env_var": "MASSIVE_API_KEY",
                 "unlocks": (
                     "detailed options chains, tick-level trade data, "

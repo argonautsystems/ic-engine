@@ -25,7 +25,7 @@ logic:
     1 symbol  →  flat columns ['Open', 'High', 'Low', 'Close', 'Volume']
     N symbols →  MultiIndex columns [('Open', 'AAPL'), ('Close', 'AAPL'), ...]
 
-PriceProvider routes history calls to ``massive`` (Polygon) first, which
+PriceProvider routes history calls to ``massive`` first, which
 returns split-adjusted and dividend-adjusted prices. This preserves the
 historical yfinance adjusted-close semantics expected by return calculations.
 """
@@ -77,7 +77,7 @@ def _history_for(provider: PriceProvider, symbol: str, days: int) -> List[dict]:
         return []
 
 
-def _polygon_happy_path_provider() -> PriceProvider:
+def _massive_happy_path_provider() -> PriceProvider:
     pp = PriceProvider(primary="massive")
     # price_panel owns the fallback phase so yfinance can be called once in
     # batch, instead of through PriceProvider's per-symbol history chain.
@@ -150,7 +150,7 @@ def _yf_batch_fallback(symbols: List[str], days: int) -> Dict[str, List[Dict]]:
     """Batch fallback for symbols that PriceProvider could not resolve.
 
     Single ``yf.download()`` call for all symbols at once, matching the
-    pre-refactor behavior. Used when the Polygon-first happy path returns
+    pre-refactor behavior. Used when the Massive-first happy path returns
     empty for one or more symbols; avoids the per-symbol rate-limit cascade
     through AlphaVantage/Finnhub/yfinance.Ticker.history.
 
@@ -225,7 +225,7 @@ def get_ohlcv_panel(
 
     Symbols that fail to fetch are retained as all-NaN columns.
 
-    NOTE: In the default adapter path, PriceProvider is limited to Polygon for
+    NOTE: In the default adapter path, PriceProvider is limited to Massive for
     the per-symbol happy path. Missing symbols are then fetched in one
     yfinance.download(auto_adjust=True) batch so fallback remains split- and
     dividend-adjusted without per-symbol provider cascades.
@@ -234,7 +234,7 @@ def get_ohlcv_panel(
     if not syms:
         return pd.DataFrame()
 
-    pp = provider or _polygon_happy_path_provider()
+    pp = provider or _massive_happy_path_provider()
     n_days = _resolve_days(days=days, period=period)
 
     frames: List[pd.DataFrame] = []
@@ -289,7 +289,7 @@ def get_close_panel(
     Replaces the historical idiom ``yf.download(symbols, period=p)["Adj Close"]``
     plus the single-symbol ``.to_frame()`` dance in callers like ``optimize.py``.
 
-    NOTE: In the default adapter path, PriceProvider is limited to Polygon for
+    NOTE: In the default adapter path, PriceProvider is limited to Massive for
     the per-symbol happy path. Missing symbols are then fetched in one
     yfinance.download(auto_adjust=True) batch so fallback remains split- and
     dividend-adjusted without per-symbol provider cascades.
@@ -298,7 +298,7 @@ def get_close_panel(
     if not syms:
         return pd.DataFrame()
 
-    pp = provider or _polygon_happy_path_provider()
+    pp = provider or _massive_happy_path_provider()
     n_days = _resolve_days(days=days, period=period)
 
     series = {}

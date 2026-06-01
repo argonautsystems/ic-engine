@@ -59,7 +59,7 @@ This means:
 
 | File | Public surface | Line count (v2.4.6) |
 |---|---|---|
-| `data_downloader.py` | `DataDownloader`, `DataProviderConfig`, `DownloadResult`, `DownloadStats` + provider adapters (yfinance, Finnhub, Polygon, Alpha Vantage, NewsAPI) | 691 |
+| `data_downloader.py` | `DataDownloader`, `DataProviderConfig`, `DownloadResult`, `DownloadStats` + provider adapters (yfinance, Finnhub, Massive, Alpha Vantage, NewsAPI) | 691 |
 | `data_extractor.py` | `DataExtractor`, `ExtractionSchema`, `ExtractionResult` | 344 |
 | `data_transformer.py` | `DataTransformer`, `TransformConfig` | 350 |
 

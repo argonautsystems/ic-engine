@@ -64,7 +64,7 @@ print(downloader.stats.summary())
 |----------------|----------------------------------|---------------------------|----------------------|-----------|
 | `yfinance`     | yfinance SDK                     | —                         | 0.5 s (≈ 2 req/s)    | 24 h      |
 | `finnhub`      | `/stock/candle`                  | `FINNHUB_API_KEY`         | 1.05 s               | 24 h      |
-| `polygon`      | `/v2/aggs/ticker/.../range/…`    | `POLYGON_API_KEY`         | 12.5 s (5/min free)  | 24 h      |
+| `massive`      | `/v2/aggs/ticker/.../range/...`  | `MASSIVE_API_KEY`         | 12.5 s (5/min free)  | 24 h      |
 | `alphavantage` | `TIME_SERIES_DAILY`              | `ALPHA_VANTAGE_API_KEY`   | 12.5 s (5/min free)  | 24 h      |
 | `newsapi`      | `/everything`                    | `NEWSAPI_KEY`             | 1.0 s                | 1 h       |
 
@@ -156,7 +156,7 @@ print(result.summary())
 |--------------------------|----------|---------------------------------------------------|
 | `yfinance_ohlcv`         | parquet  | Open / High / Low / Close / Volume                |
 | `finnhub_candles`        | json     | c / h / l / o / t / v                             |
-| `polygon_aggs`           | json     | c / h / l / o / t / v (under `results[...]`)      |
+| `massive_aggs`           | json     | c / h / l / o / t / v (under `results[...]`)      |
 | `alphavantage_daily`     | json     | 1. open … 5. volume (under `Time Series (Daily)`) |
 | `newsapi_everything`     | json     | title / publishedAt / source (under `articles`)   |
 
@@ -209,7 +209,7 @@ low    : Float64
 close  : Float64
 adj_close : Float64
 volume : Int64
-source : Utf8          (literal: "yfinance" | "finnhub" | "polygon" | ...)
+source : Utf8          (literal: "yfinance" | "finnhub" | "massive" | ...)
 ```
 
 ### Safe derived-field expression language
