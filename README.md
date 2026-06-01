@@ -60,7 +60,7 @@ ic-engine/
 │   ├── cli.py                 # `investorclaw` console script entry
 │   ├── services/              # consultation, deduplication, PDF extraction
 │   ├── models/                # CDM 5.x / 6.x portfolio models
-│   ├── providers/             # yfinance, Finnhub, FRED, Polygon, etc
+│   ├── providers/             # yfinance, Finnhub, FRED, Massive, etc
 │   ├── runtime/               # router, bootstrap, environment, subprocess runner
 │   ├── commands/              # actual command implementations
 │   ├── internal/              # pipeline, stages, consultation, fingerprints
