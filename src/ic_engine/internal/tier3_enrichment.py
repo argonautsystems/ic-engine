@@ -99,10 +99,38 @@ logger = logging.getLogger(__name__)
 _SENT_RE = re.compile(r"(?<!\d)\.(?!\d)\s*")
 
 
+def _data_hmac_key_path() -> "Path | None":
+    """Persistent HMAC-key location on the mounted data volume.
+
+    The envelope HMAC is keyed by this value. In a container deployment each
+    ``ask`` is a fresh ``docker run --rm`` with an EPHEMERAL home, so the
+    ``~/.investorclaw/.env`` fallback below mints a brand-new key every run —
+    which means a cached envelope signed by one container fails HMAC validation
+    in the next (`cache_status` → valid=False), and ``ask --no-refresh``
+    rebuilds the whole ~200s pipeline every time. Persisting the key on the
+    /data volume (parent of the portfolio dir) keeps it stable across runs so
+    the signed-envelope cache actually validates and is reused.
+    """
+    pdir = (
+        os.environ.get("INVESTORCLAW_PORTFOLIO_DIR")
+        or os.environ.get("IC_PORTFOLIO_DIR")
+    )
+    if not pdir:
+        return None
+    return Path(pdir).expanduser().parent / ".investorclaw_hmac_key"
+
+
 def _get_hmac_key() -> bytes:
     key = os.environ.get("INVESTORCLAW_CONSULTATION_HMAC_KEY", "").strip()
     if key:
         return key.encode()
+    # Persistent key on the mounted data volume — stable across containers.
+    data_key = _data_hmac_key_path()
+    if data_key and data_key.exists():
+        k = data_key.read_text().strip()
+        if k:
+            os.environ["INVESTORCLAW_CONSULTATION_HMAC_KEY"] = k
+            return k.encode()
     # Check user-space config, never read or write the repo-local .env
     env_file = Path.home() / ".investorclaw" / ".env"
     if env_file.exists():
@@ -112,8 +140,25 @@ def _get_hmac_key() -> bytes:
                 found_key = line.strip().split("=", 1)[1].strip()
                 if found_key:
                     os.environ["INVESTORCLAW_CONSULTATION_HMAC_KEY"] = found_key
+                    # backfill the persistent data-volume copy for future runs
+                    if data_key:
+                        try:
+                            data_key.parent.mkdir(parents=True, exist_ok=True)
+                            data_key.write_text(found_key)
+                            os.chmod(data_key, 0o600)
+                        except OSError:
+                            pass
                     return found_key.encode()
     generated = secrets.token_hex(32)
+    # Persist to the data volume first (stable across containers), then the
+    # user-space .env fallback.
+    if data_key:
+        try:
+            data_key.parent.mkdir(parents=True, exist_ok=True)
+            data_key.write_text(generated)
+            os.chmod(data_key, 0o600)
+        except OSError:
+            pass
     env_file.parent.mkdir(parents=True, exist_ok=True)
     try:
         os.chmod(env_file.parent, 0o700)
