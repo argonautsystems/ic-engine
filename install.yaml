@@ -31,12 +31,13 @@ prerequisites:
 
 steps:
   - id: bring_up
-    description: "Start mnemos + ic-engine containers using bundle-local compose.yml"
+    description: "Start the ic-engine container using bundle-local compose.yml"
     cmd:
       - "docker compose up -d"
     wait_for:
-      - url: http://localhost:5002/healthz
-        timeout_sec: 30
+      # Only ic-engine is required. MNEMOS (memory) is OPTIONAL — the default
+      # compose.yml ships ic-engine alone; set MNEMOS_BASE + run a mnemos
+      # service separately if you want cross-session memory.
       - url: http://localhost:18090/healthz
         timeout_sec: 60   # ic-engine needs longer first-start (sqlite init)
 
@@ -143,10 +144,9 @@ post_install:
     - "Try a query through your agent: \"What's in my portfolio?\""
 
 verify:
-  - description: "Both MCP servers are healthy"
+  - description: "ic-engine MCP server is healthy"
     checks:
       - url: http://localhost:18090/healthz
-      - url: http://localhost:5002/healthz
   - description: "Dashboard responds"
     checks:
       - url: http://localhost:18092/
