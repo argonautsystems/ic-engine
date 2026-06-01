@@ -132,15 +132,132 @@ def compact_envelope(envelope: Envelope) -> dict:
     return compacted
 
 
+# Stage-1 stripped feed budget. The full compacted envelope is ~190k tokens —
+# larger than the 128k context of half the GRAEAE providers (groq, together,
+# perplexity, deepseek), which BadRequest and fall through to the heuristic.
+# A hard byte cap guarantees the consultant/narrator input fits EVERY provider.
+# ~110 KB ≈ 28k tokens, leaving headroom for the system prompt + question.
+_STRIPPED_FEED_MAX_BYTES = 110_000
+
+
+def _trim_section(data: Any, cap: int) -> Any:
+    """Cap every list field in a section to `cap` items; recurse into dicts."""
+    if isinstance(data, dict):
+        out: dict[str, Any] = {}
+        for k, v in data.items():
+            if k in {"output_file", "_raw", "raw"} or str(k).endswith("_full"):
+                continue
+            if isinstance(v, list):
+                out[k] = v[:cap]
+            elif isinstance(v, dict):
+                out[k] = _trim_section(v, cap)
+            else:
+                out[k] = v
+        return out
+    if isinstance(data, list):
+        return data[:cap]
+    return data
+
+
+def build_stripped_feed(envelope: Envelope, focus: str | None = None) -> dict:
+    """Stage-1: a stripped, compressed view of the envelope that fits any
+    provider's context. Keeps the signed ic_result + metadata + a holdings
+    summary verbatim, then adds sections (focus first) under a hard byte
+    budget — list fields trimmed top-10, then top-5/3/1, dropping whole
+    non-focus sections last. Deterministic; mutates nothing. The validator
+    still scores against the FULL envelope, so trimming the LLM's view cannot
+    enable fabrication.
+    """
+    base: dict[str, Any] = {k: v for k, v in envelope.items() if k != "sections"}
+    sections = envelope.get("sections", {}) or {}
+    holdings = sections.get("holdings", {})
+    if isinstance(holdings, dict):
+        base["holdings_summary"] = {
+            k: v for k, v in holdings.items() if not isinstance(v, list)
+        }
+
+    def _size(d: dict) -> int:
+        return len(json.dumps(d, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
+
+    names = list(sections)
+    if focus and focus in names:
+        names = [focus] + [n for n in names if n != focus]
+
+    for cap in (10, 5, 3, 1):
+        feed = dict(base)
+        kept: dict[str, Any] = {}
+        for name in names:
+            probe = dict(feed)
+            probe["sections"] = {**kept, name: _trim_section(sections.get(name), cap)}
+            if _size(probe) <= _STRIPPED_FEED_MAX_BYTES:
+                kept[name] = _trim_section(sections.get(name), cap)
+        feed["sections"] = kept
+        if _size(feed) <= _STRIPPED_FEED_MAX_BYTES:
+            return feed
+
+    base["sections"] = (
+        {focus: _trim_section(sections.get(focus), 1)} if focus and focus in sections else {}
+    )
+    return base
+
+
 def _build_user_prompt(envelope: Envelope, question: str, focus: str | None = None) -> str:
     focus_line = f"\nFocus section: {focus}" if focus else ""
-    compacted = compact_envelope(envelope)
-    envelope_json = json.dumps(compacted, indent=2, sort_keys=True, ensure_ascii=False)
+    feed = build_stripped_feed(envelope, focus)
+    feed_json = json.dumps(feed, indent=2, sort_keys=True, ensure_ascii=False)
     return (
         f"User question: {question}{focus_line}\n\n"
         "JSON envelope follows. Do not use any source outside this envelope.\n"
-        f"{envelope_json}"
+        f"{feed_json}"
     )
+
+
+def _run_consultant(stripped_feed_json: str, question: str) -> str | None:
+    """Stage-2 (optional): a consultant model (e.g. gemma-4-31B) compresses the
+    stripped feed into a tight, fact-faithful narrative that the Stage-3
+    narrator enriches. Configured via INVESTORCLAW_CONSULTANT_ENDPOINT/_MODEL/
+    _API_KEY. Returns None when unconfigured or on any failure (the narrator
+    then works directly from the stripped feed).
+    """
+    import logging
+    import os
+    log = logging.getLogger(__name__)
+    endpoint = os.environ.get("INVESTORCLAW_CONSULTANT_ENDPOINT")
+    model = os.environ.get("INVESTORCLAW_CONSULTANT_MODEL")
+    if not endpoint or not model:
+        return None
+    try:
+        from ic_engine.internal.litellm_consultation import LiteLLMConsultationClient
+
+        client = LiteLLMConsultationClient(
+            endpoint=endpoint,
+            model=model,
+            api_key=os.environ.get("INVESTORCLAW_CONSULTANT_API_KEY") or None,
+        )
+        sysp = (
+            "You are the anti-fabrication consultant for a portfolio analyzer. "
+            "Compress the JSON envelope into a tight, factual narrative that "
+            "answers the question. Quote every number VERBATIM from the JSON. "
+            "Use ONLY the JSON — never infer, estimate, or add outside data. "
+            "Be concise: facts only, no filler."
+        )
+        result = client.complete(
+            messages=[
+                {"role": "system", "content": sysp},
+                {"role": "user", "content": f"Question: {question}\n\nEnvelope:\n{stripped_feed_json}"},
+            ],
+            timeout=_NARRATOR_TIMEOUT_SECS,
+            temperature=0.0,
+            top_p=1.0,
+            max_tokens=900,
+        )
+        if result.response:
+            return result.response
+        log.warning("consultant empty (%s) — narrator uses stripped feed", model)
+    except Exception as exc:
+        log.warning("consultant failed: %s: %s — narrator uses stripped feed",
+                    type(exc).__name__, exc)
+    return None
 
 
 def _call_llm(system_prompt: str, user_prompt: str) -> tuple[str, str]:
@@ -651,7 +768,26 @@ def narrate(envelope: Envelope, question: str, focus: str | None = None) -> Narr
         return NarratorResult(answer=response, hmac=hmac_value, model=model)
 
     # Default portfolio mode — strict envelope-only narration.
-    user_prompt = _build_user_prompt(envelope, question, focus)
+    # Stage 1: stripped feed (<32k tokens, fits every provider).
+    feed = build_stripped_feed(envelope, focus)
+    feed_json = json.dumps(feed, indent=2, sort_keys=True, ensure_ascii=False)
+    # Stage 2 (optional): consultant compresses the feed into a fact-faithful
+    # narrative; Stage 3 narrator then enriches that instead of the raw feed.
+    compressed = _run_consultant(feed_json, question)
+    if compressed:
+        user_prompt = (
+            f"User question: {question}\n\n"
+            "A verified factual summary of the user's portfolio follows. Quote "
+            "every number VERBATIM; do not add, infer, or estimate any data "
+            "beyond it.\n\n"
+            f"{compressed}"
+        )
+    else:
+        user_prompt = (
+            f"User question: {question}\n\n"
+            "JSON envelope follows. Do not use any source outside this envelope.\n"
+            f"{feed_json}"
+        )
     response, model = _call_llm(SYSTEM_PROMPT, user_prompt)
     if not response:
         response = _heuristic_narration(envelope, question)
