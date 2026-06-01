@@ -33,7 +33,7 @@ x-mcp-service-meta:
 
 services:
   ic-engine:
-    image: ghcr.io/argonautsystems/ic-engine:4.6.0-cpu
+    image: ghcr.io/argonautsystems/ic-engine:4.6.0-cpu@sha256:a51915cc1b7eb341c57fcd156d77ae8050492dbfe868cf45089a4b93f286881b
     container_name: ic-engine
     restart: unless-stopped
 
