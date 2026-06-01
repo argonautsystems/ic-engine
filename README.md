@@ -33,7 +33,7 @@ uv pip install ic-engine
 From git (any host):
 
 ```bash
-uv pip install "git+https://gitlab.com/perlowja/ic-engine.git"
+uv pip install "git+https://gitlab.com/argonautsystems/ic-engine.git"
 ```
 
 Verify:
@@ -49,7 +49,7 @@ This repo exists because of a 2026-04-25 conformance-test finding: when the engi
 The fix is structural: separate the engine (this repo) from the runtime adapters (InvestorClaw, InvestorClaude), and centralize the agent-skill contract template here in `contract/` so both adapters render their `SKILL.md` from one source.
 
 The full architectural decision is documented at:
-**[InvestorClaw/docs/IC_DECOMPOSITION_SPEC.md](https://gitlab.com/perlowja/InvestorClaw/-/blob/main/docs/IC_DECOMPOSITION_SPEC.md)**
+**[InvestorClaw/docs/IC_DECOMPOSITION_SPEC.md](https://gitlab.com/argonautsystems/InvestorClaw/-/blob/main/docs/IC_DECOMPOSITION_SPEC.md)**
 
 ## What's in this repo
 
