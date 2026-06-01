@@ -211,7 +211,7 @@ class TestDataDownloader(unittest.TestCase):
 
     def test_default_provider_configs_present(self):
         """Regression: make sure we ship sensible defaults for all providers."""
-        for p in ("yfinance", "finnhub", "polygon", "alphavantage", "newsapi"):
+        for p in ("yfinance", "finnhub", "massive", "alphavantage", "newsapi"):
             self.assertIn(p, DEFAULT_PROVIDER_CONFIGS)
             cfg = DEFAULT_PROVIDER_CONFIGS[p]
             self.assertGreater(cfg.retry_count, 0)

@@ -1,6 +1,6 @@
 """Futures contract specifications + symbol parsing.
 
-Massive (polygon.io) launched a Futures API (CME Globex: CBOT/CME/NYMEX/COMEX).
+Massive launched a Futures API (CME Globex: CBOT/CME/NYMEX/COMEX).
 The data feed gives contract metadata + prices but NOT the dollar multiplier
 needed to turn a price into a notional value, so this module carries a curated
 map of the common CME product multipliers plus helpers to recognise and parse

@@ -19,7 +19,7 @@ DataDownloader — Phase 2 Stage P1a
 Financial-data download stage for InvestorClaw.
 
 Adapts the ETLANTIS HTTPDownloader pattern (retry, rate-limit, cache-TTL) to
-the financial-API landscape: yfinance, Finnhub, Polygon, Alpha Vantage,
+the financial-API landscape: yfinance, Finnhub, Massive, Alpha Vantage,
 NewsAPI. Each provider gets its own ``DataProviderConfig`` describing rate
 limits, retry policy, and cache semantics; the ``DataDownloader`` dispatches
 symbol fetches via small provider-specific adapters, all wrapped in the same
@@ -31,7 +31,7 @@ Design goals
   tuples within ``cache_max_age_hours`` (default 24h for OHLCV, 1h for news).
   Cache payload is stored as Parquet (fast reload, columnar, typed).
 * **Rate-limit aware** — per-provider throttle. yfinance tolerates ~2 req/s,
-  Finnhub free tier is 60 req/min (~1/sec), Polygon free is 5 req/min, Alpha
+  Finnhub free tier is 60 req/min (~1/sec), Massive free is 5 req/min, Alpha
   Vantage free is 5 req/min + 500/day, NewsAPI is 100/day. We use the most
   conservative safe floor and let callers override via config.
 * **Retry with classification** — 429 (rate limit) → backoff + retry, 503
@@ -69,7 +69,7 @@ class DataProviderConfig:
 
     Attributes:
         provider_name:        Canonical provider identifier
-                              ("yfinance" | "finnhub" | "polygon" |
+                              ("yfinance" | "finnhub" | "massive" |
                               "alphavantage" | "newsapi").
         base_url:             Base URL for HTTP APIs (ignored for yfinance,
                               which uses its own SDK).
@@ -111,12 +111,12 @@ DEFAULT_PROVIDER_CONFIGS: Dict[str, DataProviderConfig] = {
         cache_max_age_hours=24.0,
         api_key_env="FINNHUB_API_KEY",
     ),
-    "polygon": DataProviderConfig(
-        provider_name="polygon",
-        base_url="https://api.polygon.io/",
+    "massive": DataProviderConfig(
+        provider_name="massive",
+        base_url="https://api.massive.com/",
         rate_limit_delay=12.5,  # 5 req/min free tier → 12s each
         cache_max_age_hours=24.0,
-        api_key_env="POLYGON_API_KEY",
+        api_key_env="MASSIVE_API_KEY",
     ),
     "alphavantage": DataProviderConfig(
         provider_name="alphavantage",
@@ -316,7 +316,7 @@ def _finnhub_adapter(
     return data
 
 
-def _polygon_adapter(
+def _massive_adapter(
     symbol: str,
     date_range: Tuple[str, str],
     api_key: Optional[str],
@@ -325,9 +325,9 @@ def _polygon_adapter(
     retry_codes: Tuple[int, ...],
     skip_codes: Tuple[int, ...],
 ) -> Dict[str, Any]:
-    """Polygon aggregates v2 endpoint."""
+    """Massive aggregates v2 endpoint."""
     if not api_key:
-        raise _ProviderError("Polygon API key missing (POLYGON_API_KEY)")
+        raise _ProviderError("Massive API key missing (MASSIVE_API_KEY)")
     start, end = date_range
     url = f"{base_url.rstrip('/')}/v2/aggs/ticker/{symbol}/range/1/day/{start}/{end}"
     return _http_json_adapter(url, {"apiKey": api_key}, timeout, retry_codes, skip_codes)
@@ -533,8 +533,8 @@ class DataDownloader:
                 cfg.retry_status_codes,
                 cfg.skip_status_codes,
             )
-        if cfg.provider_name == "polygon":
-            return _polygon_adapter(
+        if cfg.provider_name == "massive":
+            return _massive_adapter(
                 symbol,
                 date_range,
                 api_key,

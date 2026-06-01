@@ -21,7 +21,7 @@ Supported providers:
   finnhub    - Finnhub.io: quotes, historical candles, company news, analyst ratings
   yfinance   - Yahoo Finance (unofficial): batch quotes, historical, news, analyst
   newsapi    - NewsAPI.org: news headlines only (no price data)
-  massive    - Massive (polygon.io-compatible): quotes, historical, news
+  massive    - Massive: quotes, historical, news
 
 Provider priority is resolved at runtime from INVESTORCLAW_PRICE_PROVIDER env var
 or passed explicitly to PriceProvider(primary=...).
@@ -485,31 +485,40 @@ class NewsAPIProvider:
         raise NotImplementedError("NewsAPI does not provide analyst ratings")
 
 
-class PolygonProvider:
+class MassiveProvider:
     """
-    Polygon.io market data provider (using official polygon-io SDK).
+    Massive market data provider.
     Starter plan: real-time quotes, full OHLCV history, news.
-    Docs: https://polygon.io/docs/stocks
+    Docs: https://massive.com/docs/stocks
     """
 
     NAME = "massive"
+    API_BASE = "https://api.massive.com"
 
     def __init__(self, api_key: Optional[str] = None):
         try:
+            # polygon-api-client is the upstream SDK Massive is built on.
             from polygon import RESTClient
         except ImportError:
-            raise ImportError("polygon-io not installed. Install with: pip install polygon-io")
+            raise ImportError(
+                "polygon-api-client not installed. Install with: pip install polygon-api-client"
+            )
 
-        self.api_key = api_key or os.getenv("MASSIVE_API_KEY") or os.getenv("POLYGON_API_KEY")
+        self.api_key = api_key or os.getenv("MASSIVE_API_KEY")
         if not self.api_key:
-            raise ValueError("MASSIVE_API_KEY / POLYGON_API_KEY not set")
+            raise ValueError("MASSIVE_API_KEY not set")
 
-        self._client = RESTClient(api_key=self.api_key)
+        try:
+            self._client = RESTClient(api_key=self.api_key, base=self.API_BASE, trace=False)
+        except TypeError:
+            # Older SDKs may not expose the stocks API base override. Futures
+            # REST calls below still use Massive directly via FUTURES_API_BASE.
+            self._client = RESTClient(api_key=self.api_key)
 
     def get_quote(self, symbol: str) -> Optional[Dict]:
         """Previous-day close (free tier).
 
-        polygon-api-client renamed `get_previous_close` -> `get_previous_close_agg`
+        The SDK renamed `get_previous_close` -> `get_previous_close_agg`
         in 2024. Modern shape: returns a List[PreviousCloseAgg] directly (no
         wrapper object with .results), with full attr names (close/open/high/
         low/volume/timestamp) instead of the legacy single-letter (.c/.o/.h/
@@ -532,13 +541,13 @@ class PolygonProvider:
                 "provider": self.NAME,
             }
         except Exception as e:
-            logger.warning(f"Polygon quote({symbol}): {e}")
+            logger.warning(f"Massive quote({symbol}): {e}")
             return None
 
     def get_quotes(self, symbols: List[str]) -> Dict[str, Dict]:
         """Batch quotes via snapshot-all endpoint (Starter+ plan) or prev-day fallback.
 
-        Modern polygon-api-client uses `get_snapshot_all(market_type, tickers)`
+        Modern Massive SDK uses `get_snapshot_all(market_type, tickers)`
         for batch — old `get_snapshot_ticker(symbols=joined)` was a single-
         ticker call with an unsupported batch kwarg.
         """
@@ -581,11 +590,12 @@ class PolygonProvider:
                 if results:
                     return results
         except Exception as e:
-            logger.debug(f"Polygon snapshot_all unavailable: {e}; falling back to sequential")
+            logger.debug(f"Massive snapshot_all unavailable: {e}; falling back to sequential")
 
         # Free-tier fallback: sequential prev-day calls
         logger.info(
-            f"Polygon batch snapshot unavailable; falling back to sequential for {len(symbols)} symbols"
+            "Massive batch snapshot unavailable; falling back to sequential "
+            f"for {len(symbols)} symbols"
         )
         for sym in symbols:
             q = self.get_quote(sym)
@@ -596,13 +606,13 @@ class PolygonProvider:
     def _apply_dividend_adjustment(self, rows: List[Dict], symbol: str) -> List[Dict]:
         """Apply backward dividend adjustment to OHLC prices.
 
-        Polygon list_aggs with adjusted=True only adjusts for splits; this method
+        Massive list_aggs with adjusted=True only adjusts for splits; this method
         further adjusts close/open/high/low for cash dividends so the resulting
         prices match yfinance Adj Close semantics (total-return basis).
 
         Two-pass implementation: first pass reads ORIGINAL close-before-ex_date
         for every dividend and computes its factor independently using
-        Polygon.split_adjusted_cash_amount (matching the split-adjusted basis of
+        Massive split_adjusted_cash_amount (matching the split-adjusted basis of
         aggs returned with adjusted=True); second pass applies all factors. This
         avoids the compounding bug where computing a later (older-ex_date)
         factor against an already-adjusted close skews cumulative adjustment for
@@ -627,7 +637,7 @@ class PolygonProvider:
         )
 
         if not divs:
-            logger.debug(f"Polygon list_dividends({symbol}): no dividends in range")
+            logger.debug(f"Massive list_dividends({symbol}): no dividends in range")
             return rows
 
         date_to_idx = {r["date"]: i for i, r in enumerate(rows)}
@@ -646,7 +656,7 @@ class PolygonProvider:
                 cash_amount = getattr(div, "cash_amount", None)
                 if cash_amount is not None and not logged_cash_amount_fallback:
                     logger.debug(
-                        f"Polygon div adj({symbol}): using cash_amount fallback; "
+                        f"Massive div adj({symbol}): using cash_amount fallback; "
                         f"dividend basis mismatch may be present"
                     )
                     logged_cash_amount_fallback = True
@@ -668,7 +678,7 @@ class PolygonProvider:
             close_before = rows[idx_before]["close"]
             if close_before is None or close_before <= cash_amount:
                 logger.warning(
-                    f"Polygon div adj({symbol}): close_before={close_before} <= D={cash_amount} "
+                    f"Massive div adj({symbol}): close_before={close_before} <= D={cash_amount} "
                     f"on ex_date={ex_date}; skipping"
                 )
                 continue
@@ -696,7 +706,7 @@ class PolygonProvider:
                 if v is not None:
                     rows[i][fld] = v * cf
 
-        logger.debug(f"Polygon div adj({symbol}): applied {len(factors)} dividends across {n} rows")
+        logger.debug(f"Massive div adj({symbol}): applied {len(factors)} dividends across {n} rows")
         return rows
 
     def get_history(self, symbol: str, days: int = 365) -> List[Dict]:
@@ -738,17 +748,17 @@ class PolygonProvider:
                 rows = self._apply_dividend_adjustment(rows, symbol)
             except Exception as e:
                 logger.warning(
-                    f"Polygon dividend adjustment failed for {symbol}: {e}; "
+                    f"Massive dividend adjustment failed for {symbol}: {e}; "
                     f"returning [] to trigger provider fallback"
                 )
                 return []
             return rows
         except Exception as e:
-            logger.warning(f"Polygon history({symbol}): {e}")
+            logger.warning(f"Massive history({symbol}): {e}")
             return []
 
     def get_news(self, symbols: List[str], days: int = 7) -> List[Dict]:
-        """Polygon news API."""
+        """Massive news API."""
         from_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
         articles = []
 
@@ -778,20 +788,20 @@ class PolygonProvider:
                         }
                     )
             except Exception as e:
-                logger.warning(f"Polygon news({sym}): {e}")
+                logger.warning(f"Massive news({sym}): {e}")
 
         return articles
 
     def get_analyst_ratings(self, symbols: List[str]) -> Dict[str, Dict]:
         raise NotImplementedError(
-            "Polygon does not provide analyst recommendations — use Finnhub or yfinance"
+            "Massive does not provide analyst recommendations — use Finnhub or yfinance"
         )
 
     # ── Futures (Massive Futures API, launched 2026) ─────────────────────────
-    # CME Globex (CBOT/CME/NYMEX/COMEX). The polygon-api-client SDK does not
+    # CME Globex (CBOT/CME/NYMEX/COMEX). The Massive SDK does not
     # wrap the /futures/vX/ surface yet, so these call the REST endpoints
     # directly. Verified live against the Massive partner key 2026-05-29.
-    FUTURES_API_BASE = "https://api.polygon.io/futures/vX"
+    FUTURES_API_BASE = "https://api.massive.com/futures/vX"
 
     def _futures_get(self, path: str, params: Optional[dict] = None) -> Optional[dict]:
         """GET a /futures/vX endpoint; returns the parsed JSON body or None."""
@@ -924,11 +934,6 @@ class PolygonProvider:
             )
         rows.sort(key=lambda x: x["date"] or "")
         return rows
-
-
-# Backwards-compat alias
-MassiveProvider = PolygonProvider
-
 
 class AlphaVantageProvider:
     """
@@ -1090,8 +1095,7 @@ PROVIDER_CLASSES = {
     "finnhub": FinnhubProvider,
     "yfinance": YFinanceProvider,
     "newsapi": NewsAPIProvider,
-    "massive": PolygonProvider,
-    "polygon": PolygonProvider,
+    "massive": MassiveProvider,
     "alpha_vantage": AlphaVantageProvider,
     # Lazy registration — appended below after the no-key providers are defined.
 }
@@ -1332,7 +1336,7 @@ class PriceProvider:
     Data-type-aware, quota-sharding financial data provider facade.
 
     Different operation types are routed to optimal providers:
-      quotes     → yfinance (1 batch call, no quota) → Polygon (1 batch call, Starter+)
+      quotes     → yfinance (1 batch call, no quota) → Massive (1 batch call, Starter+)
                    → Finnhub (sequential, 60/min, no daily limit)
       history    → Alpha Vantage (adjusted close, 500/day) → Finnhub (candles, unlimited)
                    → yfinance
@@ -1344,7 +1348,7 @@ class PriceProvider:
       INVESTORCLAW_QUOTA_NEWSAPI=100
 
     Override routing via env vars:
-      INVESTORCLAW_PRICE_PROVIDER=auto|finnhub|yfinance|massive|polygon|alpha_vantage
+      INVESTORCLAW_PRICE_PROVIDER=auto|finnhub|yfinance|massive|alpha_vantage
       INVESTORCLAW_FALLBACK_CHAIN=yfinance,massive  (comma-separated)
     """
 
@@ -1353,7 +1357,6 @@ class PriceProvider:
         "finnhub": 999_999,
         "yfinance": 999_999,
         "massive": 999_999,
-        "polygon": 999_999,
         "alpha_vantage": 500,
         "newsapi": 100,
         "marketaux": 100,  # free tier 100/day
@@ -1362,7 +1365,7 @@ class PriceProvider:
     }
 
     # Preferred provider order per operation type (first available wins)
-    # massive (Polygon) leads history because it is paid + unrate-limited.
+    # massive leads history because it is paid + unrate-limited.
     # alpha_vantage's 4-calls/min cap and finnhub's premium-only candle
     # endpoint both collapse under barrage load.
     _OP_ROUTING: Dict[str, List[str]] = {

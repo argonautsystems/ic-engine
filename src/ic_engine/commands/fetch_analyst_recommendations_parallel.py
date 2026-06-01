@@ -300,7 +300,7 @@ class ParallelAnalystFetcher:
         rate-limits us with a 429 (which currently happens for unauthenticated
         anonymous query1 traffic regardless of source IP), `info` comes back
         empty and we fall back to PriceProvider — which prefers Finnhub for
-        analyst ratings and Polygon (massive) for quotes, avoiding Yahoo
+        analyst ratings and Massive for quotes, avoiding Yahoo
         entirely. The fallback path requires FINNHUB_KEY and/or MASSIVE_API_KEY
         to be set; if neither is, the symbol returns None like before.
         """

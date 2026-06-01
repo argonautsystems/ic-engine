@@ -123,8 +123,8 @@ DEFAULT_SCHEMAS: Dict[str, ExtractionSchema] = {
         required_columns=["c", "h", "l", "o", "t", "v"],  # close/high/low/open/time/volume
         nan_sensitive_columns=["c"],
     ),
-    "polygon_aggs": ExtractionSchema(
-        source="polygon_aggs",
+    "massive_aggs": ExtractionSchema(
+        source="massive_aggs",
         format="json",
         required_columns=["c", "h", "l", "o", "t", "v"],
         nan_sensitive_columns=["c"],
