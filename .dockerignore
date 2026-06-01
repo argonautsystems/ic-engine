@@ -1,0 +1,12 @@
+.git
+.github
+**/.venv
+**/__pycache__
+**/*.pyc
+**/node_modules
+**/.pytest_cache
+mnemos-rs/target
+results
+*.bundle
+assets
+docs/blog

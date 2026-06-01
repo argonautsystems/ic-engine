@@ -1,132 +1,138 @@
-# Portfolio and holdings data (sensitive)
-holdings.json
-holdings_summary.json
-*.holdings.json
-benchmark_results.json
-data/fetch_output/
-portfolio_reports/
-portfolio_data/
-portfolios/
-*.csv
-!examples/**/*.csv
-!tests/**/*.csv
-!docs/samples/*.csv
 
-# Environment and local config
+__pycache__/
+!.env.example
+!docs/samples/*.csv
+!examples/**/*.csv
+!lib/
+!tests/**/*.csv
+.~*
+.AppleDouble
+.coverage
+.DS_Store
+.eggs/
 .env
-.env.local
+.env.*
 .env.*.local
 .env.backup*
+.env.local
 .env.provider-*
-!.env.example
-keys.env
-api-keys.env
-secrets.*
+.env/
+.harness/
+.idea/
+.installed.cfg
+.investorclaw/
+.LSOverride
+.pytest_cache/
+.Python
+.python/
+.uv/
+.venv/
+.vscode/
+*.bak
+*.csv
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+*.distribution.zip
+*.egg
+*.egg-info/
+*.enterprise.py
+*.holdings.json
 *.key
 *.pem
-
-# Python
-__pycache__/
 *.py[cod]
-*$py.class
+*.pyc
+*.pyo
+*.secret
 *.so
-.Python
+*.swo
+*.swp
+*.tmp
+*$py.class
+*battery-report*
+*COMMERCIALIZATION*.md
+*FINANCIAL*.md
+*INVESTOR*.md
+*PRICING*.md
+*ROADMAP*.md
+*STRATEGY*.md
+/enterprise/
+# (plugin-build job requires it for npm ci to work)
+# Archive directory (backup and historical docs)
+# Benchmark and battery test results (large test output files)
+# Build and test artifacts
+# Build artifacts
+# Commercialization & Strategy (CONFIDENTIAL — enterprise branch ONLY)
+# committed lock for reproducible Python installs (per project CLAUDE.md)
+# CRITICAL SECURITY: These documents are NEVER pushed to public GitHub/GitLab
+# Development utilities (archived, not for distribution)
+# Distribution artifacts
+# Editor / OS
+# Enterprise branch (private, development only)
+# Environment / secrets (never commit raw keys)
+# Environment and local config
+# IDE
+# IMPORTANT: Enterprise code must NOT be pushed to public remotes (GitHub, GitLab)
+# internal/
+# internal/ contains tier3_enrichment.py (CERBERUS consultation) — must be distributed
+# lib/ is the skill's source package — NOT a venv directory, do not ignore
+# Local fleet tooling (not for public runtime repo)
+# Local volumes / data
+# Lock files
+# npm's package-lock.json MUST be committed for CI/CD reproducibility
+# OS
+# Portfolio and holdings data (sensitive)
+# Python
+# Sibling-repo work-tree (do not include as submodule)
+# Temp files
+# Test outputs
+# Testing
+# They contain pricing, financial models, go-to-market strategy, and investor materials
+# This directory is tracked ONLY on the enterprise branch
+# uv / Python
+# uv.lock MUST also be committed — `uv sync --frozen` in CI needs the
+# Virtual environments (keep only on ARGONAS NAS, NOT in git remotes)
+api-keys.env
+archive/
+battery-results-*/
+benchmark_results.json
 build/
+CLAUDE.md
+data/
+data/fetch_output/
 develop-eggs/
 dist/
 downloads/
-node_modules/
 eggs/
-.eggs/
-lib64/
-# lib/ is the skill's source package — NOT a venv directory, do not ignore
-!lib/
-parts/
-sdist/
-var/
-wheels/
-pip-wheel-metadata/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
-
-# Lock files
-# npm's package-lock.json MUST be committed for CI/CD reproducibility
-# (plugin-build job requires it for npm ci to work)
-# uv.lock MUST also be committed — `uv sync --frozen` in CI needs the
-# committed lock for reproducible Python installs (per project CLAUDE.md)
-yarn.lock
-poetry.lock
-
-# Build and test artifacts
-.coverage
-.pytest_cache/
-
-# Virtual environments (keep only on ARGONAS NAS, NOT in git remotes)
-venv/
-.venv/
-ENV/
 env/
-.env/
-.python/
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# OS
-.DS_Store
-.AppleDouble
-.LSOverride
-Thumbs.db
-
-# Testing
-.pytest_cache/
-.coverage
+ENV/
+holdings_summary.json
+holdings.json
 htmlcov/
-
-# Temp files
-*.tmp
-*.bak
-.~*
-portfolios/.sector_cache.json
-
-# Distribution artifacts
 InvestorClaw-distribution.zip
-*.distribution.zip
-
-# Development utilities (archived, not for distribution)
-# internal/ contains tier3_enrichment.py (CERBERUS consultation) — must be distributed
-# internal/
-
-# Benchmark and battery test results (large test output files)
-battery-results-*/
-*battery-report*
-scripts/wf_outputs/
-
-# Archive directory (backup and historical docs)
-archive/
-
-# Enterprise branch (private, development only)
-# IMPORTANT: Enterprise code must NOT be pushed to public remotes (GitHub, GitLab)
-# This directory is tracked ONLY on the enterprise branch
-/enterprise/
-*.enterprise.py
-requirements-enterprise.txt
-
-# Commercialization & Strategy (CONFIDENTIAL — enterprise branch ONLY)
-# CRITICAL SECURITY: These documents are NEVER pushed to public GitHub/GitLab
-# They contain pricing, financial models, go-to-market strategy, and investor materials
+keys.env
+lib64/
+MANIFEST
+mnemos-rs/
+node_modules/
+parts/
+pip-wheel-metadata/
+poetry.lock
+portfolio_data/
+portfolio_reports/
+portfolios/
+portfolios/.sector_cache.json
 PRODUCT_STRATEGY.md
-*STRATEGY*.md
-*COMMERCIALIZATION*.md
-*FINANCIAL*.md
-*PRICING*.md
-*ROADMAP*.md
-*INVESTOR*.md
-CLAUDE.md
-.harness/
+requirements-enterprise.txt
+scripts/wf_outputs/
+sdist/
+secrets.*
+share/python-wheels/
+test-results/
+Thumbs.db
+tools/multi_host_load.sh
+var/
+venv/
+wheels/
+yarn.lock

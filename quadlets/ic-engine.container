@@ -1,0 +1,98 @@
+# SPDX-License-Identifier: Apache-2.0
+# InvestorClaw ic-engine — systemd-podman quadlet
+#
+# For NCZ pi-gen / ncz-debs consumption: drop into
+# /etc/containers/systemd/ic-engine.container during agent-stack install.
+# `systemctl daemon-reload` then translates this into
+# /run/systemd/generator/ic-engine.service which runs the container under
+# rootful podman with the canonical InvestorClaw v4.x configuration.
+#
+# Pairs with the existing zeroclaw / openclaw / hermes quadlets in
+# /usr/share/ncz/quadlets/ and is exposed via `ncz agent install ic-engine`
+# in the ncz CLI (see fleet handoff to ncz-claude for CLI integration).
+#
+# Maintained by: investorclaw-claude on STUDIO; source of truth at
+# gitlab.com/ncz-os/mnemos-ic-runtime/quadlets/ic-engine.container.
+# When updating image digest after a release, update the Image= line and
+# bump the ncz pi-gen revision.
+
+[Unit]
+Description=InvestorClaw ic-engine — deterministic portfolio analyzer (v4.x)
+Documentation=https://github.com/argonautsystems/InvestorClaw
+Documentation=https://gitlab.com/ncz-os/mnemos-ic-runtime
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+# Multi-arch manifest list — resolves correctly on both amd64 (TYPHON,
+# generic Intel/AMD Linux/macOS) and arm64/v8 (cixmini NCZ Reinhardt 26.5,
+# bigpi Pi 5, Apple Silicon, AWS Graviton, etc).
+#
+# Image pinned to immutable manifest-list digest. To roll forward to a
+# newer build, resolve the new sha256 via:
+#   docker manifest inspect ghcr.io/argonautsystems/ic-engine:VERSION-cpu \
+#     | jq -r '.manifests[0].digest'
+# (or the equivalent on the manifest list itself). Then update this line
+# and ship a new ncz-debs / pi-gen revision.
+#
+# AutoUpdate=registry intentionally OMITTED — same posture as the
+# zeroclaw/openclaw/hermes quadlets per the 3-agent-rootfs handoff.
+# Operators upgrade by deploying a new ncz revision, not by registry pull.
+Image=ghcr.io/argonautsystems/ic-engine:4.4.4-cpu@sha256:1d27ca406b1c7150b8019c7fd0c7b3cd32a086ca2e7fae490c7b1a8695e6d66a
+ContainerName=ic-engine
+
+# Networking
+# MCP-HTTP at :18090 (agent-facing JSON-RPC + REST surface)
+# Dashboard at :18092 (human-facing browser UI)
+# Both bind 0.0.0.0 inside the container; PublishPort surfaces on the
+# host's loopback. For LAN access, override IC_HOST=0.0.0.0 via env file
+# (only behind nginx/Tailscale/Caddy with TLS termination).
+PublishPort=18090:8090
+PublishPort=18092:8092
+
+# Data volume — persistent state lives in /data/ inside the container:
+#   /data/portfolios/   — uploaded portfolio CSVs/XLS/PDFs
+#   /data/reports/      — generated section JSONs + EOD HTML reports
+#   /data/keys.env      — provider API keys (mode 0600 inside container)
+#   /data/stonkmode.json — stonkmode persona state
+#
+# The Z mount option applies SELinux private label (no-op on non-SELinux
+# hosts). Volume name `ic-engine-data` matches the named-volume convention
+# in compose.yml so a `podman volume create ic-engine-data` pre-step in
+# pi-gen creates it with the right ownership.
+Volume=ic-engine-data:/data:Z
+
+# Container user is uid=1000 (ic). Map to the host's uid 1000 (default
+# user on NCZ Reinhardt — `mini`). Without this flag, rootless podman
+# shifts uid 1000 into a high subuid range and /data/keys.env perms
+# fail with EACCES. ROOTFUL podman (this quadlet runs as root via
+# systemd) doesn't need keep-id; included as a comment for documentation
+# only — uncomment if migrating to a rootless quadlet.
+#UserNS=keep-id:uid=1000,gid=1000
+
+# Provider API keys + narrator config injected from the shared agent-env
+# file (same pattern as zeroclaw/openclaw/hermes). Keys: TOGETHER_API_KEY,
+# OPENAI_API_KEY, FINNHUB_KEY, FRED_API_KEY, NEWSAPI_KEY,
+# ALPHA_VANTAGE_KEY, MASSIVE_API_KEY, MARKETAUX_API_KEY, plus
+# INVESTORCLAW_NARRATIVE_* for narrator endpoint config.
+EnvironmentFile=/etc/nclawzero/agent-env
+
+# Boot-time auto-init: setup → refresh → seed_ask runs once on first
+# start so the envelope cache is warm by the time any agent connects.
+# Bridge serves immediately and reports init_state via /healthz; agents
+# poll portfolio_initialize_status until ready.
+Environment=IC_INITIALIZE_ON_BOOT=1
+
+# CPU-only image (the v4.0 trim removed the CUDA/torch/transformers
+# stack). No GPU access needed; this avoids the "GPU group membership"
+# requirement that complicates rootful podman on NCZ.
+
+[Service]
+# First-start init can take 30-90s on cold yfinance cache. Subsequent
+# starts pull from /data/reports cache and warm in <10s.
+TimeoutStartSec=900
+Restart=always
+RestartSec=15
+
+[Install]
+WantedBy=multi-user.target default.target

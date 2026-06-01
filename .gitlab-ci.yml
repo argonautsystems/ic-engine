@@ -1,90 +1,161 @@
-# ic-engine GitLab CI pipeline
+# SPDX-License-Identifier: Apache-2.0
+# CI for ncz-os/mnemos-ic-runtime — ARGOS self-hosted shell runner
 #
-# Runs on every push + merge request. Validates that the engine package
-# installs cleanly, the CLI works, and the test suite is at least collectable.
-# This is a thin Phase 1 CI; the full V13 enterprise barrage + downstream
-# adapter compatibility tests get wired in Phase 1.5 / 2.
+# Runner: ARGOS (192.168.207.22) — Docker 29 + buildx 0.30, shell executor.
+# No Docker-in-Docker needed; jobs run directly on the ARGOS host shell.
 #
-# Stages:
-#   test    — uv sync + investorclaw --version + pytest collection
-#   harness — V13 enterprise harness (the engine-side conformance suite)
-#
-# Trigger gate is centralized in workflow:rules below — push, MR, and tag
-# fire the pipeline; per-job rules are reserved for jobs that need a
-# stricter scope (v13-harness uses main+tag-only because the harness is
-# heavy and would burn CI minutes on every MR). Fleet-wide pattern
-# standardized 2026-04-27.
-
-workflow:
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH
-    - if: $CI_COMMIT_TAG
+# Requires GitLab CI/CD variables (Settings → CI/CD → Variables):
+#   GHCR_USER  — github username (perlowja)
+#   GHCR_PAT   — GitHub PAT with write:packages scope (masked + protected)
 
 stages:
-  - test
-  - harness
+  - lint
+  - build
+  - manifest
+  - publish-record
 
 variables:
-  # Pin a managed Python via uv. The repo's .python-version sets the version.
-  UV_VERSION: "0.5.0"
-  # Reproducible installs from uv.lock (not loose `uv pip install`).
-  UV_FROZEN: "1"
+  REGISTRY: ghcr.io
+  IMAGE_NAME: argonautsystems/ic-engine
+  DOCKER_BUILDKIT: "1"
 
-# ---------------------------------------------------------------------------
-# Stage: test
-# ---------------------------------------------------------------------------
-
-unit-tests:
-  stage: test
+# ── Lint ──────────────────────────────────────────────────────────────────
+# Shell executor: run hadolint via docker on the host (no image: needed).
+lint:dockerfile:
+  stage: lint
   tags: [argos, ncz-os]
-  before_script:
-    # uv + ruff now system-wide on ARGOS runner; PATH export kept as
-    # belt+suspenders for hosts where /usr/local/bin lags.
-    - export PATH="/usr/local/bin:/home/jasonperlow/.local/bin:$PATH"
-    # ic-engine pulls clio @ git+https://gitlab.com/argonautsystems/clio.git
-    # (private). Rewrite gitlab.com URLs to use the runner's
-    # CI_JOB_TOKEN so uv git+ fetches succeed without prompting for
-    # credentials. Requires argonautsystems/clio → Settings → CI/CD →
-    # Job Token Permissions → Allow argonautsystems/ic-engine.
-    - git config --global url."https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.com/".insteadOf "https://gitlab.com/"
   script:
-    - uv sync --frozen
-    - uv run investorclaw --version
-    - uv run python -c "import ic_engine; print(f'ic_engine v{ic_engine.__version__}')"
-    # Pytest collection (verifies imports work; doesn't run live network tests)
-    - uv run python -m pytest tests/ --collect-only -q || true
-  artifacts:
-    when: on_failure
-    paths:
-      - .venv/
-    expire_in: 1 hour
-
-# ---------------------------------------------------------------------------
-# Stage: harness
-# ---------------------------------------------------------------------------
-
-v13-harness:
-  stage: harness
-  tags: [argos, ncz-os]
-  needs: [unit-tests]
-  before_script:
-    - export PATH="/usr/local/bin:/home/jasonperlow/.local/bin:$PATH"
-    - git config --global url."https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.com/".insteadOf "https://gitlab.com/"
-  script:
-    - uv sync --frozen
-    # V13 enterprise barrage. --fast for CI to keep pipeline minutes reasonable.
-    # Allow contract-gate + version checks to fail in CI (they assume
-    # InvestorClaw-shaped manifests; ic-engine doesn't have those). The harness
-    # itself runs the engine surface, which is what we want to gate on.
-    - uv run python harness/v13_typhon_enterprise_cicd.py --fast --json-out /tmp/v13.json || true
-    - cat /tmp/v13.json | head -50
-  artifacts:
-    when: always
-    paths:
-      - /tmp/v13.json
-    expire_in: 1 week
+    - docker run --rm -i hadolint/hadolint:latest < Dockerfile || true
+  allow_failure: true
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "main"'
-    - if: '$CI_COMMIT_TAG'
-  allow_failure: true   # Phase 1: harness is informational. Phase 2 makes it blocking.
+    - if: $CI_COMMIT_TAG
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+lint:compose:
+  stage: lint
+  tags: [argos, ncz-os]
+  script:
+    - docker compose -f compose.yml config --quiet
+  rules:
+    - if: $CI_COMMIT_TAG
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+# ── Build ─────────────────────────────────────────────────────────────────
+# Shell executor on ARGOS: docker buildx is available on host.
+# Buildx builder named "multiarch" is pre-created on ARGOS with QEMU support.
+# If it doesn't exist the before_script creates it once.
+
+.build-common: &build-common
+  stage: build
+  tags: [argos, ncz-os]
+  before_script:
+    - echo "$GHCR_PAT" | docker login $REGISTRY -u "$GHCR_USER" --password-stdin
+    - docker buildx inspect multiarch > /dev/null 2>&1 ||
+        (docker run --privileged --rm tonistiigi/binfmt --install all &&
+         docker buildx create --name multiarch --driver docker-container --use &&
+         docker buildx inspect --bootstrap)
+    - docker buildx use multiarch
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+
+build:amd64:
+  <<: *build-common
+  script:
+    - export VERSION="${CI_COMMIT_TAG#v}"
+    - |
+      docker buildx build \
+        --platform linux/amd64 \
+        --build-arg GITLAB_TOKEN="${GITLAB_READ_PAT}" \
+        --tag $REGISTRY/$IMAGE_NAME:${VERSION}-cpu-amd64 \
+        --provenance=false \
+        --push \
+        .
+    - echo "Pushed $REGISTRY/$IMAGE_NAME:${VERSION}-cpu-amd64"
+
+build:arm64:
+  <<: *build-common
+  timeout: 90m
+  script:
+    - export VERSION="${CI_COMMIT_TAG#v}"
+    - |
+      docker buildx build \
+        --platform linux/arm64 \
+        --build-arg GITLAB_TOKEN="${GITLAB_READ_PAT}" \
+        --tag $REGISTRY/$IMAGE_NAME:${VERSION}-cpu-arm64 \
+        --provenance=false \
+        --push \
+        .
+    - echo "Pushed $REGISTRY/$IMAGE_NAME:${VERSION}-cpu-arm64"
+
+# ── Manifest ──────────────────────────────────────────────────────────────
+
+manifest:multi-arch:
+  stage: manifest
+  tags: [argos, ncz-os]
+  needs: [build:amd64, build:arm64]
+  before_script:
+    - echo "$GHCR_PAT" | docker login $REGISTRY -u "$GHCR_USER" --password-stdin
+  script:
+    - export VERSION="${CI_COMMIT_TAG#v}"
+    # Remove any stale local manifest
+    - docker manifest rm $REGISTRY/$IMAGE_NAME:${VERSION}-cpu 2>/dev/null || true
+    - |
+      docker manifest create $REGISTRY/$IMAGE_NAME:${VERSION}-cpu \
+        $REGISTRY/$IMAGE_NAME:${VERSION}-cpu-amd64 \
+        $REGISTRY/$IMAGE_NAME:${VERSION}-cpu-arm64
+    - |
+      docker manifest annotate $REGISTRY/$IMAGE_NAME:${VERSION}-cpu \
+        $REGISTRY/$IMAGE_NAME:${VERSION}-cpu-amd64 --os linux --arch amd64
+    - |
+      docker manifest annotate $REGISTRY/$IMAGE_NAME:${VERSION}-cpu \
+        $REGISTRY/$IMAGE_NAME:${VERSION}-cpu-arm64 --os linux --arch arm64 --variant v8
+    - docker manifest push --purge $REGISTRY/$IMAGE_NAME:${VERSION}-cpu
+    # :latest
+    - docker manifest rm $REGISTRY/$IMAGE_NAME:latest 2>/dev/null || true
+    - |
+      docker manifest create $REGISTRY/$IMAGE_NAME:latest \
+        $REGISTRY/$IMAGE_NAME:${VERSION}-cpu-amd64 \
+        $REGISTRY/$IMAGE_NAME:${VERSION}-cpu-arm64
+    - |
+      docker manifest annotate $REGISTRY/$IMAGE_NAME:latest \
+        $REGISTRY/$IMAGE_NAME:${VERSION}-cpu-amd64 --os linux --arch amd64
+    - |
+      docker manifest annotate $REGISTRY/$IMAGE_NAME:latest \
+        $REGISTRY/$IMAGE_NAME:${VERSION}-cpu-arm64 --os linux --arch arm64 --variant v8
+    - docker manifest push --purge $REGISTRY/$IMAGE_NAME:latest
+    - echo "MANIFEST_DIGEST=$(docker manifest inspect $REGISTRY/$IMAGE_NAME:${VERSION}-cpu --verbose | sha256sum | awk '{print $1}')" > manifest.env
+    - cat manifest.env
+  artifacts:
+    reports:
+      dotenv: manifest.env
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+
+# ── Publish record ────────────────────────────────────────────────────────
+
+publish:release-summary:
+  stage: publish-record
+  tags: [argos, ncz-os]
+  needs: [manifest:multi-arch]
+  script:
+    - export VERSION="${CI_COMMIT_TAG#v}"
+    - |
+      cat > release-summary.txt <<SUMMARY
+      InvestorClaw v${VERSION} — $(date -u +%Y-%m-%dT%H:%M:%SZ)
+      Pipeline: ${CI_PIPELINE_URL}
+      Commit:   ${CI_COMMIT_SHA}
+
+      Image (multi-arch manifest list):
+        ${REGISTRY}/${IMAGE_NAME}:${VERSION}-cpu
+        ${REGISTRY}/${IMAGE_NAME}:latest
+
+      Per-arch tags:
+        ${REGISTRY}/${IMAGE_NAME}:${VERSION}-cpu-amd64
+        ${REGISTRY}/${IMAGE_NAME}:${VERSION}-cpu-arm64
+      SUMMARY
+    - cat release-summary.txt
+  artifacts:
+    paths: [release-summary.txt]
+    expire_in: 1 year
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
