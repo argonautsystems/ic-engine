@@ -14,7 +14,14 @@ import time
 from typing import NamedTuple
 
 try:
+    import litellm
     from litellm import completion
+
+    # Drop params a given model/provider does not support instead of raising.
+    # Required for gpt-5* (rejects temperature=0.0 — "Only temperature=1 is
+    # supported") and other models with narrow sampling-param support; without
+    # this the narrator silently falls through to the heuristic fallback.
+    litellm.drop_params = True
 
     LITELLM_AVAILABLE = True
 except ImportError:
@@ -141,8 +148,8 @@ class LiteLLMConsultationClient:
         self,
         messages: list[dict[str, str]],
         timeout: int = 120,
-        temperature: float = 0.0,
-        top_p: float = 0.9,
+        temperature: float | None = 0.0,
+        top_p: float | None = 0.9,
         max_tokens: int = 1200,
     ) -> ConsultationResult:
         """Send explicit chat messages through the configured litellm backend."""
@@ -174,15 +181,30 @@ class LiteLLMConsultationClient:
                     or "sk-no-key-needed"
                 )
 
+                # Send each sampling param only when set (not None). Callers
+                # that want a single param pass None for the other: the narrator
+                # passes top_p=None because temperature=0.0 already forces greedy
+                # decoding (top_p is a no-op there) AND because Anthropic + newest
+                # OpenAI models reject temperature and top_p TOGETHER
+                # (litellm.BadRequestError: "`temperature` and `top_p` cannot
+                # both be specified for this model") — sending both silently
+                # broke claude/openai narration (heuristic fallback every prompt).
+                # consult() still sends both (temp=0.65 + top_p=0.9) for its
+                # creative path on backends that accept the pair.
+                sampling: dict = {}
+                if temperature is not None:
+                    sampling["temperature"] = temperature
+                if top_p is not None:
+                    sampling["top_p"] = top_p
+
                 response = completion(
                     model=model_str,
                     messages=messages,
                     api_base=api_base,
                     api_key=api_key,
                     timeout=timeout,
-                    temperature=temperature,
-                    top_p=top_p,
                     max_tokens=max_tokens,
+                    **sampling,
                 )
 
                 # Extract text from response
