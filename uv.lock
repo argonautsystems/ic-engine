@@ -1894,7 +1894,7 @@ wheels = [
 
 [[package]]
 name = "ic-engine"
-version = "2.5.1"
+version = "4.6.0"
 source = { editable = "." }
 dependencies = [
     { name = "camelot-py" },
