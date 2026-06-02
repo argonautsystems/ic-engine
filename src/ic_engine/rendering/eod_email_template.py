@@ -656,27 +656,27 @@ def _render_bond_summary(bonds: Optional[dict]) -> str:
     )
 
     bond_rows = []
-    bond_list = bd.get("bonds", []) or []
+    bond_list = bd.get("individual_bonds", bd.get("bonds", [])) or []
     if isinstance(bond_list, list):
         sorted_bonds = sorted(
             [b for b in bond_list if isinstance(b, dict)],
-            key=lambda b: float(b.get("value") or 0),
+            key=lambda b: float(b.get("market_value") or b.get("value") or 0),
             reverse=True,
         )
         for bond in sorted_bonds[:25]:
-            name = str(bond.get("name") or bond.get("bond_name") or "Unknown")
+            name = str(bond.get("symbol") or bond.get("name") or bond.get("bond_name") or "Unknown")
             if len(name) > 40:
                 name = name[:37] + "..."
-            value = float(bond.get("value") or 0)
+            value = float(bond.get("market_value") or bond.get("value") or 0)
             ytm = bond.get("ytm", bond.get("yield_to_maturity"))
             bond_rows.append(f"""<tr>
   {_td(_esc(name))}
   {_td(_esc(bond.get("cusip", "")), f"color:{_C_LABEL};font-size:12px;")}
   {_td(_currency(value), "text-align:right;")}
-  {_td(_fmt_pct_value(bond.get("coupon")), "text-align:right;")}
+  {_td(_fmt_pct_value(bond.get("coupon_rate", bond.get("coupon"))), "text-align:right;")}
   {_td(_fmt_pct_value(ytm), "text-align:right;")}
-  {_td(_esc(bond.get("maturity") or "—"))}
-  {_td(_esc(bond.get("credit_rating") or bond.get("credit") or "—"))}
+  {_td(_esc(bond.get("maturity_date") or bond.get("maturity") or "—"))}
+  {_td(_esc(bond.get("credit_quality_estimate") or bond.get("credit_rating") or bond.get("credit") or "—"))}
 </tr>""")
 
         if len(sorted_bonds) > 25:
