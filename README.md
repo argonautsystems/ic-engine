@@ -292,6 +292,47 @@ Anthropic's ToS). Fleet defaults:
 - **Local-only / offline**: Ollama `gemma4:e4b` on host — zero cloud
   cost, GPU-bound, no key required.
 
+### Provider grounding battery (2026-06)
+
+> **Scope.** This battery + recommendation are for the **non-Claude**
+> provider path (openclaw / zeroclaw / hermes with an external narrator
+> API key). On **Claude Code / Claude Desktop**, narrate with the agent
+> own Claude over its OAuth subscription (Sonnet 4.6 narrative, Opus 4.7
+> escalation) -- do NOT wire an external narrator API key. See the
+> Claude Code / Claude Desktop subsection above.
+
+A 540-run battery (2 consultants x 9 narrator providers x 30 NLQ
+prompts) measured how faithfully each narrator quotes the signed
+envelope without inventing numbers (`pass` = grounded + on-intent / 30;
+`halluc` = mean ungrounded numbers per answer):
+
+| narrator | pass / 30 | mean halluc |
+|---|---:|---:|
+| **gemini** | **17.0** | **0.36** |
+| groq | 7.5 | 0.92 |
+| together | 7.5 | 1.06 |
+| perplexity | 6.5 | 1.38 |
+| siliconflow | 5.0 | 1.30 |
+| claude-sonnet-4-6 | 5.0 | 1.45 |
+| xai | 4.0 | 1.07 |
+| deepseek | 3.5 | 1.15 |
+| gpt-5.2-chat | 2.5 | 1.23 |
+
+- **gemini is the best-grounded narrator** under both consultants:
+  highest pass, lowest hallucination.
+- The strongest chat models (claude-sonnet, gpt-5.2) hallucinate the
+  **most** -- fluent embellishment is a liability in a strict grounding
+  task, even with a "quote every number verbatim" system prompt.
+- Consultant reliability: `deepseek_flash` 0%% timeout vs
+  `gemma_together` 31%% (Together serverless latency).
+- **Recommended (non-Claude agents): `deepseek_flash` consultant + `gemini` narrator.**
+
+Full 18-cell matrix lives in the battery harness `results/REPORT.md`.
+A narrator provider-compat fix (Anthropic + gpt-5 reject certain
+sampling-param combinations, which silently forced the heuristic
+fallback) landed in commit `591f166`.
+
+
 ## Recommended API Keys by Portfolio Size
 
 | Size | Required | Recommended | Why |
