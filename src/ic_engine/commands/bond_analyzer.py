@@ -330,10 +330,6 @@ class BondAnalyzer:
             for pos in portfolio.positions:
                 if pos.asset_class != "bond":
                     continue
-
-                # Build a flat dict preserving the fields bond_analyzer
-                # downstream code reads (par_value, market_value, coupon,
-                # maturity, cusip, etc.).
                 raw = pos.raw if isinstance(pos.raw, dict) else {}
                 asset_blob = raw.get("asset") if isinstance(raw, dict) else {}
                 security_name = None
@@ -341,6 +337,20 @@ class BondAnalyzer:
                     security_name = asset_blob.get("securityName") or asset_blob.get(
                         "security_name"
                     )
+                if self._is_cash_equivalent(
+                    {
+                        "symbol": pos.symbol,
+                        "cusip": pos.cusip,
+                        "description": security_name,
+                        "security_name": security_name,
+                        "asset_type": pos.asset_class,
+                    }
+                ):
+                    continue
+
+                # Build a flat dict preserving the fields bond_analyzer
+                # downstream code reads (par_value, market_value, coupon,
+                # maturity, cusip, etc.).
 
                 entry: Dict[str, Any] = {
                     "symbol": pos.symbol,
@@ -442,6 +452,9 @@ class BondAnalyzer:
 
     def _is_bond(self, holding: Dict) -> bool:
         """Check if a holding is a bond based on asset_type or data characteristics."""
+        if self._is_cash_equivalent(holding):
+            return False
+
         asset_type = holding.get("asset_type", "").lower()
         if "bond" in asset_type or "treasury" in asset_type or "muni" in asset_type:
             return True
@@ -468,6 +481,22 @@ class BondAnalyzer:
             return True
 
         return False
+
+    @staticmethod
+    def _is_cash_equivalent(holding: Dict) -> bool:
+        """True for cash, sweeps, money-market funds, and CDs mis-shaped as CUSIPs."""
+        text = " ".join(
+            str(holding.get(k) or "")
+            for k in ("asset_type", "description", "name", "security_name", "bond_name", "symbol")
+        ).lower()
+        return bool(
+            re.search(
+                r"cash|credit balance|trade date balance|sweep|deposit account|"
+                r"insured|money market|money fund|mmf|bank usa|bank deposit|"
+                r"sweep program|cash alternatives|certificate of deposit|brokered cd|\bcd\b",
+                text,
+            )
+        )
 
     def _detect_asset_type(self, holding: Dict) -> str:
         """Detect bond asset type from data."""

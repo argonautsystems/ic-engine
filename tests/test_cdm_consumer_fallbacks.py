@@ -58,6 +58,51 @@ def test_eod_email_renders_cdm_camel_summary_and_compact_value_fallbacks():
     assert "AAPL" in html
 
 
+def test_eod_email_always_renders_futures_empty_state():
+    from ic_engine.rendering.eod_email_template import render_eod_email
+
+    html = render_eod_email(
+        {
+            "date": "2026-06-01",
+            "holdings": {"summary": {"totalPortfolioValue": 100_000.0}},
+            "analyst": {},
+            "news": {},
+            "bonds": None,
+            "performance": {},
+            "fa_topics": [],
+        }
+    )
+
+    assert "Futures" in html
+    assert "No futures positions in this portfolio" in html
+
+
+def test_eod_email_renders_top_bond_performers():
+    from ic_engine.rendering.eod_email_template import render_eod_email
+
+    html = render_eod_email(
+        {
+            "date": "2026-06-01",
+            "holdings": {"summary": {"totalPortfolioValue": 100_000.0}},
+            "analyst": {},
+            "news": {},
+            "bonds": {
+                "portfolio_summary": {"bond_count": 2, "total_value": 20_000.0},
+                "individual_bonds": [
+                    {"symbol": "LOWYTM", "market_value": 9_000.0, "ytm": 2.1},
+                    {"symbol": "HIGHYTM", "market_value": 11_000.0, "ytm": 5.2},
+                ],
+            },
+            "performance": {},
+            "fa_topics": [],
+        }
+    )
+
+    assert "Top Bond Performers" in html
+    assert "HIGHYTM" in html
+    assert "5.20%" in html
+
+
 def test_fa_discussion_reads_cdm_camel_summary_fields():
     from ic_engine.commands.fa_discussion import _topics_from_holdings
 

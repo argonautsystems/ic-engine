@@ -577,7 +577,7 @@ def _render_news_summary(news: dict) -> str:
 def _render_bond_summary(bonds: Optional[dict]) -> str:
     if not bonds:
         return ""
-    bd = bonds.get("data", {})
+    bd = bonds.get("data", bonds)
     ps = bd.get("portfolio_summary", {})
 
     total_val = float(ps.get("total_value", 0))
@@ -686,7 +686,37 @@ def _render_bond_summary(bonds: Optional[dict]) -> str:
 </tr>""")
 
     bonds_html = ""
+    performers_html = ""
     if bond_rows:
+        performer_rows = []
+        top_performers = sorted(
+            sorted_bonds,
+            key=lambda b: float(b.get("ytm") or b.get("yield_to_maturity") or 0),
+            reverse=True,
+        )[:5]
+        for bond in top_performers:
+            name = str(bond.get("symbol") or bond.get("name") or bond.get("bond_name") or "Unknown")
+            if len(name) > 44:
+                name = name[:41] + "..."
+            value = float(bond.get("market_value") or bond.get("value") or 0)
+            ytm = bond.get("ytm", bond.get("yield_to_maturity"))
+            performer_rows.append(f"""<tr>
+  {_td(f'<strong style="color:{_C_TEXT_PRIMARY};">{_esc(name)}</strong>')}
+  {_td(_fmt_pct_value(ytm), "text-align:right;")}
+  {_td(_currency(value), "text-align:right;")}
+</tr>""")
+        if performer_rows:
+            performer_header = (
+                _th("Name / Symbol")
+                + _th("YTM", "text-align:right;")
+                + _th("Value", "text-align:right;")
+            )
+            performers_html = (
+                f'<div style="margin-top:16px;font-size:11px;font-weight:600;color:{_C_LABEL};'
+                f'text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;">Top Bond Performers</div>'
+                + _table(performer_rows, performer_header)
+            )
+
         header = (
             _th("Name")
             + _th("CUSIP")
@@ -702,21 +732,26 @@ def _render_bond_summary(bonds: Optional[dict]) -> str:
             + _table(bond_rows, header)
         )
 
-    return _section("Fixed Income", _card(kpi_row + extras_html + ladder_html + bonds_html))
+    return _section(
+        "Fixed Income", _card(kpi_row + extras_html + ladder_html + performers_html + bonds_html)
+    )
 
 
 def _render_futures(holdings: dict) -> str:
     raw = _portfolio_summary(holdings)
     futures_value = float(raw.get("futures_value", 0) or holdings.get("futures_value", 0) or 0)
     futures_rows = holdings.get("top_futures", []) or []
-    if futures_value <= 0 and not futures_rows:
-        return ""
 
     try:
-        from ic_engine.providers.futures_spec import contract_multiplier, parse_contract_ticker
+        from ic_engine.providers.futures_spec import (
+            contract_multiplier,
+            parse_contract_ticker,
+            product_code,
+        )
     except Exception:
         contract_multiplier = None
         parse_contract_ticker = None
+        product_code = None
 
     position_count = holdings.get("position_count", {})
     futures_count = (
@@ -734,12 +769,14 @@ def _render_futures(holdings: dict) -> str:
 
     rows = []
     for pos in futures_rows[:20]:
-        symbol = pos.get("contract_symbol") or pos.get("symbol") or ""
+        contract_symbol = pos.get("contract_symbol") or pos.get("symbol") or ""
+        symbol = product_code(contract_symbol) if product_code else None
+        symbol = symbol or contract_symbol
         contracts = float(pos.get("contracts") or pos.get("shares") or pos.get("quantity") or 0)
         notional = float(pos.get("notional_value") or pos.get("value") or 0)
         multiplier = float(pos.get("contract_size") or 0)
         if multiplier <= 0 and contract_multiplier:
-            multiplier = float(contract_multiplier(symbol))
+            multiplier = float(contract_multiplier(contract_symbol))
         price = float(pos.get("current_price") or pos.get("price") or 0)
         if notional <= 0 and price > 0 and multiplier > 0 and contracts:
             notional = price * multiplier * contracts
@@ -748,7 +785,7 @@ def _render_futures(holdings: dict) -> str:
 
         desc = pos.get("description") or pos.get("contract_description") or ""
         if not desc and parse_contract_ticker:
-            parsed = parse_contract_ticker(symbol)
+            parsed = parse_contract_ticker(contract_symbol)
             if parsed:
                 product, month, year = parsed
                 desc = f"{product} futures {month:02d}/{year}"
@@ -762,15 +799,21 @@ def _render_futures(holdings: dict) -> str:
   {_td(_currency(notional), "text-align:right;")}
 </tr>""")
 
-    table_html = ""
-    if rows:
-        header = (
-            _th("Symbol")
-            + _th("Contract Description")
-            + _th("Contracts", "text-align:right;")
-            + _th("Notional", "text-align:right;")
-        )
-        table_html = f'<div style="margin-top:16px;">{_table(rows, header)}</div>'
+    if not rows:
+        rows.append(f"""<tr>
+  {_td("No futures positions in this portfolio", f"color:{_C_LABEL};font-style:italic;",)}
+  {_td("")}
+  {_td("", "text-align:right;")}
+  {_td("", "text-align:right;")}
+</tr>""")
+
+    header = (
+        _th("Symbol")
+        + _th("Contract Description")
+        + _th("Contracts", "text-align:right;")
+        + _th("Notional", "text-align:right;")
+    )
+    table_html = f'<div style="margin-top:16px;">{_table(rows, header)}</div>'
 
     return _section("Futures", _card(_kpi_row(kpis) + table_html))
 

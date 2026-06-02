@@ -108,6 +108,21 @@ def test_cost_basis_cash_not_divided():
     assert h.cost_basis == pytest.approx(10_000.00)
 
 
+def test_holding_prefers_explicit_unrealized_gain_loss():
+    h = Holding(
+        symbol="AAPL",
+        asset_type="equity",
+        shares=10,
+        current_price=100,
+        purchase_price=100,
+        explicit_unrealized_gain_loss=123.45,
+        explicit_unrealized_gain_loss_pct=12.34,
+    )
+
+    assert h.unrealized_gain_loss == pytest.approx(123.45)
+    assert h.unrealized_gain_loss_pct == pytest.approx(0.1234)
+
+
 # ---------------------------------------------------------------------------
 # WF30: AnalystConsensus.recommendation_mean default is None (not 2.5)
 # ---------------------------------------------------------------------------
@@ -223,6 +238,182 @@ def test_news_yf_ticker_period_replaced():
 
 def test_news_yf_ticker_no_period_unchanged():
     assert PortfolioNewsAnalyzer._yf_ticker("MSFT") == "MSFT"
+
+
+def test_portfolio_news_falls_back_to_yfinance_when_keyed_provider_empty(monkeypatch):
+    class EmptyProvider:
+        NAME = "massive"
+
+        def get_news(self, symbols, days=7):
+            return []
+
+    class FakeTicker:
+        news = [
+            {
+                "content": {
+                    "title": "Apple earnings beat expectations",
+                    "summary": "Apple reports strong revenue growth.",
+                    "provider": {"displayName": "Yahoo"},
+                    "canonicalUrl": {"url": "https://example.com/aapl"},
+                    "pubDate": "2026-06-01T12:00:00Z",
+                }
+            }
+        ]
+
+    analyzer = PortfolioNewsAnalyzer()
+    analyzer.portfolio_holdings = {
+        "AAPL": {"value": 10_000.0, "current_price": 100.0, "shares": 100.0}
+    }
+    analyzer._news_provider_names = ["massive"]
+    monkeypatch.setattr(analyzer, "_configured_news_providers", lambda: [EmptyProvider()])
+    monkeypatch.setattr(analyzer, "_company_name", lambda symbol: "Apple")
+    monkeypatch.setattr("ic_engine.commands.fetch_portfolio_news.yf.Ticker", lambda symbol: FakeTicker())
+
+    items = analyzer.fetch_symbol_news("AAPL", max_articles=5)
+
+    assert items
+    assert items[0]["title"] == "Apple earnings beat expectations"
+    assert items[0]["link"] == "https://example.com/aapl"
+
+
+def test_fetch_all_news_writes_populated_compact_json_with_yfinance_fallback(
+    tmp_path, monkeypatch
+):
+    class EmptyProvider:
+        NAME = "massive"
+
+        def get_news(self, symbols, days=7):
+            return []
+
+    class FakeTicker:
+        news = [
+            {
+                "content": {
+                    "title": "Apple earnings beat expectations",
+                    "summary": "Apple reports strong revenue growth.",
+                    "provider": {"displayName": "Yahoo"},
+                    "canonicalUrl": {"url": "https://example.com/aapl"},
+                    "pubDate": "2026-06-01T12:00:00Z",
+                }
+            }
+        ]
+
+    holdings_file = tmp_path / "holdings.json"
+    holdings_file.write_text(
+        json.dumps(
+            {
+                "portfolio": {
+                    "portfolioState": {
+                        "positions": [
+                            {
+                                "product": {"productIdentifier": {"identifier": "AAPL"}},
+                                "asset": {
+                                    "productIdentifier": {"identifier": "AAPL"},
+                                    "securityType": "Equity",
+                                    "securityName": "Apple Inc.",
+                                },
+                                "priceQuantity": {
+                                    "quantity": {"amount": 100.0},
+                                    "currentPrice": {"amount": 100.0},
+                                },
+                                "marketValue": 10_000.0,
+                            }
+                        ]
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    output_file = tmp_path / "portfolio_news.json"
+
+    analyzer = PortfolioNewsAnalyzer()
+    analyzer._news_provider_names = ["massive"]
+    monkeypatch.setattr(analyzer, "_configured_news_providers", lambda: [EmptyProvider()])
+    monkeypatch.setattr(analyzer, "_company_name", lambda symbol: "Apple")
+    monkeypatch.setattr("ic_engine.commands.fetch_portfolio_news.yf.Ticker", lambda symbol: FakeTicker())
+
+    analyzer.fetch_all_news(str(holdings_file), str(output_file), top_n=1)
+    written = json.loads(output_file.read_text(encoding="utf-8"))
+
+    assert output_file.exists()
+    assert written["total_items"] == 1
+    assert written["narrative"]
+    assert written["key_tailwinds"]
+    assert written["top_positive"][0]["symbol"] == "AAPL"
+    assert written["top_positive"][0]["url"] == "https://example.com/aapl"
+
+
+def test_massive_provider_news_uses_reference_news_results(monkeypatch):
+    import sys
+    import types
+
+    if "ratelimit" not in sys.modules:
+        fake_ratelimit = types.ModuleType("ratelimit")
+        fake_ratelimit.limits = lambda *args, **kwargs: (lambda fn: fn)
+        fake_ratelimit.sleep_and_retry = lambda fn: fn
+        monkeypatch.setitem(sys.modules, "ratelimit", fake_ratelimit)
+
+    from ic_engine.providers.price_provider import MassiveProvider
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "count": 1,
+                "results": [
+                    {
+                        "title": "Apple gains on services growth",
+                        "article_url": "https://example.com/news",
+                        "published_utc": "2026-06-01T13:14:15Z",
+                        "publisher": {"name": "Benzinga"},
+                        "description": "Services revenue remains strong.",
+                        "tickers": ["AAPL"],
+                    }
+                ],
+            }
+
+    calls = []
+
+    def fake_get(url, params, timeout):
+        calls.append((url, params, timeout))
+        return FakeResponse()
+
+    provider = MassiveProvider.__new__(MassiveProvider)
+    provider.api_key = "test-key"
+    monkeypatch.setattr("ic_engine.providers.price_provider.requests.get", fake_get)
+
+    items = provider.get_news(["AAPL"], days=3)
+
+    assert calls[0][0] == "https://api.massive.com/v2/reference/news"
+    assert calls[0][1]["ticker"] == "AAPL"
+    assert items == [
+        {
+            "symbol": "AAPL",
+            "headline": "Apple gains on services growth",
+            "summary": "Services revenue remains strong.",
+            "source": "Benzinga",
+            "url": "https://example.com/news",
+            "datetime": "2026-06-01 13:14",
+            "provider": "massive",
+        }
+    ]
+
+
+def test_bond_analyzer_excludes_cash_equivalent_cusip_rows():
+    from ic_engine.commands.bond_analyzer import BondAnalyzer
+
+    analyzer = BondAnalyzer.__new__(BondAnalyzer)
+    row = {
+        "symbol": None,
+        "cusip": "123456789",
+        "description": "UBS Bank USA Sweep Program Money Market",
+        "asset_type": "",
+    }
+
+    assert analyzer._is_bond(row) is False
 
 
 # ---------------------------------------------------------------------------
