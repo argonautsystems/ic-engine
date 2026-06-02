@@ -248,7 +248,7 @@ def _run_consultant(stripped_feed_json: str, question: str) -> str | None:
             ],
             timeout=_NARRATOR_TIMEOUT_SECS,
             temperature=0.0,
-            top_p=1.0,
+            top_p=None,  # temp=0.0 already greedy; sending top_p too breaks claude/gpt-5
             max_tokens=900,
         )
         if result.response:
@@ -291,7 +291,7 @@ def _call_llm(system_prompt: str, user_prompt: str) -> tuple[str, str]:
             ],
             timeout=_NARRATOR_TIMEOUT_SECS,
             temperature=0.0,
-            top_p=1.0,
+            top_p=None,  # temp=0.0 already greedy; sending top_p too breaks claude/gpt-5
             max_tokens=_MAX_NARRATOR_TOKENS,
         )
         if not result.response:
