@@ -762,32 +762,40 @@ class MassiveProvider:
             return []
 
     def get_news(self, symbols: List[str], days: int = 7) -> List[Dict]:
-        """Massive news API."""
+        """Massive news API via /v2/reference/news."""
         from_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
         articles = []
 
         for sym in symbols:
             try:
-                data = self._client.list_ticker_news(
-                    ticker=sym,
-                    published_utc_gte=from_date,
-                    limit=25,
+                resp = requests.get(
+                    f"{self.API_BASE}/v2/reference/news",
+                    params={
+                        "ticker": sym,
+                        "published_utc.gte": from_date,
+                        "limit": 25,
+                        "apiKey": self.api_key,
+                    },
+                    timeout=15,
                 )
-
-                if not data or not data.results:
+                resp.raise_for_status()
+                data = resp.json()
+                results = data.get("results", []) if isinstance(data, dict) else []
+                if not results:
                     continue
 
-                for item in data.results:
+                for item in results:
+                    if not isinstance(item, dict):
+                        continue
+                    publisher = item.get("publisher") or {}
                     articles.append(
                         {
                             "symbol": sym,
-                            "headline": item.title or "",
-                            "summary": item.description or "",
-                            "source": (item.publisher or {}).get("name", "")
-                            if hasattr(item.publisher, "get")
-                            else "",
-                            "url": item.article_url or "",
-                            "datetime": (item.published_utc or "")[:16].replace("T", " "),
+                            "headline": item.get("title") or "",
+                            "summary": item.get("description") or "",
+                            "source": publisher.get("name", "") if isinstance(publisher, dict) else "",
+                            "url": item.get("article_url") or "",
+                            "datetime": (item.get("published_utc") or "")[:16].replace("T", " "),
                             "provider": self.NAME,
                         }
                     )

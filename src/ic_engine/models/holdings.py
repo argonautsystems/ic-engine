@@ -114,6 +114,8 @@ class Holding:
     name: Optional[str] = None  # Human-readable name (bond names, fund names)
     quantity: Optional[float] = None  # Alias for shares (bonds may use this)
     market_value: Optional[float] = None  # Explicit market value (computed if not provided)
+    explicit_unrealized_gain_loss: Optional[float] = None
+    explicit_unrealized_gain_loss_pct: Optional[float] = None
 
     # Metadata
     metadata: Dict[str, Any] = field(default_factory=dict)
@@ -177,11 +179,16 @@ class Holding:
     @property
     def unrealized_gain_loss(self) -> float:
         """Absolute unrealized gain or loss in currency."""
+        if self.explicit_unrealized_gain_loss is not None:
+            return float(self.explicit_unrealized_gain_loss)
         return self.value - self.cost_basis
 
     @property
     def unrealized_gain_loss_pct(self) -> float:
         """Unrealized gain/loss as percentage (0.15 = 15% gain)."""
+        if self.explicit_unrealized_gain_loss_pct is not None:
+            pct = float(self.explicit_unrealized_gain_loss_pct)
+            return pct / 100.0 if abs(pct) > 1 else pct
         if self.cost_basis == 0:
             return 0.0
         return self.unrealized_gain_loss / self.cost_basis

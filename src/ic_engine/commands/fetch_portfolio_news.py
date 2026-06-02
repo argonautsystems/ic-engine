@@ -376,7 +376,8 @@ class PortfolioNewsAnalyzer:
 
         Massive is preferred when configured as the price provider or when its
         key is present. Yahoo/yfinance is intentionally excluded here and used
-        only by the explicit fallback path when no keyed provider is available.
+        only by the explicit fallback path when keyed providers return no
+        usable articles.
         """
         if self._news_providers is not None:
             return self._news_providers
@@ -485,8 +486,8 @@ class PortfolioNewsAnalyzer:
         """Fetch news for a single symbol from configured providers.
 
         Keyed providers are preferred in this order: Massive, Finnhub,
-        Marketaux/NewsAPI. Yahoo Finance is used only when no keyed news
-        provider is configured.
+        Marketaux/NewsAPI. Yahoo Finance is the final fallback when keyed
+        providers return no usable articles.
         """
         try:
             logger.info(f"Fetching news for {symbol} (max {max_articles} articles)")
@@ -494,8 +495,9 @@ class PortfolioNewsAnalyzer:
             if provider_news:
                 return provider_news
             if self._configured_news_providers() or self._news_provider_names:
-                logger.warning(f"No configured-provider news found for {symbol}")
-                return []
+                logger.warning(
+                    f"No configured-provider news found for {symbol}; falling back to yfinance"
+                )
 
             company_name = self._company_name(symbol)
             ticker = yf.Ticker(self._yf_ticker(symbol))
@@ -967,7 +969,6 @@ class PortfolioNewsAnalyzer:
                 "all_news": sorted_by_impact,
                 "per_symbol": per_symbol_cache,
             }
-            from pathlib import Path
 
             Path(cache_file).parent.mkdir(parents=True, exist_ok=True)
             with open(cache_file, "w") as f:

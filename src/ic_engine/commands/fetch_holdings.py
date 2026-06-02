@@ -740,7 +740,9 @@ class PortfolioFetcher:
             # Cash heuristic: description matches cash-like keywords, OR null symbol + null CUSIP
             _cash_keywords = (
                 r"cash|credit balance|trade date balance|sweep|deposit account|"
-                r"insured|money market|bank usa|sweep program|interest|dividend"
+                r"insured|money market|money fund|mmf|bank usa|bank deposit|"
+                r"sweep program|cash alternatives|certificate of deposit|brokered cd|"
+                r"\bcd\b|interest|dividend"
             )
             cash_by_desc = (
                 (
@@ -1439,8 +1441,22 @@ class PortfolioFetcher:
 
                 purchase_date = str(row.get("purchase_date", "N/A"))
 
-                unrealized = value - (shares * purchase_price)
-                ((unrealized / (shares * purchase_price)) * 100 if purchase_price > 0 else 0.0)
+                explicit_unrealized = row.get("unrealized_gain_loss")
+                try:
+                    explicit_unrealized = (
+                        float(explicit_unrealized) if explicit_unrealized is not None else None
+                    )
+                except (ValueError, TypeError):
+                    explicit_unrealized = None
+                explicit_unrealized_pct = row.get("unrealized_gain_loss_pct")
+                try:
+                    explicit_unrealized_pct = (
+                        float(explicit_unrealized_pct)
+                        if explicit_unrealized_pct is not None
+                        else None
+                    )
+                except (ValueError, TypeError):
+                    explicit_unrealized_pct = None
 
                 _row_asset_type = row.get("_asset_type") or "equity"
                 _sec_info = _sector_lookup.get(sym, {})
@@ -1491,6 +1507,8 @@ class PortfolioFetcher:
                     data_provider=quote.get("provider", "unknown"),
                     espp_status=_espp_status,
                     managed_status=_managed_status,
+                    explicit_unrealized_gain_loss=explicit_unrealized,
+                    explicit_unrealized_gain_loss_pct=explicit_unrealized_pct,
                 )
                 logger.info(f"{sym}: {shares} shares @ ${current_price:.2f} = ${value:,.2f}")
 
@@ -1568,11 +1586,22 @@ class PortfolioFetcher:
 
                 purchase_date = str(row.get("purchase_date", "N/A"))
 
-                value - (
-                    quantity * (purchase_price / 100.0)
-                    if market_value_raw is not None
-                    else quantity * purchase_price
-                )
+                explicit_unrealized = row.get("unrealized_gain_loss")
+                try:
+                    explicit_unrealized = (
+                        float(explicit_unrealized) if explicit_unrealized is not None else None
+                    )
+                except (ValueError, TypeError):
+                    explicit_unrealized = None
+                explicit_unrealized_pct = row.get("unrealized_gain_loss_pct")
+                try:
+                    explicit_unrealized_pct = (
+                        float(explicit_unrealized_pct)
+                        if explicit_unrealized_pct is not None
+                        else None
+                    )
+                except (ValueError, TypeError):
+                    explicit_unrealized_pct = None
 
                 # Coupon rate: prefer CSV column; fall back to parsing from bond name
                 # e.g. "ATLANTA GA WTR ... RATE 05.000% MATURES 11/01/28"
@@ -1610,6 +1639,8 @@ class PortfolioFetcher:
                     coupon_rate=coupon_rate,
                     maturity_date=maturity_raw,
                     market_value=float(value),
+                    explicit_unrealized_gain_loss=explicit_unrealized,
+                    explicit_unrealized_gain_loss_pct=explicit_unrealized_pct,
                 )
                 logger.info(
                     f"{cusip} ({bond_name}): {quantity} bonds @ ${current_price:.2f} = ${value:,.2f}"
@@ -1944,8 +1975,8 @@ class PortfolioFetcher:
             positions.append(pos)
 
         # Calculate portfolio gain/loss
-        total_cost_basis = sum(pos.cost_basis for pos in positions)
-        total_gain_loss = total_value - total_cost_basis
+        total_gain_loss = sum(pos.unrealized_gain_loss for pos in positions)
+        total_cost_basis = total_value - total_gain_loss
         total_gain_loss_pct = (
             (total_gain_loss / total_cost_basis * 100) if total_cost_basis > 0 else 0.0
         )
