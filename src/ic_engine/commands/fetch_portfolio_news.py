@@ -232,6 +232,8 @@ class PortfolioNewsAnalyzer:
         self.all_news = {}
         self.errors = []
         self._company_names: Dict[str, str] = {}  # ticker → short name cache
+        self._news_providers = None
+        self._news_provider_names: List[str] = []
 
     @staticmethod
     def _yf_ticker(symbol: str) -> str:
@@ -369,15 +371,132 @@ class PortfolioNewsAnalyzer:
         else:
             return 5
 
-    def fetch_symbol_news(self, symbol: str, max_articles: int = 10) -> List[Dict]:
-        """Fetch news for a single symbol from Yahoo Finance.
+    def _configured_news_providers(self) -> List[object]:
+        """Provider precedence for portfolio news.
 
-        Only articles that actually mention the company (by ticker or name) are
-        kept — yfinance returns loosely-correlated market news that may be
-        primarily about different companies.
+        Massive is preferred when configured as the price provider or when its
+        key is present. Yahoo/yfinance is intentionally excluded here and used
+        only by the explicit fallback path when no keyed provider is available.
+        """
+        if self._news_providers is not None:
+            return self._news_providers
+
+        override = os.getenv("INVESTORCLAW_PRICE_PROVIDER", "auto").strip().lower()
+        names: List[str] = []
+        if override == "massive" or os.getenv("MASSIVE_API_KEY"):
+            names.append("massive")
+        if os.getenv("FINNHUB_KEY") or os.getenv("FINNHUB_API_KEY"):
+            names.append("finnhub")
+        if os.getenv("MARKETAUX_API_KEY"):
+            names.append("marketaux")
+        if os.getenv("NEWSAPI_KEY"):
+            names.append("newsapi")
+        self._news_provider_names = list(dict.fromkeys(names))
+
+        try:
+            from ic_engine.providers.price_provider import PROVIDER_CLASSES
+        except Exception as e:
+            logger.warning(f"PriceProvider news providers unavailable: {e}")
+            self._news_providers = []
+            return self._news_providers
+
+        providers = []
+        for name in self._news_provider_names:
+            cls = PROVIDER_CLASSES.get(name)
+            if cls is None:
+                continue
+            try:
+                providers.append(cls())
+            except Exception as e:
+                logger.warning(f"Cannot initialise {name} news provider: {e}")
+        self._news_providers = providers
+        if providers:
+            logger.info("News provider order: %s", ", ".join(p.NAME for p in providers))
+        return providers
+
+    def _normalise_provider_article(self, symbol: str, item: Dict) -> Dict:
+        title = item.get("headline") or item.get("title") or ""
+        summary = item.get("summary") or item.get("description") or ""
+        source = item.get("source") or item.get("provider") or "Unknown"
+        link = item.get("url") or item.get("link") or ""
+        pub_date = item.get("datetime") or item.get("publish_date") or item.get("published_at")
+        if not pub_date:
+            pub_date = datetime.now().isoformat()
+
+        sentiment, confidence = self.simple_sentiment(f"{title} {summary}")
+        holding_value = self.portfolio_holdings[symbol]["value"]
+        impact_multiplier = {
+            "positive": 0.015,
+            "negative": -0.025,
+            "neutral": 0.0,
+        }
+        impact_pct = impact_multiplier.get(sentiment, 0.0) * confidence
+        return {
+            "symbol": symbol,
+            "title": title,
+            "summary": summary,
+            "source": source,
+            "link": link,
+            "publish_date": str(pub_date),
+            "sentiment": sentiment,
+            "confidence": float(confidence),
+            "portfolio_impact": float(holding_value * impact_pct),
+            "impact_pct": float(impact_pct * 100),
+        }
+
+    def _fetch_provider_symbol_news(self, symbol: str, max_articles: int) -> List[Dict]:
+        providers = self._configured_news_providers()
+        if not providers:
+            return []
+
+        processed = []
+        seen = set()
+        for provider in providers:
+            try:
+                raw_articles = provider.get_news([symbol], days=14) or []
+            except Exception as e:
+                logger.warning(f"{provider.NAME} news({symbol}) failed: {e}")
+                continue
+            for item in raw_articles:
+                item_symbol = str(item.get("symbol") or symbol).upper()
+                if item_symbol and item_symbol != symbol.upper():
+                    continue
+                article = self._normalise_provider_article(symbol, item)
+                if not article["title"]:
+                    continue
+                dedupe_key = (article["link"] or article["title"]).strip().lower()
+                if dedupe_key in seen:
+                    continue
+                seen.add(dedupe_key)
+                processed.append(article)
+                if len(processed) >= max_articles:
+                    break
+            if processed:
+                logger.info(
+                    "%s: %d articles from %s",
+                    symbol,
+                    len(processed),
+                    getattr(provider, "NAME", "provider"),
+                )
+                return processed
+        return []
+
+    def fetch_symbol_news(self, symbol: str, max_articles: int = 10) -> List[Dict]:
+        """Fetch news for a single symbol from configured providers.
+
+        Keyed providers are preferred in this order: Massive, Finnhub,
+        Marketaux/NewsAPI. Yahoo Finance is used only when no keyed news
+        provider is configured.
         """
         try:
             logger.info(f"Fetching news for {symbol} (max {max_articles} articles)")
+            provider_news = self._fetch_provider_symbol_news(symbol, max_articles)
+            if provider_news:
+                return provider_news
+            if self._configured_news_providers() or self._news_provider_names:
+                logger.warning(f"No configured-provider news found for {symbol}")
+                return []
+
             company_name = self._company_name(symbol)
             ticker = yf.Ticker(self._yf_ticker(symbol))
 
