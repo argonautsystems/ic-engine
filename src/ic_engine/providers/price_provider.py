@@ -771,7 +771,7 @@ class MassiveProvider:
                 data = self._client.list_ticker_news(
                     ticker=sym,
                     published_utc_gte=from_date,
-                    limit=5,
+                    limit=25,
                 )
 
                 if not data or not data.results:

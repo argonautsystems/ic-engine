@@ -114,6 +114,15 @@ def _signed(v: float, decimals: int = 1) -> str:
     return f"{sign}{v:.{decimals}%}"
 
 
+def _fmt_pct_value(v: Any, decimals: int = 2) -> str:
+    if v is None or v == "":
+        return "—"
+    try:
+        return f"{float(v):.{decimals}f}%"
+    except (TypeError, ValueError):
+        return _esc(v)
+
+
 def _portfolio_summary(holdings: dict) -> Dict[str, Any]:
     return normalize_summary_fields(extract_summary_block(holdings))
 
@@ -377,7 +386,58 @@ def _render_analyst_summary(analyst: dict) -> str:
         ),
         ("No Coverage", str(int(cov.get("no_coverage", 0))), _C_NEUTRAL),
     ]
-    return _section("Analyst Coverage", _card(_kpi_row(kpis)))
+    rows = []
+    recs = analyst.get("recommendations", {}) or {}
+    if isinstance(recs, dict):
+        def _analyst_count(item: dict) -> int:
+            return int(item.get("num_analysts") or item.get("analyst_count") or 0)
+
+        covered = [
+            (sym, rec)
+            for sym, rec in recs.items()
+            if isinstance(rec, dict) and _analyst_count(rec) > 0
+        ]
+        covered.sort(key=lambda kv: _analyst_count(kv[1]), reverse=True)
+
+        for sym, rec in covered[:20]:
+            consensus = rec.get("consensus") or rec.get("recommendation") or "—"
+            consensus_lower = str(consensus).lower()
+            consensus_color = (
+                _C_POSITIVE
+                if "buy" in consensus_lower
+                else _C_NEGATIVE if "sell" in consensus_lower else _C_NEUTRAL
+            )
+            count = _analyst_count(rec)
+            current = float(rec.get("current_price") or 0)
+            target = float(rec.get("target_price_mean") or rec.get("target_mean") or 0)
+            upside = (target - current) / current if current > 0 and target > 0 else None
+            upside_html = (
+                f'<span style="color:{_sign_color(upside)};font-weight:600;">{_signed(upside)}</span>'
+                if upside is not None
+                else "—"
+            )
+            rows.append(f"""<tr>
+  {_td(f'<strong style="color:{_C_TEXT_PRIMARY};">{_esc(sym)}</strong>')}
+  {_td(f'<span style="color:{consensus_color};font-weight:600;">{_esc(consensus)}</span>')}
+  {_td(str(count), "text-align:right;")}
+  {_td(_currency(current) if current > 0 else "—", "text-align:right;")}
+  {_td(_currency(target) if target > 0 else "—", "text-align:right;")}
+  {_td(upside_html, "text-align:right;")}
+</tr>""")
+
+    table_html = ""
+    if rows:
+        header = (
+            _th("Symbol")
+            + _th("Consensus")
+            + _th("# Analysts", "text-align:right;")
+            + _th("Current", "text-align:right;")
+            + _th("Mean Target", "text-align:right;")
+            + _th("Upside %", "text-align:right;")
+        )
+        table_html = f'<div style="margin-top:16px;">{_table(rows, header)}</div>'
+
+    return _section("Analyst Coverage", _card(_kpi_row(kpis) + table_html))
 
 
 def _render_news_summary(news: dict) -> str:
@@ -595,7 +655,124 @@ def _render_bond_summary(bonds: Optional[dict]) -> str:
         else ""
     )
 
-    return _section("Fixed Income", _card(kpi_row + extras_html + ladder_html))
+    bond_rows = []
+    bond_list = bd.get("bonds", []) or []
+    if isinstance(bond_list, list):
+        sorted_bonds = sorted(
+            [b for b in bond_list if isinstance(b, dict)],
+            key=lambda b: float(b.get("value") or 0),
+            reverse=True,
+        )
+        for bond in sorted_bonds[:25]:
+            name = str(bond.get("name") or bond.get("bond_name") or "Unknown")
+            if len(name) > 40:
+                name = name[:37] + "..."
+            value = float(bond.get("value") or 0)
+            ytm = bond.get("ytm", bond.get("yield_to_maturity"))
+            bond_rows.append(f"""<tr>
+  {_td(_esc(name))}
+  {_td(_esc(bond.get("cusip", "")), f"color:{_C_LABEL};font-size:12px;")}
+  {_td(_currency(value), "text-align:right;")}
+  {_td(_fmt_pct_value(bond.get("coupon")), "text-align:right;")}
+  {_td(_fmt_pct_value(ytm), "text-align:right;")}
+  {_td(_esc(bond.get("maturity") or "—"))}
+  {_td(_esc(bond.get("credit_rating") or bond.get("credit") or "—"))}
+</tr>""")
+
+        if len(sorted_bonds) > 25:
+            bond_rows.append(f"""<tr>
+  {_td(f'<span style="color:{_C_LABEL};">+{len(sorted_bonds) - 25} more bonds not shown</span>', "font-style:italic;",)}
+  {_td("")}{_td("")}{_td("")}{_td("")}{_td("")}{_td("")}
+</tr>""")
+
+    bonds_html = ""
+    if bond_rows:
+        header = (
+            _th("Name")
+            + _th("CUSIP")
+            + _th("Value", "text-align:right;")
+            + _th("Coupon", "text-align:right;")
+            + _th("YTM", "text-align:right;")
+            + _th("Maturity")
+            + _th("Credit")
+        )
+        bonds_html = (
+            f'<div style="margin-top:16px;font-size:11px;font-weight:600;color:{_C_LABEL};'
+            f'text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;">Bond Positions</div>'
+            + _table(bond_rows, header)
+        )
+
+    return _section("Fixed Income", _card(kpi_row + extras_html + ladder_html + bonds_html))
+
+
+def _render_futures(holdings: dict) -> str:
+    raw = _portfolio_summary(holdings)
+    futures_value = float(raw.get("futures_value", 0) or holdings.get("futures_value", 0) or 0)
+    futures_rows = holdings.get("top_futures", []) or []
+    if futures_value <= 0 and not futures_rows:
+        return ""
+
+    try:
+        from ic_engine.providers.futures_spec import contract_multiplier, parse_contract_ticker
+    except Exception:
+        contract_multiplier = None
+        parse_contract_ticker = None
+
+    position_count = holdings.get("position_count", {})
+    futures_count = (
+        int(position_count.get("futures", 0))
+        if isinstance(position_count, dict)
+        else len(futures_rows)
+    )
+    if not futures_count:
+        futures_count = len(futures_rows)
+
+    kpis = [
+        ("Futures Contracts", str(futures_count), _C_ACCENT),
+        ("Total Notional", _currency(futures_value), _C_ACCENT),
+    ]
+
+    rows = []
+    for pos in futures_rows[:20]:
+        symbol = pos.get("contract_symbol") or pos.get("symbol") or ""
+        contracts = float(pos.get("contracts") or pos.get("shares") or pos.get("quantity") or 0)
+        notional = float(pos.get("notional_value") or pos.get("value") or 0)
+        multiplier = float(pos.get("contract_size") or 0)
+        if multiplier <= 0 and contract_multiplier:
+            multiplier = float(contract_multiplier(symbol))
+        price = float(pos.get("current_price") or pos.get("price") or 0)
+        if notional <= 0 and price > 0 and multiplier > 0 and contracts:
+            notional = price * multiplier * contracts
+        if not contracts and price > 0 and multiplier > 0 and notional > 0:
+            contracts = notional / (price * multiplier)
+
+        desc = pos.get("description") or pos.get("contract_description") or ""
+        if not desc and parse_contract_ticker:
+            parsed = parse_contract_ticker(symbol)
+            if parsed:
+                product, month, year = parsed
+                desc = f"{product} futures {month:02d}/{year}"
+        if not desc:
+            desc = pos.get("type") or "Futures contract"
+
+        rows.append(f"""<tr>
+  {_td(f'<strong style="color:{_C_TEXT_PRIMARY};">{_esc(symbol)}</strong>')}
+  {_td(_esc(desc))}
+  {_td(f"{contracts:g}" if contracts else "—", "text-align:right;")}
+  {_td(_currency(notional), "text-align:right;")}
+</tr>""")
+
+    table_html = ""
+    if rows:
+        header = (
+            _th("Symbol")
+            + _th("Contract Description")
+            + _th("Contracts", "text-align:right;")
+            + _th("Notional", "text-align:right;")
+        )
+        table_html = f'<div style="margin-top:16px;">{_table(rows, header)}</div>'
+
+    return _section("Futures", _card(_kpi_row(kpis) + table_html))
 
 
 def _render_performance_summary(performance: dict) -> str:
@@ -867,6 +1044,7 @@ def render_eod_email(report_data: Dict[str, Any]) -> str:
         _render_analyst_summary(analyst),
         _render_news_summary(news),
         _render_bond_summary(bonds),
+        _render_futures(holdings),
         _render_fa_topics(fa_topics),
         _render_disclaimer(),
         _render_footer(run_duration_s),
