@@ -429,6 +429,19 @@ def _send_email_gog(
 
 
 def main() -> int:
+    """CLI entry point for generating the EOD portfolio report.
+
+    Report sections assembled into the HTML output include holdings, analyst
+    recommendations, portfolio news, bond analysis, performance, FA discussion
+    topics, and the extended institutional sections: what changed, scenario,
+    cashflow, peer analysis, optimization, rebalance, and synthesis.
+
+    Inputs are provided through CLI flags and matching environment-backed
+    defaults: whether to run the full pipeline first, the recipient email
+    address, whether email delivery is disabled, whether to generate a PDF,
+    the output HTML path, gog delivery settings, and an optional reports
+    directory override.
+    """
     parser = argparse.ArgumentParser(
         description="InvestorClaw end-of-day portfolio report",
         formatter_class=argparse.RawDescriptionHelpFormatter,
