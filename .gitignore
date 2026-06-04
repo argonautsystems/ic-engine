@@ -22,9 +22,11 @@ __pycache__/
 .installed.cfg
 .investorclaw/
 .LSOverride
+.mypy_cache/
 .pytest_cache/
 .Python
 .python/
+.ruff_cache/
 .uv/
 .venv/
 .vscode/
