@@ -6,6 +6,8 @@
   </picture>
 </p>
 
+# spark agentic executor test marker
+
 # InvestorClaw
 
 > Deterministic-first portfolio analysis. Real money math, no LLM math.
