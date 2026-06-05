@@ -947,6 +947,147 @@ class MassiveProvider:
         rows.sort(key=lambda x: x["date"] or "")
         return rows
 
+    # ── Forex (Massive Forex API) ─────────────────────────────────────────
+    # Major/minor forex pairs via /forex/vX REST endpoints. The Massive SDK does
+    # not wrap the forex surface yet, so these call the REST endpoints directly.
+    FOREX_API_BASE = "https://api.massive.com/forex/vX"
+
+    # Canonical forex pair tickers recognised by the Massive forex feed.
+    # Keys are the normalised pair (EUR/USD, GBP/USD, etc.); values are the
+    # ticker string expected by the Massive API.
+    _FOREX_PAIRS = {
+        "EUR/USD": "EUR/USD",
+        "GBP/USD": "GBP/USD",
+        "USD/JPY": "USD/JPY",
+    }
+
+    @classmethod
+    def is_forex_pair(cls, symbol: str) -> bool:
+        """True when ``symbol`` is a recognised forex pair (case-insensitive)."""
+        return str(symbol).strip().upper() in cls._FOREX_PAIRS
+
+    @classmethod
+    def canonical_forex_pair(cls, symbol: str) -> Optional[str]:
+        """Return the canonical slash-delimited forex pair string, or None."""
+        key = str(symbol).strip().upper()
+        return cls._FOREX_PAIRS.get(key)
+
+    def _forex_get(self, path: str, params: Optional[dict] = None) -> Optional[dict]:
+        """GET a /forex/vX endpoint; returns the parsed JSON body or None."""
+        url = f"{self.FOREX_API_BASE}{path}"
+        q = dict(params or {})
+        q["apiKey"] = self.api_key
+        try:
+            resp = requests.get(url, params=q, timeout=15)
+            resp.raise_for_status()
+            data = resp.json()
+            if isinstance(data, dict) and data.get("status") not in (None, "OK", "DELAYED"):
+                logger.warning("Massive forex %s: status=%s", path, data.get("status"))
+            return data
+        except Exception as e:
+            logger.warning("Massive forex GET %s: %s", path, e)
+            return None
+
+    def get_forex_snapshot(self, pair: str) -> Optional[Dict]:
+        """Current snapshot for a forex pair.
+
+        Returns a normalised quote dict with symbol, price, change, pct_change,
+        open, high, low, prev_close, and provider.
+        """
+        canonical = self.canonical_forex_pair(pair)
+        if not canonical:
+            return None
+        data = self._forex_get("/snapshot", {"ticker": canonical})
+        results = (data or {}).get("results") or []
+        if not results:
+            return None
+        r = results[0]
+        session = r.get("session") or {}
+        details = r.get("details") or {}
+        price = session.get("close") or session.get("price") or 0
+        prev_close = session.get("previous_close") or session.get("prev_close") or 0
+        change = session.get("change") or (price - prev_close if price and prev_close else 0)
+        pct_change = session.get("change_percent") or 0
+        if not pct_change and prev_close:
+            pct_change = round((change / prev_close) * 100, 4)
+        return {
+            "symbol": canonical,
+            "price": price if price else 0,
+            "change": change if change else 0,
+            "pct_change": pct_change if pct_change else 0,
+            "open": session.get("open") or 0,
+            "high": session.get("high") or 0,
+            "low": session.get("low") or 0,
+            "prev_close": prev_close,
+            "volume": session.get("volume") or 0,
+            "base_currency": details.get("base_currency") or canonical.split("/")[0],
+            "quote_currency": details.get("quote_currency") or canonical.split("/")[1],
+            "provider": self.NAME,
+        }
+
+    def get_forex_quote(self, pair: str) -> Optional[Dict]:
+        """Alias for :meth:`get_forex_snapshot` — quote-shaped access."""
+        return self.get_forex_snapshot(pair)
+
+    def get_forex_quotes(self, pairs: List[str]) -> Dict[str, Dict]:
+        """Batch forex snapshots for a list of pair tickers."""
+        out: Dict[str, Dict] = {}
+        for pair in pairs:
+            try:
+                snap = self.get_forex_snapshot(pair)
+            except Exception as e:
+                logger.warning("forex snapshot %s: %s", pair, e)
+                snap = None
+            if snap:
+                symbol = snap.get("symbol") or self.canonical_forex_pair(pair) or pair
+                out[symbol] = snap
+        return out
+
+    def get_forex_history(
+        self,
+        pair: str,
+        days: int = 365,
+        resolution: str = "1day",
+    ) -> List[Dict]:
+        """Historical aggregate bars for a forex pair.
+
+        ``resolution`` is a Massive forex resolution string (``1day``,
+        ``1hour``, ``1minute`` ...). Returns oldest-first OHLCV rows.
+        """
+        canonical = self.canonical_forex_pair(pair)
+        if not canonical:
+            return []
+        start = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+        end = datetime.now().strftime("%Y-%m-%d")
+        data = self._forex_get(
+            f"/aggs/{canonical}",
+            {"resolution": resolution, "window_start": start, "window_end": end, "limit": 50000},
+        )
+        rows: List[Dict] = []
+        for r in (data or {}).get("results", []) or []:
+            ts = r.get("window_start") or r.get("timestamp") or r.get("t")
+            dt = None
+            if isinstance(ts, (int, float)):
+                secs = ts / 1e9 if ts > 1e12 else ts / 1000 if ts > 1e10 else ts
+                try:
+                    dt = datetime.fromtimestamp(secs).strftime("%Y-%m-%d")
+                except (OverflowError, OSError, ValueError):
+                    dt = None
+            rows.append(
+                {
+                    "date": dt,
+                    "open": r.get("open") or r.get("o") or 0,
+                    "high": r.get("high") or r.get("h") or 0,
+                    "low": r.get("low") or r.get("l") or 0,
+                    "close": r.get("close") or r.get("c") or 0,
+                    "volume": r.get("volume") or r.get("v") or 0,
+                    "symbol": canonical,
+                    "provider": self.NAME,
+                }
+            )
+        rows.sort(key=lambda x: x["date"] or "")
+        return rows
+
 class AlphaVantageProvider:
     """
     Alpha Vantage REST API provider.
@@ -1392,6 +1533,8 @@ class PriceProvider:
         "history": ["massive", "alpha_vantage", "finnhub", "yfinance"],
         # Futures are CME contract tickers only Massive serves (/futures/vX).
         "futures": ["massive"],
+        # Forex spot quotes: Massive first (paid, real-time), Frankfurter fallback (free).
+        "forex": ["massive", "frankfurter"],
         "news": ["marketaux", "finnhub", "newsapi", "yfinance"],
         "general_news": ["finnhub", "marketaux"],
         "fx": ["frankfurter", "alpha_vantage"],
