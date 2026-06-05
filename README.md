@@ -488,3 +488,4 @@ financial advice.
 | [`ncz-os/mnemos-ic-runtime`](https://github.com/ncz-os/mnemos-ic-runtime) (this repo) | v4.x dockerized-skill bundle + Dockerfile + compose + dashboard |
 | [`argonautsystems/ic-engine`](https://github.com/argonautsystems/ic-engine) | ic-engine analytical Python source (pulled into the container at build time) |
 <!-- confab-fix validation 2026-06-05 SENTINEL_QFX7 -->
+<!-- isolation-fix validation MAIN_PUSH_OK -->
