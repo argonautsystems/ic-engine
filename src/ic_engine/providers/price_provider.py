@@ -559,7 +559,9 @@ class MassiveProvider:
 
         # Try batch snapshot (Starter+ plan only)
         try:
-            data = self._client.get_snapshot_all(market_type="stocks", tickers=symbols)
+            # Support stocks and forex via market_type
+            market = "forex" if any("/" in s for s in symbols) else "stocks"
+            data = self._client.get_snapshot_all(market_type=market, tickers=symbols)
             if data:
                 for t in data:
                     day = getattr(t, "day", None)
