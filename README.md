@@ -1,3 +1,4 @@
+<!-- spark agentic executor verification -->
 <p align="center">
   <picture>
     <source srcset="assets/investorclaw-logo.webp" type="image/webp">
