@@ -86,6 +86,16 @@ question through your agent:
 What's in my portfolio?
 ```
 
+### Apple Silicon (arm64)
+
+`:<ver>-cpu` is a multi-arch manifest, so `docker pull` selects the
+native arm64 image automatically on Apple Silicon. Do **not** force
+`--platform linux/amd64` on an arm64 host: the x86 image requires AVX2,
+which Rosetta and QEMU do not provide, and Polars will segfault at price
+time (`init_state: failed`, `fetch_holdings.py exit_code -11`).
+Maintainers publishing the arm64 layer from an Apple Silicon Mac: see
+[`tools/publish-arm64.sh`](tools/publish-arm64.sh).
+
 Connect your agent — see [SKILL.md](SKILL.md) for per-runtime config
 blocks (Claude Code, Claude Desktop, openclaw, zeroclaw, hermes).
 
