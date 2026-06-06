@@ -59,6 +59,11 @@ unit-tests:
     - export PATH="/usr/local/bin:/home/jasonperlow/.local/bin:$PATH"
   script:
     - uv sync --frozen
+    # Tests under tests/ also import investorclaw_bridge (the MCP/dashboard
+    # layer), which is a separate package with its own deps (structlog,
+    # fastapi, ...). Install it editable into the same venv, as the
+    # Dockerfile does in the image.
+    - uv pip install -e ./bridge
     - uv run investorclaw --version
     - uv run python -c "import ic_engine; print(f'ic_engine v{ic_engine.__version__}')"
     - uv run python -c "import clio; print('vendored clio import ok')"
