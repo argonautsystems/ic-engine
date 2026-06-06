@@ -48,7 +48,7 @@ cd ~/.investorclaw && docker compose up -d
 ```
 
 This starts two containers: `mnemos-os/mnemos-rs:4.2` on
-`localhost:5002` (memory) and `ghcr.io/argonautsystems/ic-engine:4.6.2-cpu` on
+`localhost:5002` (memory) and `ghcr.io/argonautsystems/ic-engine:4.7.0-cpu` on
 `localhost:18090` (portfolio analysis). First boot pulls ~600 MB of
 images; subsequent boots are instant.
 
