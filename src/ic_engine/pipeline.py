@@ -97,7 +97,16 @@ _CDM_SUMMARY_PERCENT_VALUE_KEYS = {
 }
 
 _PIPELINE_SUMMARY_SOURCE_KEY = "_pipeline_source"
-_COMPACT_SUMMARY_BUCKETS = ("equity", "bond", "cash", "margin", "crypto", "futures", "metals")
+_COMPACT_SUMMARY_BUCKETS = (
+    "equity",
+    "bond",
+    "cash",
+    "margin",
+    "crypto",
+    "futures",
+    "metals",
+    "option",
+)
 
 
 def run_full(holdings_file: str, **kwargs):
@@ -271,6 +280,13 @@ def _derive_position_count(portfolio: dict) -> dict:
         if isinstance(bucket, dict):
             counts[key] = len(bucket)
 
+    # Mirror _build_compact_holdings: the "option" count is emitted ONLY
+    # when option positions exist, so legacy option-free summaries keep
+    # their exact pre-options shape.
+    option_bucket = portfolio.get("option")
+    if isinstance(option_bucket, dict) and option_bucket:
+        counts["option"] = len(option_bucket)
+
     return counts
 
 
@@ -394,6 +410,10 @@ def _build_compact_summary_from_buckets(
         crypto_data=bucket_data["crypto"],
         futures_data=bucket_data["futures"],
         metals_data=bucket_data["metals"],
+        # Empty dict when the portfolio has no options, which preserves
+        # _build_compact_holdings' only-emit-option-keys-when-present
+        # behavior (option_value/option_pct/position_count.option).
+        options_data=bucket_data["option"],
     )
 
 

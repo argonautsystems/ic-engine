@@ -236,7 +236,9 @@ class BondAnalyzer:
         yield_30_year, percent floats — e.g. yield_10_year=4.47), so this
         is one request vs nine FRED series. Returns {} on any failure (no
         MASSIVE_API_KEY, no entitlement, network) so the caller falls back
-        to FRED unchanged.
+        to FRED unchanged. A PARTIAL curve (fewer tenors than
+        MASSIVE_TENOR_KEYS) is also treated as failure — benchmark spread
+        matching needs the full curve, so FRED serves it instead.
         """
         try:
             from ic_engine.providers.price_provider import MassiveProvider
@@ -261,11 +263,19 @@ class BondAnalyzer:
                 fetched[tenor] = float(value)
             except (TypeError, ValueError):
                 continue
-        if fetched:
-            logger.info(
-                f"Loaded {len(fetched)}/{len(self.MASSIVE_TENOR_KEYS)} Treasury yields "
-                f"from Massive (curve date {row.get('date', 'unknown')})"
-            )
+        if len(fetched) < len(self.MASSIVE_TENOR_KEYS):
+            # Sparse row (missing tenors) — don't short-circuit FRED with a
+            # partial curve; let the full FRED path serve every tenor.
+            if fetched:
+                logger.info(
+                    f"Massive Treasury curve partial ({len(fetched)}/"
+                    f"{len(self.MASSIVE_TENOR_KEYS)} tenors) — falling back to FRED"
+                )
+            return {}
+        logger.info(
+            f"Loaded {len(fetched)}/{len(self.MASSIVE_TENOR_KEYS)} Treasury yields "
+            f"from Massive (curve date {row.get('date', 'unknown')})"
+        )
         return fetched
 
     def _load_treasury_yields(self):

@@ -26,6 +26,7 @@ column-by-column. No pandas DataFrames are created or used anywhere in this modu
 
 import json
 import logging
+import os
 import re
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -126,6 +127,21 @@ def parse_occ_option_symbol(symbol) -> Optional[Dict]:
     }
 
 
+def _refresh_prices_enabled() -> bool:
+    """Whether live price refresh is enabled (INVESTOR_CLAW_REFRESH_PRICES).
+
+    Default true: live prices are fetched and broker CSV prices are the
+    fallback. Set to false/0/no to use broker-snapshot prices as-is — that
+    contract applies to EVERY live price source, including the Massive
+    crypto snapshot pre-fetch, not just the generic equity provider chain.
+    """
+    return os.environ.get("INVESTOR_CLAW_REFRESH_PRICES", "true").strip().lower() not in (
+        "0",
+        "false",
+        "no",
+    )
+
+
 def _build_massive_provider():
     """MassiveProvider instance or None — never raises.
 
@@ -134,8 +150,6 @@ def _build_massive_provider():
     import/SDK failure must degrade to broker/yfinance data, never crash
     holdings ingest.
     """
-    import os
-
     if not os.environ.get("MASSIVE_API_KEY"):
         logger.debug("MASSIVE_API_KEY not set — Massive surfaces disabled")
         return None
@@ -1389,11 +1403,7 @@ class PortfolioFetcher:
         # INVESTOR_CLAW_REFRESH_PRICES=true (default): always fetch live prices; broker CSV
         # prices are only used as a fallback when the provider fails.
         # INVESTOR_CLAW_REFRESH_PRICES=false: use broker-snapshot prices as-is (old behaviour).
-        import os as _os
-
-        _refresh_prices = _os.environ.get(
-            "INVESTOR_CLAW_REFRESH_PRICES", "true"
-        ).strip().lower() not in ("0", "false", "no")
+        _refresh_prices = _refresh_prices_enabled()
 
         needs_live = []
         broker_only = {}
@@ -1943,7 +1953,10 @@ class PortfolioFetcher:
         pricing rather than failing the position.
         """
         option_data: Dict = {}
-        provider = _build_massive_provider()  # None when no key — guarded
+        # Honor the no-refresh contract: with INVESTOR_CLAW_REFRESH_PRICES=false
+        # skip the live snapshot and degrade to the broker CSV chain, same as
+        # crypto and equities.
+        provider = _build_massive_provider() if _refresh_prices_enabled() else None
 
         for idx, row in enumerate(options_df.to_dicts()):
             raw_sym = str(row.get("symbol") or "").strip()
@@ -2134,9 +2147,11 @@ class PortfolioFetcher:
                         logger.warning(f"Massive FX {ccy}→USD failed: {e}")
                         res = None
                     if res:
-                        # 'converted' of a 1.0-unit amount IS the rate;
-                        # 'rate' (last ask/bid) may be absent from the envelope.
-                        rate = res.get("rate") or res.get("converted")
+                        # 'converted' of a 1.0-unit amount IS the rate (the
+                        # server-side conversion we asked for); 'rate' (last
+                        # ask/bid) is a fallback for envelopes that omit
+                        # 'converted'.
+                        rate = res.get("converted") or res.get("rate")
                 rates[ccy] = float(rate) if rate else None
                 if rates[ccy]:
                     logger.info(f"FX rate {ccy}→USD = {rates[ccy]:.4f} (massive)")
@@ -2588,7 +2603,14 @@ class PortfolioFetcher:
                     if "symbol" in crypto_df.columns
                     else []
                 )
-                _crypto_overrides = self._fetch_massive_crypto_quotes(_crypto_syms)
+                # Honor the no-refresh contract: with
+                # INVESTOR_CLAW_REFRESH_PRICES=false broker-snapshot prices
+                # are used as-is, so don't hit the Massive crypto snapshot.
+                _crypto_overrides = (
+                    self._fetch_massive_crypto_quotes(_crypto_syms)
+                    if _refresh_prices_enabled()
+                    else {}
+                )
                 _crypto = self.fetch_equity_holdings(crypto_df, quote_overrides=_crypto_overrides)
                 for _k, _h in _crypto.items():
                     _h.asset_type = "crypto"

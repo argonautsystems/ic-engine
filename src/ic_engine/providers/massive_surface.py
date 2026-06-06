@@ -43,7 +43,9 @@ class MassiveSurfaceMixin:
     SURFACE_TIMEOUT = 15
 
     # Endpoint families confirmed 403 (not entitled) get parked here at
-    # runtime so we never hammer a gated surface.
+    # runtime so we never hammer a gated surface. MassiveProvider.__init__
+    # initializes this eagerly (thread-safe); the hasattr guard in
+    # _surface_get is belt-and-suspenders for any other host class.
     _not_entitled: set
 
     def _surface_get(self, path: str, params: Optional[dict] = None) -> Optional[dict]:

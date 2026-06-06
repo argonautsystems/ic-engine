@@ -321,6 +321,10 @@ def _project_equity_dividends_massive(
 
     events: List[CashflowEvent] = []
     latest_date: Optional[date] = None
+    # Forward projection anchors on the latest REGULAR (frequency > 0) row:
+    # a special dividend (frequency=0) arriving after the regular cadence
+    # must not suppress projection — specials stay dated events only.
+    reg_latest_date: Optional[date] = None
     per_share = 0.0
     freq = 0
     for row in rows:  # newest-first by ex-date
@@ -330,11 +334,14 @@ def _project_equity_dividends_massive(
             continue
         if latest_date is None or d > latest_date:
             latest_date = d
+        try:
+            row_freq = int(row.get("frequency") or 0)
+        except (TypeError, ValueError):
+            row_freq = 0
+        if row_freq > 0 and (reg_latest_date is None or d > reg_latest_date):
+            reg_latest_date = d
             per_share = amt
-            try:
-                freq = int(row.get("frequency") or 0)
-            except (TypeError, ValueError):
-                freq = 0
+            freq = row_freq
         # Declared rows landing inside the window are real dated events.
         if today <= d <= horizon_end:
             events.append(
@@ -349,17 +356,19 @@ def _project_equity_dividends_massive(
                 )
             )
 
-    if latest_date is None or per_share <= 0:
+    if latest_date is None:
         # Rows existed but were unusable — let yfinance have a go.
         return None
 
-    # Project beyond the last declared row using the declared frequency
-    # (payments/year: 1, 2, 4, 12...; 0 = one-time special → no projection).
-    # Anchoring on the latest declared row means projections start strictly
-    # after every declared event, so no double-counting is possible.
-    if freq > 0:
+    # Project beyond the last declared REGULAR row using its declared
+    # frequency (payments/year: 1, 2, 4, 12...). Specials (frequency=0)
+    # never seed the projection — they were emitted above as dated events
+    # only. Anchoring on the latest regular row means projections start
+    # strictly after every declared regular event, so no double-counting
+    # is possible.
+    if freq > 0 and per_share > 0 and reg_latest_date is not None:
         cadence = max(1, round(365 / freq))
-        next_date = latest_date + timedelta(days=cadence)
+        next_date = reg_latest_date + timedelta(days=cadence)
         while next_date <= today:
             next_date += timedelta(days=cadence)
         while next_date <= horizon_end:

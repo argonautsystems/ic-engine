@@ -34,6 +34,7 @@ import logging
 import os
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -202,6 +203,11 @@ class ParallelAnalystFetcher:
         self.errors: List[Tuple[str, str]] = []
         self.metrics: List[FetchMetrics] = []
 
+        # Guards the lazy MassiveProvider cache in _get_massive_provider so
+        # tier-2 thread fan-outs can't check-then-set concurrently and build
+        # duplicate provider instances.
+        self._massive_provider_lock = threading.Lock()
+
         # Notifications
         self.notification_handler = NotificationHandler(self.output_dir)
 
@@ -242,20 +248,31 @@ class ParallelAnalystFetcher:
         mp = getattr(self, "_massive_provider", None)
         if mp is not None:
             return mp or None  # False sentinel → None
-        try:
-            from ic_engine.providers.price_provider import MassiveProvider
+        # Lock so concurrent tier-2 threads can't both miss the cache and
+        # construct duplicate providers (check-then-set race). Lazy getattr
+        # keeps backward compatibility with instances created before
+        # __init__ grew the lock (e.g. unpickled/stubbed in tests).
+        lock = getattr(self, "_massive_provider_lock", None)
+        if lock is None:
+            lock = self._massive_provider_lock = threading.Lock()
+        with lock:
+            mp = getattr(self, "_massive_provider", None)
+            if mp is not None:
+                return mp or None
+            try:
+                from ic_engine.providers.price_provider import MassiveProvider
 
-            mp = MassiveProvider()  # reads MASSIVE_API_KEY; ValueError when unset
-        except (ImportError, ValueError) as e:
-            logger.debug(f"Massive unavailable for analyst ratings: {e}")
-            mp = False
-        except Exception as e:
-            # Any other construction failure also means "skip Massive" —
-            # the yfinance→provider chain below keeps working regardless.
-            logger.debug(f"MassiveProvider init failed: {e}")
-            mp = False
-        self._massive_provider = mp
-        return mp or None
+                mp = MassiveProvider()  # reads MASSIVE_API_KEY; ValueError when unset
+            except (ImportError, ValueError) as e:
+                logger.debug(f"Massive unavailable for analyst ratings: {e}")
+                mp = False
+            except Exception as e:
+                # Any other construction failure also means "skip Massive" —
+                # the yfinance→provider chain below keeps working regardless.
+                logger.debug(f"MassiveProvider init failed: {e}")
+                mp = False
+            self._massive_provider = mp
+            return mp or None
 
     def _fetch_via_massive(
         self, symbol: str, start: float
@@ -285,6 +302,33 @@ class ParallelAnalystFetcher:
             total = int(r.get("total_analysts") or 0) or (buy_count + hold_count + sell_count)
             if total <= 0:
                 return None
+
+            # recommendation_mean orientation: ic-engine uses the
+            # yfinance/Finnhub 1-5 scale (1 = strong buy … 5 = sell).
+            # Benzinga's consensus_rating_value is INVERTED (5 = strong buy:
+            # AAPL served 4.0 alongside consensus "buy"), so reorient with
+            # 6 - value. When the value is missing, derive the mean from the
+            # rating distribution directly in yfinance orientation.
+            recommendation_mean: Optional[float] = None
+            rating_value = r.get("rating_value")
+            if rating_value is not None:
+                try:
+                    rv = float(rating_value)
+                    if 1.0 <= rv <= 5.0:
+                        recommendation_mean = round(6.0 - rv, 2)
+                except (TypeError, ValueError):
+                    pass
+            if recommendation_mean is None:
+                sb = int(r.get("strong_buy") or 0)
+                b = int(r.get("buy") or 0)
+                h = int(r.get("hold") or 0)
+                s = int(r.get("sell") or 0)
+                ss = int(r.get("strong_sell") or 0)
+                dist_total = sb + b + h + s + ss
+                if dist_total > 0:
+                    recommendation_mean = round(
+                        (1 * sb + 2 * b + 3 * h + 4 * s + 5 * ss) / dist_total, 2
+                    )
 
             rating = r.get("rating")
             consensus_rec = (
@@ -323,7 +367,7 @@ class ParallelAnalystFetcher:
                 target_price_low=r.get("target_low"),
                 target_price_current=current_price,
                 analyst_count=total,
-                recommendation_mean=None,  # Benzinga consensus has no 1-5 scale here
+                recommendation_mean=recommendation_mean,
                 data_source="Massive Benzinga",
                 data_timestamp=datetime.now().isoformat(),
                 fetch_time_ms=int((time.time() - start) * 1000),
