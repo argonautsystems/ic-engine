@@ -107,9 +107,15 @@ class Holding(BaseModel):
     purchase_price: Optional[float] = Field(None, description="Original purchase price")
     purchase_date: Optional[str] = Field(None, description="Date purchased (YYYY-MM-DD)")
     asset_type: str = Field(
-        "equity", description="Asset class: equity, bond, cash, crypto, futures, metals"
+        "equity",
+        description=(
+            "Asset class: equity, bond, cash, crypto, futures, metals, option "
+            "(aliases: options, call, put, equity_option)"
+        ),
     )
     account: Optional[str] = Field(None, description="Account name/type")
+    # Per-holding currency override; Portfolio.currency remains the default.
+    currency: str = Field("USD", description="ISO 4217 currency of price/value fields")
 
     @field_validator("purchase_date")
     @classmethod
@@ -194,6 +200,10 @@ def convert_cdm_to_canonical(cdm_data: Union[Dict[str, Any], CDMInput]) -> Portf
                     asset_type = "cash"
                 elif "crypto" in sec_type:
                     asset_type = "crypto"
+                # Option check BEFORE future so "futures option" / "FOP"
+                # security types classify as option, not futures (mirrors schema.py).
+                elif "option" in sec_type:
+                    asset_type = "option"
                 elif "future" in sec_type:
                     asset_type = "futures"
                 elif "commodity" in sec_type or "metal" in sec_type:

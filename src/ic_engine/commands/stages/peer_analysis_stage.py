@@ -101,10 +101,22 @@ class PeerAnalysisStage(PipelineStage):
                     compare=["QQQ", "IVV", "AGG"],
                 )
 
+                data = result if isinstance(result, dict) else {"peer_analysis": result}
+
+                # Additive Massive enrichment: real index levels (SPX/NDX/DJI)
+                # alongside the ETF-proxy benchmark path (which stays as-is).
+                # Best-effort — skipped silently when Massive is absent.
+                try:
+                    index_snapshots = self._fetch_index_snapshots()
+                    if index_snapshots:
+                        data["index_snapshots"] = index_snapshots
+                except Exception as e:
+                    logger.debug(f"index_snapshots enrichment skipped: {e}")
+
                 return StageResult(
                     stage_name=self.stage_name,
                     status="success",
-                    data=result if isinstance(result, dict) else {"peer_analysis": result},
+                    data=data,
                     _metadata={
                         "equities_analyzed": sum(
                             1 for p in portfolio.positions if p.asset_class == "equity"
@@ -131,3 +143,31 @@ class PeerAnalysisStage(PipelineStage):
                 status="failed",
                 error=str(e),
             )
+
+    _INDEX_TICKERS = ("SPX", "NDX", "DJI")
+
+    @classmethod
+    def _fetch_index_snapshots(cls) -> dict:
+        """Real index snapshots (SPX/NDX/DJI) via Massive — one provider
+        instance, 3 calls. Best-effort: {} when Massive is absent; indices
+        that fail are omitted."""
+        import os
+
+        if not os.getenv("MASSIVE_API_KEY"):
+            return {}
+        try:
+            from ic_engine.providers.price_provider import MassiveProvider
+
+            provider = MassiveProvider()
+        except Exception as e:
+            logger.debug(f"Massive unavailable for index snapshots: {e}")
+            return {}
+        out: dict = {}
+        for idx in cls._INDEX_TICKERS:
+            try:
+                snap = provider.get_index_snapshot(idx)
+                if snap:
+                    out[idx] = snap
+            except Exception as e:
+                logger.debug(f"index_snapshot({idx}) failed: {e}")
+        return out

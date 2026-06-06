@@ -26,6 +26,7 @@ column-by-column. No pandas DataFrames are created or used anywhere in this modu
 
 import json
 import logging
+import os
 import re
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -61,6 +62,104 @@ logging.basicConfig(level=logging.WARNING, format="%(asctime)s - %(levelname)s -
 logger = logging.getLogger(__name__)
 
 _SECTOR_CACHE_FILE = Path(__file__).parent.parent / "portfolios" / ".sector_cache.json"
+
+# OCC / broker option symbol grammar: [TICKER][YYMMDD][C|P][STRIKE].
+# Accepts the canonical OCC layouts ("AAPL 251219C00300000",
+# "O:AAPL251219C00300000" — possibly space-padded to 6-char ticker) and the
+# loose leading-dash broker form ("-AAPL251219C300", strike unpadded and
+# possibly fractional). Anchored ^...$ so ordinary tickers can never match:
+# the mandatory 6-digit date + C/P + strike digits rule out equity symbols.
+_OCC_OPTION_RE = re.compile(
+    r"^(?:O:|-)?"  # optional Massive prefix or broker leading dash
+    r"(?P<ticker>[A-Z][A-Z0-9]{0,5})"  # underlying root, 1-6 chars
+    r"[ _.]*"  # OCC space padding / broker separators
+    r"(?P<date>\d{6})"  # YYMMDD expiration
+    r"(?P<cp>[CP])"  # call/put flag
+    r"(?P<strike>\d{1,8}(?:\.\d+)?)$"  # strike: OCC 8-digit or literal
+)
+
+
+def parse_occ_option_symbol(symbol) -> Optional[Dict]:
+    """Parse an OCC-style option symbol defensively. None when not an option.
+
+    Returns {underlying, expiration (YYYY-MM-DD), contract_type ('call'|'put'),
+    strike (dollars), occ_ticker (normalized O:TICKERYYMMDD[C/P]NNNNNNNN)}.
+
+    Strike decoding rule: the canonical OCC tail is exactly 8 digits encoding
+    strike × 1000 ("00300000" → 300.0); anything shorter or containing a
+    decimal point is a broker short form carrying the literal strike ("300",
+    "300.5"). Strikes never reach the $10M an unpadded 8-digit literal would
+    imply, so the 8-digit test is unambiguous in practice.
+    """
+    if not symbol:
+        return None
+    s = str(symbol).strip().upper()
+    m = _OCC_OPTION_RE.match(s)
+    if not m:
+        return None
+    raw_date = m.group("date")
+    try:
+        # strptime %y pivots 00-68 → 2000s, which covers all live expirations.
+        expiration = datetime.strptime(raw_date, "%y%m%d").strftime("%Y-%m-%d")
+    except ValueError:
+        # 6 digits that aren't a real date (e.g. a numeric ID) — not an option.
+        return None
+    raw_strike = m.group("strike")
+    try:
+        if "." not in raw_strike and len(raw_strike) == 8:
+            strike = int(raw_strike) / 1000.0  # canonical OCC: strike × 1000
+        else:
+            strike = float(raw_strike)  # broker literal form
+    except ValueError:
+        return None
+    if strike <= 0:
+        return None
+    ticker = m.group("ticker")
+    cp = m.group("cp")
+    return {
+        "underlying": ticker,
+        "expiration": expiration,
+        "contract_type": "call" if cp == "C" else "put",
+        "strike": strike,
+        # Massive's options surface wants the strict OCC form:
+        # strike × 1000, zero-padded to 8 digits.
+        "occ_ticker": f"O:{ticker}{raw_date}{cp}{int(round(strike * 1000)):08d}",
+    }
+
+
+def _refresh_prices_enabled() -> bool:
+    """Whether live price refresh is enabled (INVESTOR_CLAW_REFRESH_PRICES).
+
+    Default true: live prices are fetched and broker CSV prices are the
+    fallback. Set to false/0/no to use broker-snapshot prices as-is — that
+    contract applies to EVERY live price source, including the Massive
+    crypto snapshot pre-fetch, not just the generic equity provider chain.
+    """
+    return os.environ.get("INVESTOR_CLAW_REFRESH_PRICES", "true").strip().lower() not in (
+        "0",
+        "false",
+        "no",
+    )
+
+
+def _build_massive_provider():
+    """MassiveProvider instance or None — never raises.
+
+    The Massive surfaces used here (option snapshots, crypto snapshots, FX
+    conversion) are best-effort enhancements: a missing MASSIVE_API_KEY or an
+    import/SDK failure must degrade to broker/yfinance data, never crash
+    holdings ingest.
+    """
+    if not os.environ.get("MASSIVE_API_KEY"):
+        logger.debug("MASSIVE_API_KEY not set — Massive surfaces disabled")
+        return None
+    try:
+        from ic_engine.providers.price_provider import MassiveProvider
+
+        return MassiveProvider()
+    except Exception as e:
+        logger.warning(f"MassiveProvider unavailable: {e}")
+        return None
 
 
 def _detect_espp_accounts(equity_df: pl.DataFrame) -> Dict[str, List[str]]:
@@ -364,20 +463,23 @@ def _build_compact_holdings(
     crypto_data: Optional[dict] = None,
     futures_data: Optional[dict] = None,
     metals_data: Optional[dict] = None,
+    options_data: Optional[dict] = None,
 ) -> dict:
     """Build a compact holdings summary for LLM injection (~8-15KB vs 290KB full CDM).
 
     Returns a dict with portfolio totals, top equity positions, sector weights,
     and bond/cash summary — sufficient for LLM analysis without the full CDM payload.
 
-    CDM 5 extension: ``crypto_data``, ``futures_data``, ``metals_data`` are optional;
-    when non-empty, their totals and top-N lists are added to the summary.
+    CDM 5 extension: ``crypto_data``, ``futures_data``, ``metals_data``,
+    ``options_data`` are optional; when non-empty, their totals and top-N
+    lists are added to the summary.
     """
     from datetime import date as _date
 
     crypto_data = crypto_data or {}
     futures_data = futures_data or {}
     metals_data = metals_data or {}
+    options_data = options_data or {}
 
     equity_value = sum(h.value for h in equity_data.values())
     bond_value = sum(h.value for h in bond_data.values())
@@ -386,6 +488,7 @@ def _build_compact_holdings(
     crypto_value = sum(h.value for h in crypto_data.values())
     futures_value = sum(h.value for h in futures_data.values())
     metals_value = sum(h.value for h in metals_data.values())
+    option_value = sum(h.value for h in options_data.values())
     net_value = total_value - abs(margin_value)
 
     # Equity positions sorted by market value descending
@@ -523,12 +626,24 @@ def _build_compact_holdings(
                 _entry["metal_type"] = _h.metal_type
             if getattr(_h, "troy_oz", None) is not None:
                 _entry["troy_oz"] = _h.troy_oz
+            # Option contract fields
+            if getattr(_h, "underlying", None):
+                _entry["underlying"] = _h.underlying
+            if getattr(_h, "contract_type", None):
+                _entry["contract_type"] = _h.contract_type
+            if getattr(_h, "strike", None) is not None:
+                _entry["strike"] = _h.strike
+            if getattr(_h, "expiration", None):
+                _entry["expiration"] = _h.expiration
+            if getattr(_h, "contracts", None) is not None:
+                _entry["contracts"] = _h.contracts
             out.append(_entry)
         return out
 
     top_crypto = _top_n(crypto_data) if crypto_data else []
     top_futures = _top_n(futures_data) if futures_data else []
     top_metals = _top_n(metals_data) if metals_data else []
+    top_options = _top_n(options_data) if options_data else []
 
     compact = {
         "disclaimer": "EDUCATIONAL ANALYSIS - NOT INVESTMENT ADVICE",
@@ -578,6 +693,19 @@ def _build_compact_holdings(
         compact["top_futures"] = top_futures
     if top_metals:
         compact["top_metals"] = top_metals
+    if top_options:
+        compact["top_options"] = top_options
+    # Option summary keys are emitted ONLY when an options bucket exists —
+    # unlike the crypto/futures/metals always-present keys. WHY: legacy
+    # consumers (pipeline.py's fallback summary builder and its exact-shape
+    # contract) predate options and don't pass options_data; always-on zero
+    # keys would change the summary shape for every existing portfolio.
+    if options_data:
+        compact["summary"]["option_value"] = round(option_value, 2)
+        compact["summary"]["option_pct"] = (
+            round(option_value / total_value * 100, 1) if total_value else 0
+        )
+        compact["summary"]["position_count"]["option"] = len(options_data)
     # Include ESPP-adjusted sector breakdown when ESPP positions are present
     if espp_sector_pct:
         compact["sector_weights_ex_espp"] = sector_weights_ex_espp
@@ -625,6 +753,8 @@ class PortfolioFetcher:
         self.crypto_data: dict = {}
         self.futures_data: dict = {}
         self.metals_data: dict = {}
+        # Options bucket — OCC-symbol positions detected by normalize step 7
+        self.option_data: dict = {}
         self.errors = []
 
     def _normalize_broker_columns(self, df: pl.DataFrame) -> pl.DataFrame:
@@ -707,6 +837,24 @@ class PortfolioFetcher:
                 .then(pl.lit(None, dtype=pl.Utf8))
                 .otherwise(pl.col("cusip").cast(pl.Utf8).str.strip_chars())
                 .alias("cusip")
+            )
+
+        # 5b. Normalize optional currency column: uppercase ISO code; blank /
+        # N/A / null → USD so the FX pass can key off clean codes. Brokers
+        # only emit this column on multi-currency exports — absence means USD.
+        if "currency" in df.columns:
+            df = df.with_columns(
+                pl.when(
+                    pl.col("currency").is_null()
+                    | pl.col("currency")
+                    .cast(pl.Utf8)
+                    .str.strip_chars()
+                    .str.to_lowercase()
+                    .is_in(["n/a", "nan", "none", ""])
+                )
+                .then(pl.lit("USD"))
+                .otherwise(pl.col("currency").cast(pl.Utf8).str.strip_chars().str.to_uppercase())
+                .alias("currency")
             )
 
         # 6. Add 'name' alias from 'description' if missing (bond handler needs it)
@@ -824,6 +972,23 @@ class PortfolioFetcher:
                 else pl.lit(False)
             )
 
+            # Options: OCC-style [TICKER][YYMMDD][C|P][strike] symbols
+            # ("AAPL 251219C00300000", "O:AAPL...", "-AAPL251219C300").
+            # Classified via the same parse_occ_option_symbol grammar the
+            # option pricer uses — mirroring the futures pattern above — so
+            # the asset_type bucket matches exactly what can be normalized
+            # to an OCC ticker for Massive's option-contract snapshot. A
+            # divergent inline regex would leave rows bucketed as option
+            # but unpriceable (or vice versa).
+            option_by_symbol = (
+                pl.col("symbol").map_elements(
+                    lambda s: bool(s) and parse_occ_option_symbol(str(s)) is not None,
+                    return_dtype=pl.Boolean,
+                )
+                if has_symbol
+                else pl.lit(False)
+            )
+
             # Metals: description contains precious-metal keywords AND not a bond (no CUSIP)
             _metals_pattern = r"gold|silver|platinum|palladium|precious metal|bullion"
             metals_by_desc = (
@@ -841,13 +1006,17 @@ class PortfolioFetcher:
             # Classification order matters. Precedence (first match wins):
             #   1. cash_by_desc           — explicit cash keywords in description
             #   2. bond_by_cusip          — 9-char alphanumeric CUSIP
-            #   3. crypto_by_symbol       — unambiguous -USD suffix / known tickers
-            #   4. futures_by_symbol      — /ESZ25-style contract codes
-            #   5. metals_by_desc         — precious-metal keywords in description
+            #   3. option_by_symbol       — OCC option symbols (BEFORE crypto/
+            #      futures: the strict anchored grammar makes false positives
+            #      impossible, and an OCC symbol must never fall through to a
+            #      looser pattern)
+            #   4. crypto_by_symbol       — unambiguous -USD suffix / known tickers
+            #   5. futures_by_symbol      — /ESZ25-style contract codes
+            #   6. metals_by_desc         — precious-metal keywords in description
             #      (placed BEFORE cash_by_null so a metals row with null symbol
             #      and null CUSIP is not swept into the cash bucket)
-            #   6. cash_by_null           — null symbol + null CUSIP catch-all
-            #   7. equity                 — default
+            #   7. cash_by_null           — null symbol + null CUSIP catch-all
+            #   8. equity                 — default
             _inferred = (
                 pl.when(cash_by_desc)
                 .then(pl.lit("cash"))
@@ -855,6 +1024,8 @@ class PortfolioFetcher:
                 .then(pl.lit("municipal_bond"))
                 .when(bond_by_cusip)
                 .then(pl.lit("bond"))
+                .when(option_by_symbol)
+                .then(pl.lit("option"))
                 .when(crypto_by_symbol)
                 .then(pl.lit("crypto"))
                 .when(futures_by_symbol)
@@ -1068,8 +1239,15 @@ class PortfolioFetcher:
 
         return df
 
-    def fetch_equity_holdings(self, equity_df: pl.DataFrame) -> Dict:
+    def fetch_equity_holdings(
+        self, equity_df: pl.DataFrame, quote_overrides: Optional[Dict[str, Dict]] = None
+    ) -> Dict:
         """Fetch current prices for equity positions.
+
+        ``quote_overrides`` maps raw CSV symbol → quote dict ({price, provider})
+        fetched by the caller from an authoritative source (e.g. Massive crypto
+        snapshots). Overridden symbols skip the generic provider chain entirely;
+        everything else falls through to it as before.
 
         By default (INVESTOR_CLAW_REFRESH_PRICES=true), live prices are always fetched
         from the configured price provider.  Broker-supplied prices from the CSV are kept
@@ -1225,11 +1403,7 @@ class PortfolioFetcher:
         # INVESTOR_CLAW_REFRESH_PRICES=true (default): always fetch live prices; broker CSV
         # prices are only used as a fallback when the provider fails.
         # INVESTOR_CLAW_REFRESH_PRICES=false: use broker-snapshot prices as-is (old behaviour).
-        import os as _os
-
-        _refresh_prices = _os.environ.get(
-            "INVESTOR_CLAW_REFRESH_PRICES", "true"
-        ).strip().lower() not in ("0", "false", "no")
+        _refresh_prices = _refresh_prices_enabled()
 
         needs_live = []
         broker_only = {}
@@ -1283,6 +1457,19 @@ class PortfolioFetcher:
             else:
                 needs_live.append(sym)
 
+        # Caller-supplied authoritative quotes (e.g. Massive crypto snapshots)
+        # are the FIRST price source: seed them and drop those symbols from the
+        # live-fetch list so the generic provider chain (yfinance et al.) only
+        # prices the leftovers — i.e. stays a fallback, never a competitor.
+        quotes: Dict[str, Dict] = {}
+        if quote_overrides:
+            for _osym, _oq in quote_overrides.items():
+                if _oq and _oq.get("price"):
+                    quotes[_osym] = _oq
+            if quotes:
+                needs_live = [s for s in needs_live if s not in quotes]
+                logger.info(f"Using {len(quotes)} caller-supplied quotes (override source)")
+
         if needs_live:
             _mode = "refresh" if _refresh_prices else "no broker price"
             logger.info(f"Live price fetch for {len(needs_live)} symbols ({_mode})")
@@ -1292,11 +1479,10 @@ class PortfolioFetcher:
             )
 
         # Batch price fetch for symbols without broker prices (use real tickers, not compound keys)
-        quotes: Dict[str, Dict] = {}
         if needs_live:
             try:
                 provider = PriceProvider()
-                quotes = provider.get_quotes(list(dict.fromkeys(needs_live)))  # dedup tickers
+                quotes.update(provider.get_quotes(list(dict.fromkeys(needs_live))))  # dedup
             except Exception as e:
                 logger.error(f"PriceProvider.get_quotes failed: {e}")
 
@@ -1488,6 +1674,10 @@ class PortfolioFetcher:
                     "discretionary" if _is_managed_account(_account, _managed_accounts) else None
                 )
 
+                # Native currency of the broker row; non-USD holdings get
+                # converted to USD later by _apply_fx_conversions().
+                _currency = str(row.get("currency") or "USD").strip().upper() or "USD"
+
                 # Create Holding object (current CDM-compatible interface).
                 # Key is agg_key (sym in single_investor, sym__account in fa_professional).
                 # Holding.symbol is always the real ticker regardless of mode.
@@ -1509,6 +1699,7 @@ class PortfolioFetcher:
                     managed_status=_managed_status,
                     explicit_unrealized_gain_loss=explicit_unrealized,
                     explicit_unrealized_gain_loss_pct=explicit_unrealized_pct,
+                    currency=_currency,
                 )
                 logger.info(f"{sym}: {shares} shares @ ${current_price:.2f} = ${value:,.2f}")
 
@@ -1641,6 +1832,8 @@ class PortfolioFetcher:
                     market_value=float(value),
                     explicit_unrealized_gain_loss=explicit_unrealized,
                     explicit_unrealized_gain_loss_pct=explicit_unrealized_pct,
+                    # Non-USD bonds get converted by _apply_fx_conversions()
+                    currency=str(row.get("currency") or "USD").strip().upper() or "USD",
                 )
                 logger.info(
                     f"{cusip} ({bond_name}): {quantity} bonds @ ${current_price:.2f} = ${value:,.2f}"
@@ -1702,6 +1895,8 @@ class PortfolioFetcher:
                     name=str(desc)[:80],
                     interest_rate=float(interest_rate),
                     market_value=float(amount),
+                    # Foreign-currency cash balances get converted by _apply_fx_conversions()
+                    currency=str(row.get("currency") or "USD").strip().upper() or "USD",
                 )
                 logger.info(f"{key}: ${amount:,.2f} (rate: {interest_rate * 100:.2f}%)")
 
@@ -1748,6 +1943,237 @@ class PortfolioFetcher:
 
         return margin_data
 
+    def fetch_option_holdings(self, options_df: pl.DataFrame) -> Dict:
+        """Price OCC equity option positions via Massive option snapshots.
+
+        Massive is the only routed provider with an options surface (the
+        generic equity quote chain cannot quote OCC tickers), so the chain
+        here is: Massive contract snapshot → broker CSV price → broker CSV
+        market_value. A missing MASSIVE_API_KEY degrades to snapshot-of-import
+        pricing rather than failing the position.
+        """
+        option_data: Dict = {}
+        # Honor the no-refresh contract: with INVESTOR_CLAW_REFRESH_PRICES=false
+        # skip the live snapshot and degrade to the broker CSV chain, same as
+        # crypto and equities.
+        provider = _build_massive_provider() if _refresh_prices_enabled() else None
+
+        for idx, row in enumerate(options_df.to_dicts()):
+            raw_sym = str(row.get("symbol") or "").strip()
+            try:
+                parsed = parse_occ_option_symbol(raw_sym)
+                if parsed is None:
+                    # asset_type said "option" but the symbol isn't parseable
+                    # (manually-tagged exotic row) — keep it, price from broker.
+                    logger.warning(f"{raw_sym}: option row with non-OCC symbol")
+
+                # Contract count: broker QUANTITY column. Short positions are
+                # negative; default 1 only when truly absent.
+                try:
+                    contracts = float(row.get("shares")) if row.get("shares") is not None else 1.0
+                except (ValueError, TypeError):
+                    contracts = 1.0
+
+                try:
+                    broker_price = float(row.get("price")) if row.get("price") is not None else None
+                except (ValueError, TypeError):
+                    broker_price = None
+                try:
+                    broker_mv = (
+                        float(row.get("market_value"))
+                        if row.get("market_value") is not None
+                        else None
+                    )
+                except (ValueError, TypeError):
+                    broker_mv = None
+
+                # 1st source: Massive single-contract snapshot (live premium + greeks)
+                snap = None
+                if provider is not None and parsed is not None:
+                    try:
+                        snap = provider.get_option_contract_snapshot(
+                            parsed["underlying"], parsed["occ_ticker"]
+                        )
+                    except Exception as e:
+                        logger.warning(f"Massive option snapshot {raw_sym}: {e}")
+                        snap = None
+
+                if snap and snap.get("price"):
+                    current_price = float(snap["price"])
+                    data_provider = "massive"
+                elif broker_price and broker_price > 0:
+                    current_price = broker_price
+                    data_provider = "broker"
+                elif broker_mv and contracts:
+                    # Only a dollar value in the CSV: back out the per-share
+                    # premium so value recomputes to exactly the broker value.
+                    current_price = broker_mv / (contracts * 100.0)
+                    data_provider = "broker_value"
+                else:
+                    logger.warning(f"{raw_sym}: no option price from Massive or broker — skipped")
+                    self.errors.append(f"Option error: no price for {raw_sym}")
+                    continue
+
+                try:
+                    purchase_price = (
+                        float(row.get("purchase_price"))
+                        if row.get("purchase_price") is not None
+                        else None
+                    )
+                except (ValueError, TypeError):
+                    purchase_price = None
+                if not purchase_price:
+                    purchase_price = current_price
+
+                # Snapshot metadata (greeks/OI) is analysis-grade context, not a
+                # Holding field — stash in metadata for downstream consumers.
+                _meta: Dict = {}
+                if snap:
+                    for _mk in ("delta", "open_interest", "implied_volatility", "break_even"):
+                        if snap.get(_mk) is not None:
+                            _meta[_mk] = snap[_mk]
+
+                key = parsed["occ_ticker"] if parsed else f"{raw_sym}_{idx}"
+                if key in option_data:
+                    key = f"{key}_{idx}"  # same contract in two accounts
+
+                option_data[key] = Holding(
+                    symbol=raw_sym or key,
+                    asset_type="option",
+                    shares=contracts,
+                    current_price=current_price,
+                    purchase_price=purchase_price,
+                    purchase_date=str(row.get("purchase_date", "N/A")),
+                    sector="Options",
+                    account=row.get("account") or row.get("source"),
+                    data_provider=data_provider,
+                    underlying=(parsed or {}).get("underlying"),
+                    contract_type=(parsed or {}).get("contract_type")
+                    or (snap or {}).get("contract_type"),
+                    strike=(parsed or {}).get("strike"),
+                    expiration=(parsed or {}).get("expiration"),
+                    contracts=contracts,
+                    # market_value stays None so Holding.value computes the
+                    # standard premium × 100 × contracts (the CSV's VALUE
+                    # column already equals that; recomputing keeps live
+                    # Massive premiums authoritative).
+                    market_value=None,
+                    metadata=_meta,
+                    currency=str(row.get("currency") or "USD").strip().upper() or "USD",
+                )
+                logger.info(
+                    f"{raw_sym}: {contracts:g} contracts @ ${current_price:.2f} "
+                    f"= ${option_data[key].value:,.2f} [{data_provider}]"
+                )
+            except Exception as e:
+                logger.error(f"Error processing option {raw_sym or idx}: {e}")
+                self.errors.append(f"Option error: {e}")
+
+        return option_data
+
+    @staticmethod
+    def _fetch_massive_crypto_quotes(symbols: List[str]) -> Dict[str, Dict]:
+        """Massive crypto snapshots keyed by the RAW input symbol.
+
+        First price source for crypto holdings — get_crypto_snapshot accepts
+        BTC / BTC-USD / X:BTCUSD so raw CSV spellings pass through unchanged.
+        Symbols Massive can't serve are simply absent from the result, which
+        leaves them on the generic provider chain (yfinance -USD fallback).
+        """
+        out: Dict[str, Dict] = {}
+        if not symbols:
+            return out
+        provider = _build_massive_provider()
+        if provider is None:
+            return out
+        for sym in symbols:
+            s = str(sym).strip()
+            if not s:
+                continue
+            try:
+                snap = provider.get_crypto_snapshot(s)
+            except Exception as e:
+                logger.warning(f"Massive crypto snapshot {s}: {e}")
+                snap = None
+            if snap and snap.get("price"):
+                out[s] = {"symbol": s, "price": float(snap["price"]), "provider": "massive"}
+        if out:
+            logger.info(f"Massive crypto snapshots priced {len(out)}/{len(symbols)} symbols")
+        return out
+
+    def _apply_fx_conversions(self) -> None:
+        """Convert non-USD holdings to USD via the Massive FX surface.
+
+        One live rate is fetched per distinct currency (convert_currency of
+        1.0 unit → the rate) and applied to the PER-UNIT price fields rather
+        than the derived totals, so the value/cost_basis properties stay
+        internally consistent (value == shares × price × multiplier holds
+        before and after conversion). The applied rate is recorded in
+        holding metadata (fx_rate / fx_from).
+
+        Without a Massive key (or on FX failure) values are left in the
+        native currency and flagged metadata["fx_unconverted"]=True so
+        downstream consumers know the portfolio totals mix currencies.
+        """
+        buckets = (
+            self.equity_data,
+            self.bond_data,
+            self.cash_data,
+            self.margin_data,
+            self.crypto_data,
+            self.futures_data,
+            self.metals_data,
+            self.option_data,
+        )
+        non_usd = [
+            h
+            for bucket in buckets
+            for h in bucket.values()
+            if (getattr(h, "currency", "USD") or "USD").upper() != "USD"
+        ]
+        if not non_usd:
+            return
+
+        provider = _build_massive_provider()
+        rates: Dict[str, Optional[float]] = {}
+        for h in non_usd:
+            ccy = (h.currency or "USD").upper()
+            if ccy not in rates:
+                rate = None
+                if provider is not None:
+                    try:
+                        res = provider.convert_currency(1.0, ccy, "USD")
+                    except Exception as e:
+                        logger.warning(f"Massive FX {ccy}→USD failed: {e}")
+                        res = None
+                    if res:
+                        # 'converted' of a 1.0-unit amount IS the rate (the
+                        # server-side conversion we asked for); 'rate' (last
+                        # ask/bid) is a fallback for envelopes that omit
+                        # 'converted'.
+                        rate = res.get("converted") or res.get("rate")
+                rates[ccy] = float(rate) if rate else None
+                if rates[ccy]:
+                    logger.info(f"FX rate {ccy}→USD = {rates[ccy]:.4f} (massive)")
+
+            rate = rates[ccy]
+            if not rate:
+                # No Massive key / FX failure: leave native values, flag it.
+                h.metadata["fx_unconverted"] = True
+                h.metadata["fx_from"] = ccy
+                continue
+
+            h.current_price = h.current_price * rate
+            h.purchase_price = h.purchase_price * rate
+            if h.market_value is not None:
+                h.market_value = h.market_value * rate
+            if h.explicit_unrealized_gain_loss is not None:
+                # Absolute G/L is currency-denominated; the pct is not.
+                h.explicit_unrealized_gain_loss = float(h.explicit_unrealized_gain_loss) * rate
+            h.metadata["fx_rate"] = rate
+            h.metadata["fx_from"] = ccy
+            h.currency = "USD"
+
     def _convert_to_cdm_portfolio(
         self,
         equity_data,
@@ -1760,19 +2186,22 @@ class PortfolioFetcher:
         crypto_data: Optional[dict] = None,
         futures_data: Optional[dict] = None,
         metals_data: Optional[dict] = None,
+        options_data: Optional[dict] = None,
     ) -> CDMPortfolioResult:
         """Convert holdings to FINOS CDM-compliant Portfolio format.
 
         Creates CDM Position objects for each holding, then wraps in Portfolio/PortfolioState
         with aggregation parameters and summary statistics.
 
-        CDM 5 extension: ``crypto_data`` / ``futures_data`` / ``metals_data`` are optional;
-        each maps to a CDM payout securityType ("Crypto", "Futures", "Commodity") so
-        downstream ``normalize_portfolio()`` classifies them into the correct bucket.
+        CDM 5 extension: ``crypto_data`` / ``futures_data`` / ``metals_data`` /
+        ``options_data`` are optional; each maps to a CDM payout securityType
+        ("Crypto", "Futures", "Commodity", "Option") so downstream
+        ``normalize_portfolio()`` classifies them into the correct bucket.
         """
         crypto_data = crypto_data or {}
         futures_data = futures_data or {}
         metals_data = metals_data or {}
+        options_data = options_data or {}
         positions = []
 
         # Convert equity holdings to CDM Positions.
@@ -1974,6 +2403,41 @@ class PortfolioFetcher:
             )
             positions.append(pos)
 
+        # ---- Options positions ----
+        # securityType="Option" so normalize_portfolio() routes these to the
+        # option bucket. OCC contract symbol is the product identifier; the
+        # quoted price is the per-share premium (value = premium × 100 ×
+        # contracts via Holding.value, already reflected in market_value).
+        for _key, holding in options_data.items():
+            pos = Position(
+                product=Product(
+                    product_identifier=ProductIdentifier(
+                        identifier_type="OCC_SYMBOL",
+                        identifier=holding.symbol,
+                    )
+                ),
+                asset=Asset(
+                    product_identifier=ProductIdentifier(
+                        identifier_type="OCC_SYMBOL",
+                        identifier=holding.symbol,
+                    ),
+                    security_type="Option",
+                    asset_class="Options",
+                    security_name=(holding.name or holding.symbol),
+                    sector="Options",
+                ),
+                price_quantity=PriceQuantity(
+                    quantity=Quantity(amount=holding.shares, unit="contracts"),
+                    current_price=Price(amount=holding.current_price, currency="USD"),
+                    cost_basis_price=Price(amount=holding.purchase_price, currency="USD"),
+                ),
+                market_value=holding.value,
+                cost_basis=holding.cost_basis,
+                unrealized_gain_loss=holding.unrealized_gain_loss,
+                unrealized_gain_loss_pct=holding.unrealized_gain_loss_pct,
+            )
+            positions.append(pos)
+
         # Calculate portfolio gain/loss
         total_gain_loss = sum(pos.unrealized_gain_loss for pos in positions)
         total_cost_basis = total_value - total_gain_loss
@@ -2103,8 +2567,12 @@ class PortfolioFetcher:
                 crypto_df = df.filter(_al.is_in(["crypto", "cryptocurrency"]))
                 futures_df = df.filter(_al.is_in(["futures", "future", "futures_contract"]))
                 metals_df = df.filter(_al.is_in(["metals", "metal", "precious_metal", "commodity"]))
+                # Options: all alias spellings (mirrors schema.py CANONICAL_KEYS)
+                options_df = df.filter(
+                    _al.is_in(["option", "options", "call", "put", "equity_option"])
+                )
             else:
-                crypto_df = futures_df = metals_df = pl.DataFrame()
+                crypto_df = futures_df = metals_df = options_df = pl.DataFrame()
 
             # Fetch data by type
             if len(equity_df) > 0:
@@ -2121,8 +2589,29 @@ class PortfolioFetcher:
             self.crypto_data: dict = {}
             self.futures_data: dict = {}
             self.metals_data: dict = {}
+            self.option_data: dict = {}
             if len(crypto_df) > 0:
-                _crypto = self.fetch_equity_holdings(crypto_df)
+                # Massive crypto snapshot is the FIRST price source; symbols it
+                # can't serve fall through to the generic chain inside
+                # fetch_equity_holdings (yfinance -USD tickers, the old path).
+                _crypto_syms = (
+                    [
+                        str(_s).strip()
+                        for _s in crypto_df.get_column("symbol").drop_nulls().unique().to_list()
+                        if str(_s).strip()
+                    ]
+                    if "symbol" in crypto_df.columns
+                    else []
+                )
+                # Honor the no-refresh contract: with
+                # INVESTOR_CLAW_REFRESH_PRICES=false broker-snapshot prices
+                # are used as-is, so don't hit the Massive crypto snapshot.
+                _crypto_overrides = (
+                    self._fetch_massive_crypto_quotes(_crypto_syms)
+                    if _refresh_prices_enabled()
+                    else {}
+                )
+                _crypto = self.fetch_equity_holdings(crypto_df, quote_overrides=_crypto_overrides)
                 for _k, _h in _crypto.items():
                     _h.asset_type = "crypto"
                 self.crypto_data = _crypto
@@ -2145,6 +2634,16 @@ class PortfolioFetcher:
                 for _k, _h in _metals.items():
                     _h.asset_type = "metals"
                 self.metals_data = _metals
+            if len(options_df) > 0:
+                # Options have a dedicated fetch path: the generic equity quote
+                # chain cannot quote OCC tickers — Massive option snapshots
+                # (with broker CSV fallback) are the only viable source.
+                self.option_data = self.fetch_option_holdings(options_df)
+
+            # Convert any non-USD holdings to USD BEFORE totals are computed so
+            # every aggregate below is single-currency. No Massive key → values
+            # stay native and carry metadata fx_unconverted=True.
+            self._apply_fx_conversions()
 
             # Calculate totals by asset class (Holding objects have .value property)
             equity_value = sum(h.value for h in self.equity_data.values())
@@ -2154,6 +2653,7 @@ class PortfolioFetcher:
             crypto_value = sum(h.value for h in self.crypto_data.values())
             futures_value = sum(h.value for h in self.futures_data.values())
             metals_value = sum(h.value for h in self.metals_data.values())
+            option_value = sum(h.value for h in self.option_data.values())
 
             total_value = (
                 equity_value
@@ -2163,6 +2663,7 @@ class PortfolioFetcher:
                 + crypto_value
                 + futures_value
                 + metals_value
+                + option_value
             )
 
             # Build accounts grouping: group equity positions by account/source,
@@ -2235,6 +2736,7 @@ class PortfolioFetcher:
                 crypto_data=self.crypto_data,
                 futures_data=self.futures_data,
                 metals_data=self.metals_data,
+                options_data=self.option_data,
             )
 
             # Write CDM-compliant output
@@ -2264,6 +2766,7 @@ class PortfolioFetcher:
                 crypto_data=self.crypto_data,
                 futures_data=self.futures_data,
                 metals_data=self.metals_data,
+                options_data=self.option_data,
             )
             compact_json = json.dumps(compact, separators=(",", ":"))
 

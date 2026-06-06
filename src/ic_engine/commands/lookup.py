@@ -47,12 +47,72 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+# Massive enrichment provider cache: None = not tried yet, False = unavailable
+# (no MASSIVE_API_KEY / SDK missing). One instance per process so multi-path
+# lookups don't re-pay construction cost.
+_MASSIVE_PROVIDER = None
+
+
+def _massive_enrichment(symbol: str) -> dict:
+    """Best-effort Massive enrichment for a ticker lookup.
+
+    Returns up to three additive keys — ``profile`` (ticker overview:
+    name/market_cap/sic_description/employees/description), ``ratios``
+    (P/E, P/B, margins, dividend_yield...), ``related`` (peer tickers) —
+    omitting any surface Massive can't serve. Empty dict when
+    MASSIVE_API_KEY is not set or the provider is unavailable, so keyless
+    environments see the lookup result unchanged (additive-only contract:
+    existing keys are never touched).
+    """
+    global _MASSIVE_PROVIDER
+    if _MASSIVE_PROVIDER is None:
+        try:
+            from ic_engine.providers.price_provider import MassiveProvider
+
+            _MASSIVE_PROVIDER = MassiveProvider()  # ValueError when no key
+        except (ImportError, ValueError) as e:
+            logger.debug("Massive enrichment unavailable: %s", e)
+            _MASSIVE_PROVIDER = False
+        except Exception as e:
+            logger.debug("MassiveProvider init failed: %s", e)
+            _MASSIVE_PROVIDER = False
+    provider = _MASSIVE_PROVIDER
+    if not provider:
+        return {}
+
+    out: dict = {}
+    # Each surface degrades independently — a 403/timeout on one must not
+    # cost us the others (mixin methods already return None/[] on failure,
+    # the try/except is belt-and-braces so lookup can never crash here).
+    try:
+        profile = provider.get_ticker_overview(symbol)
+        if profile:
+            out["profile"] = profile
+    except Exception as e:
+        logger.debug("Massive overview(%s) failed: %s", symbol, e)
+    try:
+        ratios = provider.get_financial_ratios(symbol)
+        if ratios:
+            out["ratios"] = ratios
+    except Exception as e:
+        logger.debug("Massive ratios(%s) failed: %s", symbol, e)
+    try:
+        related = provider.get_related_tickers(symbol)
+        if related:
+            out["related"] = related
+    except Exception as e:
+        logger.debug("Massive related(%s) failed: %s", symbol, e)
+    return out
 
 
 def _raw_path(reports_dir: Path, filename: str) -> Path:
@@ -172,6 +232,9 @@ def query_holdings_symbol(reports_dir: Path, symbol: str, fields: list[str] | No
         return 1
 
     result = {"symbol": sym_upper, "positions": [_filter_fields(m, fields) for m in matches]}
+    # Additive Massive enrichment (profile/ratios/related) — keys absent
+    # when MASSIVE_API_KEY is unset so existing consumers are unaffected.
+    result.update(_massive_enrichment(sym_upper))
     print(json.dumps(result, indent=2, default=str))
     return 0
 
@@ -211,7 +274,14 @@ def query_analyst_symbol(reports_dir: Path, symbol: str, fields: list[str] | Non
             rec = _filter_fields(recs[sym_upper], fields)
             print(
                 json.dumps(
-                    {"symbol": sym_upper, "source": "analyst_data", **rec}, indent=2, default=str
+                    {
+                        "symbol": sym_upper,
+                        "source": "analyst_data",
+                        **rec,
+                        **_massive_enrichment(sym_upper),
+                    },
+                    indent=2,
+                    default=str,
                 )
             )
             return 0
@@ -224,7 +294,14 @@ def query_analyst_symbol(reports_dir: Path, symbol: str, fields: list[str] | Non
             rec = _filter_fields(enriched[sym_upper], fields)
             print(
                 json.dumps(
-                    {"symbol": sym_upper, "source": "tier3_enriched", **rec}, indent=2, default=str
+                    {
+                        "symbol": sym_upper,
+                        "source": "tier3_enriched",
+                        **rec,
+                        **_massive_enrichment(sym_upper),
+                    },
+                    indent=2,
+                    default=str,
                 )
             )
             return 0
@@ -239,7 +316,14 @@ def query_analyst_symbol(reports_dir: Path, symbol: str, fields: list[str] | Non
             rec = _filter_fields(recs[sym_upper], fields)
             print(
                 json.dumps(
-                    {"symbol": sym_upper, "source": "analyst_summary", **rec}, indent=2, default=str
+                    {
+                        "symbol": sym_upper,
+                        "source": "analyst_summary",
+                        **rec,
+                        **_massive_enrichment(sym_upper),
+                    },
+                    indent=2,
+                    default=str,
                 )
             )
             return 0

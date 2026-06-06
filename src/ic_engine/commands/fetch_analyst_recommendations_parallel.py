@@ -34,6 +34,7 @@ import logging
 import os
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -202,6 +203,11 @@ class ParallelAnalystFetcher:
         self.errors: List[Tuple[str, str]] = []
         self.metrics: List[FetchMetrics] = []
 
+        # Guards the lazy MassiveProvider cache in _get_massive_provider so
+        # tier-2 thread fan-outs can't check-then-set concurrently and build
+        # duplicate provider instances.
+        self._massive_provider_lock = threading.Lock()
+
         # Notifications
         self.notification_handler = NotificationHandler(self.output_dir)
 
@@ -230,6 +236,146 @@ class ParallelAnalystFetcher:
             return None
         m = re.match(r"^\s*([0-9]+(?:\.[0-9]+)?)", str(avg_rating))
         return float(m.group(1)) if m else None
+
+    def _get_massive_provider(self):
+        """Lazily build ONE MassiveProvider for the whole run.
+
+        Cached on self so tier-1 (sequential) and tier-2 (threaded) share a
+        single instance instead of constructing per symbol. ``False`` is the
+        "tried and unavailable" sentinel (no MASSIVE_API_KEY / SDK missing)
+        so keyless environments pay the import cost exactly once.
+        """
+        mp = getattr(self, "_massive_provider", None)
+        if mp is not None:
+            return mp or None  # False sentinel → None
+        # Lock so concurrent tier-2 threads can't both miss the cache and
+        # construct duplicate providers (check-then-set race). Lazy getattr
+        # keeps backward compatibility with instances created before
+        # __init__ grew the lock (e.g. unpickled/stubbed in tests).
+        lock = getattr(self, "_massive_provider_lock", None)
+        if lock is None:
+            lock = self._massive_provider_lock = threading.Lock()
+        with lock:
+            mp = getattr(self, "_massive_provider", None)
+            if mp is not None:
+                return mp or None
+            try:
+                from ic_engine.providers.price_provider import MassiveProvider
+
+                mp = MassiveProvider()  # reads MASSIVE_API_KEY; ValueError when unset
+            except (ImportError, ValueError) as e:
+                logger.debug(f"Massive unavailable for analyst ratings: {e}")
+                mp = False
+            except Exception as e:
+                # Any other construction failure also means "skip Massive" —
+                # the yfinance→provider chain below keeps working regardless.
+                logger.debug(f"MassiveProvider init failed: {e}")
+                mp = False
+            self._massive_provider = mp
+            return mp or None
+
+    def _fetch_via_massive(
+        self, symbol: str, start: float
+    ) -> Optional[Tuple[str, AnalystConsensus, float]]:
+        """PRIMARY analyst source: Massive Benzinga consensus.
+
+        Benzinga gives a real per-symbol buy/hold/sell distribution and
+        price targets — unlike the yfinance path, which has to *estimate*
+        the distribution from recommendationMean. Returns None on no key,
+        no coverage, or any error so the caller falls back to the existing
+        yfinance→provider chain.
+        """
+        mp = self._get_massive_provider()
+        if mp is None:
+            return None
+        try:
+            ratings = mp.get_analyst_ratings([symbol]) or {}
+            r = ratings.get(symbol) or {}
+            if not r:
+                return None
+
+            # AnalystConsensus has no separate strong_buy/strong_sell fields —
+            # fold them into buy/sell so the distribution still sums to total.
+            buy_count = int(r.get("buy") or 0) + int(r.get("strong_buy") or 0)
+            hold_count = int(r.get("hold") or 0)
+            sell_count = int(r.get("sell") or 0) + int(r.get("strong_sell") or 0)
+            total = int(r.get("total_analysts") or 0) or (buy_count + hold_count + sell_count)
+            if total <= 0:
+                return None
+
+            # recommendation_mean orientation: ic-engine uses the
+            # yfinance/Finnhub 1-5 scale (1 = strong buy … 5 = sell).
+            # Benzinga's consensus_rating_value is INVERTED (5 = strong buy:
+            # AAPL served 4.0 alongside consensus "buy"), so reorient with
+            # 6 - value. When the value is missing, derive the mean from the
+            # rating distribution directly in yfinance orientation.
+            recommendation_mean: Optional[float] = None
+            rating_value = r.get("rating_value")
+            if rating_value is not None:
+                try:
+                    rv = float(rating_value)
+                    if 1.0 <= rv <= 5.0:
+                        recommendation_mean = round(6.0 - rv, 2)
+                except (TypeError, ValueError):
+                    pass
+            if recommendation_mean is None:
+                sb = int(r.get("strong_buy") or 0)
+                b = int(r.get("buy") or 0)
+                h = int(r.get("hold") or 0)
+                s = int(r.get("sell") or 0)
+                ss = int(r.get("strong_sell") or 0)
+                dist_total = sb + b + h + s + ss
+                if dist_total > 0:
+                    recommendation_mean = round(
+                        (1 * sb + 2 * b + 3 * h + 4 * s + 5 * ss) / dist_total, 2
+                    )
+
+            rating = r.get("rating")
+            consensus_rec = (
+                str(rating).title()
+                if rating
+                else (
+                    "Buy"
+                    if buy_count > hold_count and buy_count > sell_count
+                    else "Sell"
+                    if sell_count > hold_count and sell_count > buy_count
+                    else "Hold"
+                )
+            )
+
+            # Benzinga consensus carries targets but no live price — one
+            # Massive prev-close quote keeps current_price meaningful
+            # without touching Yahoo. Best-effort: 0.0 on failure, same as
+            # the provider-fallback path.
+            current_price = 0.0
+            try:
+                q = mp.get_quote(symbol) or {}
+                current_price = float(q.get("price") or 0.0)
+            except Exception as qe:
+                logger.debug(f"Massive quote({symbol}) failed: {qe}")
+
+            consensus = AnalystConsensus(
+                symbol=symbol,
+                current_price=current_price,
+                consensus_recommendation=consensus_rec,
+                buy_count=buy_count,
+                hold_count=hold_count,
+                sell_count=sell_count,
+                total_recommendations=total,
+                target_price_mean=r.get("target_price"),
+                target_price_high=r.get("target_high"),
+                target_price_low=r.get("target_low"),
+                target_price_current=current_price,
+                analyst_count=total,
+                recommendation_mean=recommendation_mean,
+                data_source="Massive Benzinga",
+                data_timestamp=datetime.now().isoformat(),
+                fetch_time_ms=int((time.time() - start) * 1000),
+            )
+            return (symbol, consensus, (time.time() - start) * 1000)
+        except Exception as e:
+            logger.debug(f"Massive analyst fetch failed for {symbol}: {e}")
+            return None
 
     def _fetch_via_provider_fallback(
         self, symbol: str, start: float
@@ -296,15 +442,24 @@ class ParallelAnalystFetcher:
     def _fetch_consensus(self, symbol: str) -> Optional[Tuple[str, AnalystConsensus, float]]:
         """Fetch single symbol (with timing).
 
-        Tries yfinance.Ticker.info first (fast, batch-friendly). When Yahoo
-        rate-limits us with a 429 (which currently happens for unauthenticated
-        anonymous query1 traffic regardless of source IP), `info` comes back
-        empty and we fall back to PriceProvider — which prefers Finnhub for
-        analyst ratings and Massive for quotes, avoiding Yahoo
-        entirely. The fallback path requires FINNHUB_KEY and/or MASSIVE_API_KEY
-        to be set; if neither is, the symbol returns None like before.
+        Order: Massive-Benzinga first (real consensus distribution + price
+        targets, immune to Yahoo throttling), then yfinance.Ticker.info,
+        then the PriceProvider chain. When Yahoo rate-limits us with a 429
+        (which currently happens for unauthenticated anonymous query1
+        traffic regardless of source IP), `info` comes back empty and we
+        fall back to PriceProvider — which prefers Finnhub for analyst
+        ratings and Massive for quotes, avoiding Yahoo entirely. The
+        Massive/fallback paths require MASSIVE_API_KEY and/or FINNHUB_KEY
+        to be set; if neither is, behavior is unchanged from before.
         """
         start = time.time()
+
+        # Massive-Benzinga PRIMARY — falls through silently on no key /
+        # no coverage so the legacy chain below keeps its exact behavior.
+        massive_result = self._fetch_via_massive(symbol, start)
+        if massive_result is not None:
+            return massive_result
+
         try:
             # Normalise broker symbols: BRK.B → BRK-B (yfinance uses hyphens, not periods)
             ticker = yf.Ticker(self._yf_ticker(symbol))

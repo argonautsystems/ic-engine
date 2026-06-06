@@ -118,6 +118,22 @@ class NewsStage(PipelineStage):
                 # happening in crypto?", "EUR/USD news?". Per-symbol news
                 # alone (above) doesn't carry that signal.
                 payload["category_news"] = self._fetch_category_news()
+
+                # Additive Massive market context: top gainers/losers plus
+                # per-symbol Form 4 insider activity for top holdings.
+                # Best-effort — skipped silently when Massive is absent.
+                try:
+                    massive = self._build_massive()
+                    if massive is not None:
+                        movers = self._fetch_market_movers(massive)
+                        if movers:
+                            payload["market_movers"] = movers
+                        insider = self._fetch_insider_activity(massive, portfolio)
+                        if insider:
+                            payload["insider_activity"] = insider
+                except Exception as e:
+                    logger.debug(f"Massive market context skipped: {e}")
+
                 return StageResult(
                     stage_name=self.stage_name,
                     status="success",
@@ -163,4 +179,57 @@ class NewsStage(PipelineStage):
                     out[cat] = []
         except Exception as e:
             logger.warning(f"category_news disabled: {e}")
+        return out
+
+    # Cap per-symbol Form 4 lookups (1 call/symbol) to bound API usage
+    # per pipeline run.
+    _MAX_INSIDER_SYMBOLS = 10
+
+    @staticmethod
+    def _build_massive():
+        """Best-effort MassiveProvider; None when key absent/unavailable."""
+        import os
+
+        if not os.getenv("MASSIVE_API_KEY"):
+            return None
+        try:
+            from ic_engine.providers.price_provider import MassiveProvider
+
+            return MassiveProvider()
+        except Exception as e:
+            logger.debug(f"Massive unavailable for market context: {e}")
+            return None
+
+    @staticmethod
+    def _fetch_market_movers(provider) -> dict:
+        """Top 5 US-equity gainers + losers right now (2 calls).
+        Best-effort: directions that fail are omitted."""
+        out: dict = {}
+        for direction in ("gainers", "losers"):
+            try:
+                rows = provider.get_market_movers(direction, top=5)
+                if rows:
+                    out[direction] = rows
+            except Exception as e:
+                logger.debug(f"market_movers({direction}) failed: {e}")
+        return out
+
+    @classmethod
+    def _fetch_insider_activity(cls, provider, portfolio) -> dict:
+        """Recent Form 4 insider transactions (limit 5/symbol) for the top
+        equity holdings by market value. Best-effort: symbols with no
+        filings are omitted."""
+        equities = sorted(
+            (p for p in portfolio.positions if p.asset_class == "equity"),
+            key=lambda p: p.market_value or 0.0,
+            reverse=True,
+        )[: cls._MAX_INSIDER_SYMBOLS]
+        out: dict = {}
+        for p in equities:
+            try:
+                filings = provider.get_form4_filings(p.symbol, limit=5)
+                if filings:
+                    out[p.symbol] = filings
+            except Exception as e:
+                logger.debug(f"insider_activity({p.symbol}) failed: {e}")
         return out

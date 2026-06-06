@@ -48,6 +48,7 @@ class Holding:
     #   CDM 5 extension: 'crypto' / 'cryptocurrency',
     #                    'futures' / 'future' / 'futures_contract',
     #                    'metals' / 'metal' / 'precious_metal' / 'commodity'
+    #   Options:         'option' / 'options' / 'call' / 'put' / 'equity_option'
     asset_type: str
 
     # Position sizing
@@ -110,6 +111,20 @@ class Holding:
     metal_type: Optional[str] = None  # gold, silver, platinum, palladium
     troy_oz: Optional[float] = None  # physical only; None for ETF/spot-proxy
 
+    # ---- Options extension: equity option contract fields ----
+    underlying: Optional[str] = None  # e.g. AAPL for "AAPL 251219C00300000"
+    contract_type: Optional[str] = None  # 'call' | 'put'
+    strike: Optional[float] = None  # strike in dollars (300.0, not OCC 00300000)
+    expiration: Optional[str] = None  # YYYY-MM-DD
+    contracts: Optional[float] = None  # contract count (mirrors shares for options)
+
+    # ---- Currency ----
+    # ISO 4217 code of the prices/values on this holding. Default 'USD'
+    # preserves the historical assumption that all values are USD; the FX
+    # conversion pass in fetch_holdings normalizes non-USD holdings and
+    # records the applied rate in metadata (fx_rate / fx_from).
+    currency: str = "USD"
+
     # Legacy/optional fields
     name: Optional[str] = None  # Human-readable name (bond names, fund names)
     quantity: Optional[float] = None  # Alias for shares (bonds may use this)
@@ -139,6 +154,30 @@ class Holding:
 
         return contract_multiplier(self.contract_symbol or self.symbol or "")
 
+    # Option asset types: value is price × 100 × contracts (standard US equity
+    # option multiplier). Mirrors schema.py option aliases.
+    _OPTION_ASSET_TYPES = frozenset(("option", "options", "call", "put", "equity_option"))
+
+    def _option_multiplier(self) -> float:
+        """Dollar multiplier per option contract.
+
+        Standard US equity options deliver 100 shares per contract; an
+        explicit ``contract_size`` from the import wins so non-standard
+        deliverables (mini options = 10, post-split adjusted contracts)
+        still value correctly. Mirrors the ``_futures_multiplier`` pattern.
+        """
+        if self.contract_size:
+            return float(self.contract_size)
+        return 100.0
+
+    def _option_contracts(self) -> float:
+        """Contract count for option valuation — explicit ``contracts``
+        wins, ``shares`` is the fallback so legacy ingest paths that only
+        set shares still value correctly."""
+        if self.contracts is not None:
+            return float(self.contracts)
+        return float(self.shares or 0.0)
+
     @property
     def value(self) -> float:
         """Current market value of the holding.
@@ -153,6 +192,10 @@ class Holding:
             return self.market_value
         if self.asset_type in self._FUTURES_ASSET_TYPES:
             return self.shares * self.current_price * self._futures_multiplier()
+        if self.asset_type in self._OPTION_ASSET_TYPES:
+            # Options: premium is quoted per share; one contract controls
+            # 100 shares, so dollar value is price × 100 × contracts.
+            return self._option_contracts() * self.current_price * self._option_multiplier()
         return self.shares * self.current_price
 
     # Bond asset types whose prices are quoted as % of par (e.g. 99.769 = $99.769 per $100 face)
@@ -174,6 +217,10 @@ class Holding:
             return self.shares * self.purchase_price / 100.0
         if self.asset_type in self._FUTURES_ASSET_TYPES:
             return self.shares * self.purchase_price * self._futures_multiplier()
+        if self.asset_type in self._OPTION_ASSET_TYPES:
+            # Same ×100 multiplier as :attr:`value` so unrealized P&L is
+            # (premium − entry premium) × 100 × contracts.
+            return self._option_contracts() * self.purchase_price * self._option_multiplier()
         return self.shares * self.purchase_price
 
     @property
@@ -316,6 +363,10 @@ class Holding:
     def is_metal(self) -> bool:
         """True if holding is a precious metal / commodity (CDM 5 CommodityPayout)."""
         return self.asset_type.lower() in ("metals", "metal", "precious_metal", "commodity")
+
+    def is_option(self) -> bool:
+        """True if holding is an equity option contract (call or put)."""
+        return self.asset_type.lower() in self._OPTION_ASSET_TYPES
 
     def __repr__(self) -> str:
         """Human-readable representation."""

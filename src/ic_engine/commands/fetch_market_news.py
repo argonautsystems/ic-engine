@@ -55,7 +55,7 @@ import logging
 import sys
 import time
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 # Bootstrap project root
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -260,6 +260,51 @@ def _fetch_finnhub_news(category: str, max_articles: int) -> List[Dict]:
 
 
 # ---------------------------------------------------------------------------
+# Massive market movers (additive market context; best-effort)
+# ---------------------------------------------------------------------------
+
+# Process-lifetime memo so repeated topic fetches don't multiply API calls
+# (2 calls total per process: gainers + losers).
+_MOVERS_CACHE: Optional[Dict[str, List[Dict]]] = None
+
+
+def _fetch_market_movers(top: int = 5) -> Dict[str, List[Dict]]:
+    """Top US-equity gainers + losers via Massive (memoized per process).
+
+    Best-effort: returns {} when MASSIVE_API_KEY is unset or any failure
+    occurs — callers degrade to the existing payload without movers.
+    """
+    global _MOVERS_CACHE
+    if _MOVERS_CACHE is not None:
+        return _MOVERS_CACHE
+
+    import os
+
+    if not os.getenv("MASSIVE_API_KEY"):
+        _MOVERS_CACHE = {}
+        return _MOVERS_CACHE
+    try:
+        from ic_engine.providers.price_provider import MassiveProvider
+
+        provider = MassiveProvider()
+    except Exception as e:
+        logger.debug(f"Massive unavailable for market movers: {e}")
+        _MOVERS_CACHE = {}
+        return _MOVERS_CACHE
+
+    movers: Dict[str, List[Dict]] = {}
+    for direction in ("gainers", "losers"):
+        try:
+            rows = provider.get_market_movers(direction, top=top)
+            if rows:
+                movers[direction] = rows
+        except Exception as e:
+            logger.debug(f"market_movers({direction}) failed: {e}")
+    _MOVERS_CACHE = movers
+    return _MOVERS_CACHE
+
+
+# ---------------------------------------------------------------------------
 # Main fetch function
 # ---------------------------------------------------------------------------
 
@@ -317,11 +362,22 @@ def fetch_market_news(topic: str = "general", max_articles: int = 10) -> Dict:
         "providers_used": list({h.get("provider", "") for h in headlines} - {""}),
     }
 
-    return {
+    result = {
         "topic": topic,
         "headlines": headlines,
         "summary": summary,
     }
+
+    # Additive Massive market context: top 5 gainers + losers. Best-effort —
+    # omitted entirely when Massive is absent or the fetch fails.
+    try:
+        movers = _fetch_market_movers(top=5)
+        if movers:
+            result["market_movers"] = movers
+    except Exception as e:
+        logger.debug(f"market_movers enrichment skipped: {e}")
+
+    return result
 
 
 # ---------------------------------------------------------------------------

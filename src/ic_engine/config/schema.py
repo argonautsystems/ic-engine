@@ -31,6 +31,8 @@ CANONICAL_KEYS = {
     "crypto": ["crypto", "cryptocurrency"],
     "futures": ["futures", "futures_contract", "future"],
     "metals": ["metals", "metal", "precious_metal", "commodity"],
+    # Options — single-leg equity option contracts (OCC-symbol positions)
+    "option": ["option", "options", "call", "put", "equity_option"],
 }
 
 
@@ -60,6 +62,7 @@ def normalize_portfolio(data: Dict[str, Any]) -> Dict[str, Any]:
                 "crypto": {},
                 "futures": {},
                 "metals": {},
+                "option": {},
             }
 
             for position in portfolio_cdm["portfolioState"]["positions"]:
@@ -85,6 +88,10 @@ def normalize_portfolio(data: Dict[str, Any]) -> Dict[str, Any]:
                     # CDM 5 extension classification
                     elif "crypto" in security_type:
                         asset_type = "crypto"
+                    # Option check BEFORE future so "futures option" / "FOP"
+                    # security types classify as option, not futures.
+                    elif "option" in security_type:
+                        asset_type = "option"
                     elif "future" in security_type:
                         asset_type = "futures"
                     elif "commodity" in security_type or "metal" in security_type:
@@ -149,6 +156,7 @@ def normalize_portfolio(data: Dict[str, Any]) -> Dict[str, Any]:
         "crypto": {},
         "futures": {},
         "metals": {},
+        "option": {},
     }
 
     for canonical, aliases in CANONICAL_KEYS.items():
