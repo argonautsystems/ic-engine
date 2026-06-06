@@ -145,6 +145,22 @@ class BondAnalyzer:
         "30y": "DGS30",
     }
 
+    # Massive /fed/v1/treasury-yields row keys mapped onto the same tenor
+    # labels the FRED path produces, so downstream consumers of
+    # self.treasury_yields see an identical {tenor: percent-float} dict
+    # regardless of which source served the curve.
+    MASSIVE_TENOR_KEYS = {
+        "3mo": "yield_3_month",
+        "6mo": "yield_6_month",
+        "1y": "yield_1_year",
+        "2y": "yield_2_year",
+        "5y": "yield_5_year",
+        "7y": "yield_7_year",
+        "10y": "yield_10_year",
+        "20y": "yield_20_year",
+        "30y": "yield_30_year",
+    }
+
     TIPS_ENDPOINTS = {
         "5y": "DFII5",
         "7y": "DFII7",
@@ -213,13 +229,60 @@ class BondAnalyzer:
             logger.debug(f"FRED fetch failed for {series_id}: {e}")
         return None
 
-    def _load_treasury_yields(self):
-        """Load current Treasury yield curve from FRED API (parallelized).
+    def _load_treasury_yields_massive(self) -> Dict[str, float]:
+        """Latest Treasury curve from Massive (/fed/v1/treasury-yields).
 
-        Reads FRED_API_KEY from environment. Emits a warning and skips
-        benchmark spread comparisons if the key is missing.
-        Series used: DGS3MO, DGS6MO, DGS1, DGS2, DGS5, DGS7, DGS10, DGS20, DGS30.
+        Massive serves the whole curve in one keyed row (yield_1_month..
+        yield_30_year, percent floats — e.g. yield_10_year=4.47), so this
+        is one request vs nine FRED series. Returns {} on any failure (no
+        MASSIVE_API_KEY, no entitlement, network) so the caller falls back
+        to FRED unchanged.
         """
+        try:
+            from ic_engine.providers.price_provider import MassiveProvider
+
+            rows = MassiveProvider().get_treasury_yields(limit=1)
+        except (ImportError, ValueError) as e:
+            logger.debug(f"Massive treasury yields unavailable: {e}")
+            return {}
+        except Exception as e:
+            logger.debug(f"Massive treasury yields failed: {e}")
+            return {}
+        if not rows:
+            return {}
+
+        row = rows[0]
+        fetched: Dict[str, float] = {}
+        for tenor, key in self.MASSIVE_TENOR_KEYS.items():
+            value = row.get(key)
+            if value is None:
+                continue
+            try:
+                fetched[tenor] = float(value)
+            except (TypeError, ValueError):
+                continue
+        if fetched:
+            logger.info(
+                f"Loaded {len(fetched)}/{len(self.MASSIVE_TENOR_KEYS)} Treasury yields "
+                f"from Massive (curve date {row.get('date', 'unknown')})"
+            )
+        return fetched
+
+    def _load_treasury_yields(self):
+        """Load the current Treasury yield curve — Massive primary, FRED fallback.
+
+        Massive needs MASSIVE_API_KEY; the FRED path reads FRED_API_KEY from
+        the environment, emits a warning, and skips benchmark spread
+        comparisons if neither source can serve the curve.
+        FRED series used: DGS3MO, DGS6MO, DGS1, DGS2, DGS5, DGS7, DGS10, DGS20, DGS30.
+        """
+        # Massive PRIMARY — same {tenor: percent} structure as the FRED path,
+        # so nothing downstream changes when this source wins.
+        massive_yields = self._load_treasury_yields_massive()
+        if massive_yields:
+            self.treasury_yields = massive_yields
+            return
+
         api_key = os.environ.get("FRED_API_KEY", "").strip()
         if not api_key:
             logger.warning("FRED_API_KEY not set — Treasury benchmark spreads will be skipped.")

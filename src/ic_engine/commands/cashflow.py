@@ -263,6 +263,122 @@ def _safe_float(v: Any, default: float = 0.0) -> float:
 
 # ─── Dividend projection (equities) ─────────────────────────────────────────
 
+# Massive provider cache: None = not tried, False = unavailable (no
+# MASSIVE_API_KEY / SDK missing). One instance per run — the projection
+# thread pool shares it instead of constructing per symbol.
+_MASSIVE_PROVIDER: Any = None
+
+
+def _get_massive_provider():
+    """Return a shared MassiveProvider, or None when Massive is unavailable."""
+    global _MASSIVE_PROVIDER
+    if _MASSIVE_PROVIDER is None:
+        try:
+            from ic_engine.providers.price_provider import MassiveProvider
+
+            _MASSIVE_PROVIDER = MassiveProvider()  # ValueError when no key
+        except (ImportError, ValueError) as e:
+            logger.debug(f"Massive dividends unavailable: {e}")
+            _MASSIVE_PROVIDER = False
+        except Exception as e:
+            logger.debug(f"MassiveProvider init failed: {e}")
+            _MASSIVE_PROVIDER = False
+    return _MASSIVE_PROVIDER or None
+
+
+def _project_equity_dividends_massive(
+    provider: Any,
+    symbol: str,
+    entry: Dict[str, Any],
+    shares: float,
+    today: date,
+    horizon_end: date,
+) -> Optional[List[CashflowEvent]]:
+    """PRIMARY dividend projection via Massive corporate-actions data.
+
+    Massive rows carry declaration/ex/record/pay dates plus a declared
+    frequency, so already-declared upcoming dividends land on their actual
+    pay date instead of a cadence guess, and forward projection uses the
+    declared frequency rather than inferring it from history. Returns None
+    when Massive has no rows for the symbol (or errors) so the caller can
+    fall back to the yfinance path unchanged.
+    """
+    try:
+        rows = provider.get_dividends(symbol, limit=12)
+    except Exception as e:
+        logger.debug(f"{symbol}: Massive dividends fetch failed: {e}")
+        return None
+    if not rows:
+        return None
+
+    def _event_date(row: Dict[str, Any]) -> Optional[date]:
+        # Pay date is when the cash actually lands; ex-date is the fallback
+        # (the yfinance path only has ex-dates, so this is strictly better).
+        return _parse_iso_date(row.get("pay_date") or row.get("ex_date"))
+
+    held_days = _held_days(entry, today)
+    qualified = held_days is None or held_days >= QUALIFIED_MIN_HOLDING_DAYS
+
+    events: List[CashflowEvent] = []
+    latest_date: Optional[date] = None
+    per_share = 0.0
+    freq = 0
+    for row in rows:  # newest-first by ex-date
+        d = _event_date(row)
+        amt = _safe_float(row.get("cash_amount"), 0.0)
+        if d is None or amt <= 0:
+            continue
+        if latest_date is None or d > latest_date:
+            latest_date = d
+            per_share = amt
+            try:
+                freq = int(row.get("frequency") or 0)
+            except (TypeError, ValueError):
+                freq = 0
+        # Declared rows landing inside the window are real dated events.
+        if today <= d <= horizon_end:
+            events.append(
+                CashflowEvent(
+                    date=d.isoformat(),
+                    symbol=symbol,
+                    type="dividend",
+                    amount=amt * shares,
+                    tax_qualified=qualified,
+                    tax_exempt=False,
+                    asset_type="equity",
+                )
+            )
+
+    if latest_date is None or per_share <= 0:
+        # Rows existed but were unusable — let yfinance have a go.
+        return None
+
+    # Project beyond the last declared row using the declared frequency
+    # (payments/year: 1, 2, 4, 12...; 0 = one-time special → no projection).
+    # Anchoring on the latest declared row means projections start strictly
+    # after every declared event, so no double-counting is possible.
+    if freq > 0:
+        cadence = max(1, round(365 / freq))
+        next_date = latest_date + timedelta(days=cadence)
+        while next_date <= today:
+            next_date += timedelta(days=cadence)
+        while next_date <= horizon_end:
+            events.append(
+                CashflowEvent(
+                    date=next_date.isoformat(),
+                    symbol=symbol,
+                    type="dividend",
+                    amount=per_share * shares,
+                    tax_qualified=qualified,
+                    tax_exempt=False,
+                    asset_type="equity",
+                )
+            )
+            next_date += timedelta(days=cadence)
+
+    events.sort(key=lambda e: e.date)
+    return events
+
 
 def _fetch_dividend_history(symbol: str) -> List[Tuple[date, float]]:
     """Return trailing per-share dividend history as [(ex_date, per_share)]."""
@@ -384,11 +500,15 @@ def _project_equity_events_parallel(
     today: date,
     horizon_end: date,
 ) -> List[CashflowEvent]:
-    """Parallelize yfinance dividend lookups over positions."""
+    """Parallelize dividend lookups over positions (Massive primary, yfinance fallback)."""
     if not rows:
         return []
 
     out: List[CashflowEvent] = []
+
+    # Resolve the shared Massive provider ONCE before fanning out so the
+    # worker threads never race the lazy construction.
+    massive = _get_massive_provider()
 
     def _one(row: Tuple[str, Dict[str, Any]]) -> List[CashflowEvent]:
         sym, entry = row
@@ -396,6 +516,14 @@ def _project_equity_events_parallel(
         if shares <= 0:
             return []
         try:
+            # Massive first: declared ex/pay dates beat cadence inference.
+            # None (no key / no coverage / error) → yfinance path unchanged.
+            if massive is not None:
+                events = _project_equity_dividends_massive(
+                    massive, sym, entry, shares, today, horizon_end
+                )
+                if events is not None:
+                    return events
             return _project_equity_dividends(sym, entry, shares, today, horizon_end)
         except Exception as e:
             logger.debug(f"{sym}: equity projection failed: {e}")
