@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ic-engine"
-version = "4.6.0"
+version = "4.6.1"
 description = "Python portfolio-analysis library powering the InvestorClaw skill ecosystem. Consumed by claws-runtime and Claude Code adapters. FINOS CDM 5.x inspired data model."
 license = { text = "Apache 2.0 Dual License" }
 requires-python = ">=3.10"
@@ -21,7 +21,9 @@ classifiers = [
     "Topic :: Office/Business :: Financial",
 ]
 dependencies = [
-    "clio @ git+https://gitlab.com/argonautsystems/clio.git@v0.1.0",
+    # clio is vendored in-tree at vendor/clio (see [tool.uv.sources]) so the
+    # build has no external VCS dependency and needs no GITLAB_TOKEN.
+    "clio",
     "polars>=0.20.0",
     "pandas>=2.0.0",
     "pyarrow>=12.0.0",
@@ -96,6 +98,11 @@ ic_engine = [
 [tool.uv]
 python-preference = "managed"
 required-version = ">=0.5"
+
+# All dependencies live in-tree: clio is vendored under vendor/clio
+# (git subtree of gitlab.com/argonautsystems/clio @ v0.1.0).
+[tool.uv.sources]
+clio = { path = "vendor/clio" }
 
 [dependency-groups]
 dev = [

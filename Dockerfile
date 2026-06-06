@@ -47,10 +47,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # treat shell-pipe installers as untrusted-source.
 RUN python3 -m pip install --no-cache-dir --break-system-packages uv && uv --version
 
-# GitLab token for fetching private dependencies (clio, etc.)
-# Passed as --build-arg GITLAB_TOKEN=$CI_JOB_TOKEN in CI or any PAT with read_repository.
-ARG GITLAB_TOKEN=""
-
 # Consolidated repo: the ic-engine source lives in THIS repo alongside the
 # Dockerfile + bridge (no cross-repo git clone, no two-SHA lockstep). Copy the
 # engine build inputs from the build context into /build/ic-engine. pyproject
@@ -59,14 +55,13 @@ WORKDIR /build/ic-engine
 COPY pyproject.toml uv.lock README.md ./
 COPY src ./src
 COPY contract ./contract
+# clio is vendored in-tree (git subtree of gitlab.com/argonautsystems/clio),
+# wired via [tool.uv.sources] as a path dependency — no GITLAB_TOKEN needed.
+COPY vendor ./vendor
 
 # uv sync — produces a self-contained venv at /build/.venv
-# Configure git to use the CI token for private GitLab dependencies (e.g. clio).
 WORKDIR /build/ic-engine
-RUN if [ -n "${GITLAB_TOKEN}" ]; then \
-      git config --global url."https://gitlab-ci-token:${GITLAB_TOKEN}@gitlab.com/".insteadOf "https://gitlab.com/"; \
-    fi && \
-    UV_PROJECT_ENVIRONMENT=/build/.venv uv sync --python 3.12 --frozen \
+RUN UV_PROJECT_ENVIRONMENT=/build/.venv uv sync --python 3.12 --frozen \
  || UV_PROJECT_ENVIRONMENT=/build/.venv uv sync --python 3.12
 
 # uv sync installs the local project (`investorclaw`) editable by default,
@@ -251,10 +246,7 @@ RUN set -exo pipefail; \
     echo "verifying ic-engine + heavy deps still importable..."; \
     /build/.venv/bin/python -c "import ic_engine; import polars; import pandas; import scipy; import numpy; import pyarrow; print('imports ok: ic_engine + polars + pandas + scipy + numpy + pyarrow')"
 
-# Strip the cloned repo's .git before it crosses into the runtime stage.
-# The clone URL embeds a GitLab PAT (IC_ENGINE_REPO / GITLAB_TOKEN) which git
-# persists into /build/ic-engine/.git/config; COPYing that into
-# /opt/ic-engine/source would bake the credential into the published image.
+# Strip any git metadata before it crosses into the runtime stage.
 # Runtime needs the source files, never the git metadata.
 RUN rm -rf /build/ic-engine/.git
 

@@ -18,12 +18,13 @@
 # Prereqs:
 #   - arm64 (Apple Silicon) host with `docker buildx`
 #   - docker login ghcr.io   (user/token with write:packages)
-#   - GITLAB_TOKEN env set     (read_repository PAT for the private clio dep)
 #   - CI already pushed the amd64 image for this version:
 #       ghcr.io/argonautsystems/ic-engine:<ver>-cpu-amd64
 #
+# All dependencies (incl. clio) are vendored in-tree — no GITLAB_TOKEN needed.
+#
 # Usage:
-#   GITLAB_TOKEN=glpat-... tools/publish-arm64.sh 4.6.0
+#   tools/publish-arm64.sh 4.6.1
 set -euo pipefail
 
 VERSION="${1:?usage: publish-arm64.sh <version>   e.g. 4.6.0}"
@@ -40,7 +41,6 @@ fi
 echo ">> Building + pushing native arm64: ${IMG}:${VERSION}-cpu-arm64"
 docker buildx build \
   --platform linux/arm64 \
-  --build-arg GITLAB_TOKEN="${GITLAB_TOKEN:-}" \
   --tag "${IMG}:${VERSION}-cpu-arm64" \
   --provenance=false \
   --push \
