@@ -39,6 +39,8 @@ from typing import Dict, List, Optional, Tuple
 import requests
 from ratelimit import limits, sleep_and_retry
 
+from ic_engine.providers.massive_surface import MassiveSurfaceMixin
+
 logger = logging.getLogger(__name__)
 
 # Provider API keys come from os.environ, populated by runtime/bootstrap.py
@@ -485,10 +487,13 @@ class NewsAPIProvider:
         raise NotImplementedError("NewsAPI does not provide analyst ratings")
 
 
-class MassiveProvider:
+class MassiveProvider(MassiveSurfaceMixin):
     """
     Massive market data provider.
-    Starter plan: real-time quotes, full OHLCV history, news.
+    Real-time quotes, OHLCV history, news; extended surfaces (Benzinga
+    analyst feed, fundamentals, corporate actions, Form 4, FX conversion,
+    economy, indicators, options/indices/crypto snapshots) via
+    MassiveSurfaceMixin.
     Docs: https://massive.com/docs/stocks
     """
 
@@ -807,9 +812,33 @@ class MassiveProvider:
         return articles
 
     def get_analyst_ratings(self, symbols: List[str]) -> Dict[str, Dict]:
-        raise NotImplementedError(
-            "Massive does not provide analyst recommendations — use Finnhub or yfinance"
-        )
+        """Analyst consensus via the Massive Benzinga partner feed.
+
+        Output shape matches the Finnhub/yfinance providers so the analyst
+        stage can consume any of them interchangeably. Symbols without
+        Benzinga coverage are absent from the result, letting the
+        aggregator fall through to other providers.
+        """
+        out: Dict[str, Dict] = {}
+        for sym in symbols:
+            consensus = self.get_consensus_ratings(sym)
+            if not consensus:
+                continue
+            out[sym] = {
+                "rating": consensus.get("consensus_rating"),
+                "target_price": consensus.get("consensus_price_target"),
+                "target_high": consensus.get("high_price_target"),
+                "target_low": consensus.get("low_price_target"),
+                "buy": consensus.get("buy"),
+                "hold": consensus.get("hold"),
+                "sell": consensus.get("sell"),
+                "strong_buy": consensus.get("strong_buy"),
+                "strong_sell": consensus.get("strong_sell"),
+                "total_analysts": consensus.get("total_analysts"),
+                "recent_actions": self.get_benzinga_ratings(sym, limit=5),
+                "provider": "massive-benzinga",
+            }
+        return out
 
     # ── Futures (Massive Futures API, launched 2026) ─────────────────────────
     # CME Globex (CBOT/CME/NYMEX/COMEX). The Massive SDK does not
