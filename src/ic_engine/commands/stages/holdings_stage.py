@@ -83,7 +83,18 @@ class HoldingsStage(PipelineStage):
                 bonds.append(d)
             elif asset_type in ("cash", "cash_equivalent"):
                 cash.append(d)
-            elif asset_type in ("crypto", "futures", "metals"):
+            elif asset_type in (
+                "crypto",
+                "futures",
+                "metals",
+                # Options ride the same non-equity/bond/cash "other" bucket —
+                # all alias spellings accepted (mirrors schema.py CANONICAL_KEYS).
+                "option",
+                "options",
+                "call",
+                "put",
+                "equity_option",
+            ):
                 other.append(d)
             else:
                 equities.append(d)
