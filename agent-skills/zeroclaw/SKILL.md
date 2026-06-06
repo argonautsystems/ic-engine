@@ -3,7 +3,7 @@ name: investorclaw
 description: Deterministic-first portfolio analyzer for ZeroClaw via MCP-HTTP at localhost:18090. Holdings, performance, Sharpe + Sortino, FRED yields, bond duration, scenario rebalancing.
 homepage: https://github.com/argonautsystems/InvestorClaw
 user-invocable: true
-metadata: {"license":"MIT-0","version":"4.1.40","runtime":"zeroclaw","image":"ghcr.io/argonautsystems/ic-engine:4.1.40-cpu","mcp-endpoint":"http://localhost:18090/mcp"}
+metadata: {"license":"MIT-0","version":"4.6.0","runtime":"zeroclaw","image":"ghcr.io/argonautsystems/ic-engine:4.6.0-cpu","mcp-endpoint":"http://localhost:18090/mcp"}
 ---
 
 <!--
@@ -46,7 +46,7 @@ agent startup. No skill code, no shell-out, no per-tool wiring.
 The two services run as a Docker compose stack, bound to localhost:
 
 - `mnemos-os/mnemos-rs:4.2` → `localhost:5002`
-- `mnemos-os/ic-engine:4.1.40-cpu` → `localhost:18090`
+- `ghcr.io/argonautsystems/ic-engine:4.6.0-cpu` → `localhost:18090`
 
 **Quick install via ClawHub:**
 
@@ -247,5 +247,5 @@ This skill payload (`SKILL.md` + `SKILL.toml` in
 
 This skill describes the InvestorClaw service. If a tool returns an
 unexpected result, the bug is in the service (Apache 2.0, see
-`mnemos-os/ic-engine` and `mnemos-os/mnemos-rs`), not in this
+`github.com/argonautsystems/ic-engine` and `mnemos-os/mnemos-rs`), not in this
 manifest.

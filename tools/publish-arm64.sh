@@ -46,17 +46,16 @@ docker buildx build \
   --push \
   .
 
-# Fuse multi-arch manifests (mirrors manifest:multi-arch in .gitlab-ci.yml),
-# combining CI's amd64 image with the arm64 image just pushed.
+# Fuse multi-arch manifests, combining CI's amd64 image with the arm64 image
+# just pushed. Uses `buildx imagetools create` rather than `docker manifest
+# create`: the latter refuses children that are themselves manifest lists
+# (e.g. a per-arch tag that was re-tagged via imagetools), while imagetools
+# flattens nested lists correctly.
 for TAG in "${VERSION}-cpu" "latest"; do
   echo ">> Fusing multi-arch manifest: ${IMG}:${TAG}"
-  docker manifest rm "${IMG}:${TAG}" 2>/dev/null || true
-  docker manifest create "${IMG}:${TAG}" \
+  docker buildx imagetools create --tag "${IMG}:${TAG}" \
     "${IMG}:${VERSION}-cpu-amd64" \
     "${IMG}:${VERSION}-cpu-arm64"
-  docker manifest annotate "${IMG}:${TAG}" "${IMG}:${VERSION}-cpu-amd64" --os linux --arch amd64
-  docker manifest annotate "${IMG}:${TAG}" "${IMG}:${VERSION}-cpu-arm64" --os linux --arch arm64 --variant v8
-  docker manifest push --purge "${IMG}:${TAG}"
 done
 
 echo ">> Done. Verify both arches are present:"

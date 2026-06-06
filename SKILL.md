@@ -147,7 +147,7 @@ container goes into `init_state=failed`. Pre-creating the directory
 as the host user sidesteps the docker bind-mount UID inheritance
 quirk.
 
-The compose pulls `ghcr.io/argonautsystems/ic-engine:4.4.2-cpu` (publicly hosted, no auth) and runs it on `localhost:18090` (MCP + REST) and `localhost:18092` (dashboard).
+The compose pulls `ghcr.io/argonautsystems/ic-engine:4.6.0-cpu` (publicly hosted, no auth) and runs it on `localhost:18090` (MCP + REST) and `localhost:18092` (dashboard).
 
 ### If Docker isn't installed
 
@@ -192,7 +192,7 @@ your agent talks to it. Expect this timeline on a fresh install:
 
 | Phase | Time | What's happening | What you'll see |
 |---|---|---|---|
-| Image extract | 5–30 s | First-time pull of `ic-engine:4.4.2-cpu` (~600 MB) | docker compose progress bars |
+| Image extract | 5–30 s | First-time pull of `ic-engine:4.6.0-cpu` (~600 MB) | docker compose progress bars |
 | Bridge boot | 2–3 s | FastMCP server binds `:18090`, dashboard binds `:18092` | `/healthz` returns 200, `init_state: not_started` |
 | `portfolio_setup` | 1–60 s | Auto-discover portfolio files in `./portfolios/` | `init_state: initializing`, `current_stage: setup` |
 | `portfolio_refresh` | 30–120 s | Pull quotes / analyst / news / FRED yields for each symbol | `init_state: initializing`, `current_stage: refresh` |
@@ -1017,7 +1017,7 @@ privacy model (what stays local vs what goes to which provider) see
 
 - Service code: Apache 2.0 (`ncz-os/mnemos-ic-runtime`)
 - Distribution-edge artifacts (this `SKILL.md`, `compose.yml`, `install.yaml`, `agent-skills/**`): **MIT-0** (MIT No Attribution — `LICENSE-MIT-0`). Required for ClawHub plugin publishing; the no-attribution clause means downstream skill registries can re-host without preserving copyright notice.
-- Image: `ghcr.io/argonautsystems/ic-engine:4.1.35-cpu@sha256:45a9c5bd2216ec41d6ce8bb89ae224158c668fbe652ee70c8264862c56aec3b4` (multi-arch amd64+arm64; also at `:latest`)
+- Image: `ghcr.io/argonautsystems/ic-engine:4.6.0-cpu@sha256:c36afea2d6a92c036053443f641163e7ca7c6c152a410de819546047bf60f241` (multi-arch amd64+arm64; also at `:latest`)
 - RFC: see `RFC-v0.1.md` in this bundle (`ncz-os/mnemos-ic-runtime` GitHub repository)
 - Cross-project contract: `mnemos-os/mcp-contracts` GitHub repository
 

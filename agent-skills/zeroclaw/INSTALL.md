@@ -53,7 +53,7 @@ This starts two containers bound to localhost:
 | Container | Image | Port |
 | --- | --- | --- |
 | mnemos | `mnemos-os/mnemos-rs:4.2` | `localhost:5002` |
-| ic-engine | `mnemos-os/ic-engine:4.1.33-cpu` | `localhost:18090` |
+| ic-engine | `ghcr.io/argonautsystems/ic-engine:4.6.0-cpu` | `localhost:18090` |
 | dashboard (optional) | bundled | `localhost:18092` |
 
 Wait for health:

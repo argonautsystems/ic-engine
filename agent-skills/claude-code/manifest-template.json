@@ -5,7 +5,7 @@
 
   "name": "investorclaw",
   "displayName": "InvestorClaw",
-  "version": "4.1.22",
+  "version": "4.6.0",
   "description": "Portfolio analysis via local Docker service. Adds /ask and /refresh slash commands plus 15 MCP tools for holdings, performance, bonds, optimization, and more. Educational only — never investment advice.",
   "author": {
     "name": "InvestorClaw Contributors",
@@ -13,7 +13,7 @@
   },
   "license": "MIT-0",
   "homepage": "https://investorclaw.app",
-  "repository": "https://github.com/mnemos-os/mnemos-ic-runtime",
+  "repository": "https://github.com/argonautsystems/ic-engine",
 
   "// TODO: confirm marketplace category vocabulary": null,
   "category": "finance",
@@ -56,7 +56,7 @@
     "investorclaw": {
       "transport": "http",
       "url": "http://localhost:18090/mcp",
-      "// note": "Portfolio analysis tools. Service runs in user's Docker (mnemos-os/ic-engine:4.1.33-cpu)."
+      "// note": "Portfolio analysis tools. Service runs in user's Docker (ghcr.io/argonautsystems/ic-engine:4.6.0-cpu)."
     },
     "mnemos": {
       "transport": "http",
