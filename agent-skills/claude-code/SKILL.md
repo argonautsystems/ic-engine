@@ -3,7 +3,7 @@ name: investorclaw
 description: Deterministic-first portfolio analyzer for Claude Code via MCP-HTTP at localhost:18090. Holdings, performance, Sharpe + Sortino, FRED yields, bond duration, scenario rebalancing.
 homepage: https://github.com/argonautsystems/InvestorClaw
 user-invocable: true
-metadata: {"license":"MIT-0","version":"4.6.1","runtime":"claude-code","image":"ghcr.io/argonautsystems/ic-engine:4.6.1-cpu","mcp-endpoint":"http://localhost:18090/mcp"}
+metadata: {"license":"MIT-0","version":"4.6.2","runtime":"claude-code","image":"ghcr.io/argonautsystems/ic-engine:4.6.2-cpu","mcp-endpoint":"http://localhost:18090/mcp"}
 ---
 
 <!--
