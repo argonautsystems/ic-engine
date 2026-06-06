@@ -1,0 +1,67 @@
+# clio GitLab CI pipeline
+#
+# v0.1.0 pipeline. Stages:
+#   lint     ruff check + format-check on src/ and tests/
+#   test     uv sync --frozen, import smoke, full pytest run
+#
+# uv.lock committed; --frozen syncs from it for deterministic CI.
+
+stages:
+  - lint
+  - test
+
+variables:
+  UV_VERSION: "0.5.0"
+  UV_FROZEN: "1"
+
+default:
+  image: python:3.13-slim
+  before_script:
+    - apt-get update -qq && apt-get install -qq -y curl git build-essential
+    - curl -LsSf https://astral.sh/uv/install.sh | sh
+    - export PATH="$HOME/.local/bin:$PATH"
+    - uv --version
+  cache:
+    key: uv-${CI_COMMIT_REF_SLUG}
+    paths:
+      - .venv/
+      - ~/.cache/uv/
+
+# ---------------------------------------------------------------------------
+# Stage: lint
+# ---------------------------------------------------------------------------
+
+ruff:
+  stage: lint
+  script:
+    - uv tool install ruff
+    - uv tool run ruff check src/ tests/
+    - uv tool run ruff format --check src/ tests/
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push"'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_TAG'
+
+# ---------------------------------------------------------------------------
+# Stage: test
+# ---------------------------------------------------------------------------
+
+unit-tests:
+  stage: test
+  needs: [ruff]
+  script:
+    - uv sync --frozen
+    - uv run python -c "import clio; print(f'clio v{clio.__version__}')"
+    - uv run python -c "from clio.runtime.hardware import HardwareProfile, detect_device; print(HardwareProfile()); print(f'device={detect_device()}')"
+    - uv run python -c "from clio.extract import vision, schema_map, normalize, confidence; print('extract subsystems ok')"
+    - uv run python -c "from clio import track, drift; print('track + drift ok')"
+    - uv run pytest tests/ -v
+  artifacts:
+    when: on_failure
+    paths:
+      - .venv/
+    expire_in: 1 hour
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push"'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_TAG'

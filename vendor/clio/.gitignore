@@ -1,0 +1,77 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# uv
+.uv/
+
+# Testing
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.cache/
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+
+# Type checkers
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project
+*.log
+.env
+.env.local
+.env.*.local
+
+# Lineage stores (clio.track parquet output) — these are runtime artifacts, never committed
+*.parquet
+lineage_store/
+fingerprints/
+
+# Cached models (clio.runtime.model_cache) — multi-GB, never committed
+.model_cache/
+hf_cache/
