@@ -38,7 +38,7 @@ curl -fsS http://localhost:5002/healthz   # mnemos
 ```
 
 Both should return `200 OK` within ~30 seconds on first start (the
-`ghcr.io/argonautsystems/ic-engine:4.6.0-cpu` image needs a moment to warm caches).
+`ghcr.io/argonautsystems/ic-engine:4.6.1-cpu` image needs a moment to warm caches).
 
 ## Step 2 — Register the two MCP servers with openclaw
 
