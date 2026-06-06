@@ -11,7 +11,7 @@ SPDX-License-Identifier: MIT-0
 Copyright 2026 InvestorClaw Contributors
 -->
 
-# InvestorClaw — portfolio analysis skill (v4.4.2)
+# InvestorClaw — portfolio analysis skill (v4.6.0)
 
 A deterministic-first portfolio analyzer that does real money math: holdings
 snapshots, performance metrics, Sharpe ratios, FRED yield curves, bond
@@ -774,8 +774,8 @@ curl -s -X POST http://localhost:18090/api/portfolio/version_check | jq
 
 ```json
 {
-  "running": "4.1.39",
-  "latest": "4.4.2",
+  "running": "4.4.2",
+  "latest": "4.6.0",
   "upgrade_available": true,
   "next_steps": [...]
 }
@@ -947,7 +947,7 @@ discourage trivial passphrases).
 
 ```text
 User:  "Check for upgrades."
-Agent: portfolio_version_check → "v4.4.2 available; you're on v4.4.1"
+Agent: portfolio_version_check → "v4.6.0 available; you're on v4.4.2"
 User:  "Upgrade me."
 Agent: 1. portfolio_export → save snap.json
        2. (if new host) portfolio_keys_backup with user-supplied passphrase
