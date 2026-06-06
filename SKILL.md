@@ -1017,7 +1017,7 @@ privacy model (what stays local vs what goes to which provider) see
 
 - Service code: Apache 2.0 (`ncz-os/mnemos-ic-runtime`)
 - Distribution-edge artifacts (this `SKILL.md`, `compose.yml`, `install.yaml`, `agent-skills/**`): **MIT-0** (MIT No Attribution — `LICENSE-MIT-0`). Required for ClawHub plugin publishing; the no-attribution clause means downstream skill registries can re-host without preserving copyright notice.
-- Image: `ghcr.io/argonautsystems/ic-engine:4.6.1-cpu@sha256:3367450c6926c9cd6ef6c9fd20bdf1445af2948340a8c12fc157f7b543410d53` (multi-arch amd64+arm64; also at `:latest`)
+- Image: `ghcr.io/argonautsystems/ic-engine:4.6.1-cpu` (multi-arch amd64+arm64; also at `:latest`)
 - RFC: see `RFC-v0.1.md` in this bundle (`ncz-os/mnemos-ic-runtime` GitHub repository)
 - Cross-project contract: `mnemos-os/mcp-contracts` GitHub repository
 

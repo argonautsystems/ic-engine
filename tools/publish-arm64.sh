@@ -41,6 +41,7 @@ fi
 echo ">> Building + pushing native arm64: ${IMG}:${VERSION}-cpu-arm64"
 docker buildx build \
   --platform linux/arm64 \
+  --build-arg VERSION="${VERSION}" \
   --tag "${IMG}:${VERSION}-cpu-arm64" \
   --provenance=false \
   --push \

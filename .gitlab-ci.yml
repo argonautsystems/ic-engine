@@ -1,5 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
-# CI for ncz-os/mnemos-ic-runtime — ARGOS self-hosted shell runner
+# CI for argonautsystems/ic-engine — ARGOS self-hosted shell runner
+#
+# RELEASE RITUAL: version tags (vX.Y.Z) MUST be pushed to GitLab — this is
+# the only place release images get built. Tags that only land on GitHub
+# produce no images (v4.2.x–v4.6.0 shipped amd64-only hand-pushed images
+# because their tags never reached GitLab; that broke Apple Silicon).
+# Push order per fleet policy: ARGONAS, then GitLab (CI fires), then GitHub.
 #
 # Runner: ARGOS (192.168.207.22) — Docker 29 + buildx 0.30, shell executor.
 # No Docker-in-Docker needed; jobs run directly on the ARGOS host shell.
@@ -10,6 +16,7 @@
 
 stages:
   - lint
+  - test
   - build
   - manifest
   - publish-record
@@ -40,6 +47,28 @@ lint:compose:
     - if: $CI_COMMIT_TAG
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
 
+# ── Test ──────────────────────────────────────────────────────────────────
+# Restored 2026-06-06: the repo consolidation (1bc986a) replaced this file
+# with the runtime repo's tag-only CI, which silently dropped unit-tests —
+# branch pushes ran no validation at all. All dependencies (incl. clio) are
+# vendored in-tree, so no CI_JOB_TOKEN git rewrite is needed anymore.
+unit-tests:
+  stage: test
+  tags: [argos, ncz-os]
+  before_script:
+    - export PATH="/usr/local/bin:/home/jasonperlow/.local/bin:$PATH"
+  script:
+    - uv sync --frozen
+    - uv run investorclaw --version
+    - uv run python -c "import ic_engine; print(f'ic_engine v{ic_engine.__version__}')"
+    - uv run python -c "import clio; print('vendored clio import ok')"
+    # Pytest collection (verifies imports work; doesn't run live network tests)
+    - uv run python -m pytest tests/ --collect-only -q
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+
 # ── Build ─────────────────────────────────────────────────────────────────
 # Shell executor on ARGOS: docker buildx is available on host.
 # Buildx builder named "multiarch" is pre-created on ARGOS with QEMU support.
@@ -65,6 +94,7 @@ build:amd64:
     - |
       docker buildx build \
         --platform linux/amd64 \
+        --build-arg VERSION="${VERSION}" \
         --tag $REGISTRY/$IMAGE_NAME:${VERSION}-cpu-amd64 \
         --provenance=false \
         --push \
@@ -79,6 +109,7 @@ build:arm64:
     - |
       docker buildx build \
         --platform linux/arm64 \
+        --build-arg VERSION="${VERSION}" \
         --tag $REGISTRY/$IMAGE_NAME:${VERSION}-cpu-arm64 \
         --provenance=false \
         --push \
@@ -95,33 +126,19 @@ manifest:multi-arch:
     - echo "$GHCR_PAT" | docker login $REGISTRY -u "$GHCR_USER" --password-stdin
   script:
     - export VERSION="${CI_COMMIT_TAG#v}"
-    # Remove any stale local manifest
-    - docker manifest rm $REGISTRY/$IMAGE_NAME:${VERSION}-cpu 2>/dev/null || true
+    # buildx imagetools, NOT `docker manifest create`: the latter refuses
+    # children that are themselves manifest lists (e.g. a per-arch tag
+    # re-tagged via imagetools), while imagetools flattens nested lists.
+    # Hit live on the first 4.6.0 arm64 publish (2026-06-05).
     - |
-      docker manifest create $REGISTRY/$IMAGE_NAME:${VERSION}-cpu \
+      docker buildx imagetools create --tag $REGISTRY/$IMAGE_NAME:${VERSION}-cpu \
         $REGISTRY/$IMAGE_NAME:${VERSION}-cpu-amd64 \
         $REGISTRY/$IMAGE_NAME:${VERSION}-cpu-arm64
     - |
-      docker manifest annotate $REGISTRY/$IMAGE_NAME:${VERSION}-cpu \
-        $REGISTRY/$IMAGE_NAME:${VERSION}-cpu-amd64 --os linux --arch amd64
-    - |
-      docker manifest annotate $REGISTRY/$IMAGE_NAME:${VERSION}-cpu \
-        $REGISTRY/$IMAGE_NAME:${VERSION}-cpu-arm64 --os linux --arch arm64 --variant v8
-    - docker manifest push --purge $REGISTRY/$IMAGE_NAME:${VERSION}-cpu
-    # :latest
-    - docker manifest rm $REGISTRY/$IMAGE_NAME:latest 2>/dev/null || true
-    - |
-      docker manifest create $REGISTRY/$IMAGE_NAME:latest \
+      docker buildx imagetools create --tag $REGISTRY/$IMAGE_NAME:latest \
         $REGISTRY/$IMAGE_NAME:${VERSION}-cpu-amd64 \
         $REGISTRY/$IMAGE_NAME:${VERSION}-cpu-arm64
-    - |
-      docker manifest annotate $REGISTRY/$IMAGE_NAME:latest \
-        $REGISTRY/$IMAGE_NAME:${VERSION}-cpu-amd64 --os linux --arch amd64
-    - |
-      docker manifest annotate $REGISTRY/$IMAGE_NAME:latest \
-        $REGISTRY/$IMAGE_NAME:${VERSION}-cpu-arm64 --os linux --arch arm64 --variant v8
-    - docker manifest push --purge $REGISTRY/$IMAGE_NAME:latest
-    - echo "MANIFEST_DIGEST=$(docker manifest inspect $REGISTRY/$IMAGE_NAME:${VERSION}-cpu --verbose | sha256sum | awk '{print $1}')" > manifest.env
+    - echo "MANIFEST_DIGEST=$(docker buildx imagetools inspect $REGISTRY/$IMAGE_NAME:${VERSION}-cpu --format '{{json .Manifest.Digest}}' | tr -d '\"')" > manifest.env
     - cat manifest.env
   artifacts:
     reports:

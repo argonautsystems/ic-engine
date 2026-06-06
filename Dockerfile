@@ -307,8 +307,10 @@ ENV IC_DASHBOARD_BIND=0.0.0.0:8092
 # IC_ENGINE_VERSION is read by /api/version + portfolio_version_check
 # so the bridge can self-report its image version (the OCI label below
 # isn't readable from inside the container without docker socket access).
-# Bump this AND the LABEL line at the bottom of the file together.
-ENV IC_ENGINE_VERSION=4.6.0
+# Set from the VERSION build-arg (CI and tools/publish-arm64.sh pass it);
+# local builds without the arg report "dev".
+ARG VERSION=dev
+ENV IC_ENGINE_VERSION=${VERSION}
 
 # ic-engine reads its own canonical env-var names (INVESTOR_CLAW_*).
 # Set them to the same values so subprocess'd analyzers honor /data/.
@@ -373,6 +375,6 @@ ENTRYPOINT ["/opt/ic-engine/.venv/bin/python", "-m", "investorclaw_bridge.serve"
 LABEL org.opencontainers.image.title="InvestorClaw ic-engine"
 LABEL org.opencontainers.image.description="Portfolio analysis service exposing MCP-HTTP at :8090 and a dashboard at :8092. Pairs with mnemos-os/mnemos-rs over compose."
 LABEL org.opencontainers.image.licenses="Apache-2.0"
-LABEL org.opencontainers.image.source="https://github.com/ncz-os/mnemos-ic-runtime"
+LABEL org.opencontainers.image.source="https://github.com/argonautsystems/ic-engine"
 LABEL org.opencontainers.image.documentation="https://investorclaw.app"
-LABEL org.opencontainers.image.version="4.6.0"
+LABEL org.opencontainers.image.version="${VERSION}"
