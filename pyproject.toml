@@ -75,6 +75,7 @@ Spec = "https://gitlab.com/argonautsystems/InvestorClaw/-/blob/main/docs/IC_DECO
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+asyncio_mode = "auto"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -107,6 +108,7 @@ clio = { path = "vendor/clio" }
 [dependency-groups]
 dev = [
     "pytest>=8.0",
+    "pytest-asyncio>=0.24",
     "pytest-cov>=5.0",
     "black>=23.0",
     "ruff>=0.1.0",
