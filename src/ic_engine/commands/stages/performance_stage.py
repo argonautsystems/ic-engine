@@ -128,6 +128,16 @@ class PerformanceStage(PipelineStage):
                 # Extract metrics
                 report_data = report.get("data", report) if isinstance(report, dict) else {}
 
+                # Additive Massive enrichment: per-symbol technical context
+                # (RSI-14 + SMA-50 latest values) for top holdings.
+                # Best-effort — skipped silently when Massive is absent.
+                try:
+                    technicals = self._fetch_technicals(portfolio)
+                    if technicals:
+                        report_data["technicals"] = technicals
+                except Exception as e:
+                    logger.debug(f"technicals enrichment skipped: {e}")
+
                 return StageResult(
                     stage_name=self.stage_name,
                     status="success",
@@ -158,3 +168,46 @@ class PerformanceStage(PipelineStage):
                 status="failed",
                 error=str(e),
             )
+
+    # Cap per-symbol Massive indicator calls (2 calls/symbol) to bound
+    # API usage per pipeline run.
+    _MAX_TECHNICALS_SYMBOLS = 10
+
+    def _fetch_technicals(self, portfolio) -> dict:
+        """Per-symbol technical context (RSI-14 + SMA-50 latest values) for
+        the top equity holdings by market value. Best-effort: {} when
+        Massive is absent; symbols with no data are omitted."""
+        import os
+
+        if not os.getenv("MASSIVE_API_KEY"):
+            return {}
+        try:
+            from ic_engine.providers.price_provider import MassiveProvider
+
+            provider = MassiveProvider()
+        except Exception as e:
+            logger.debug(f"Massive unavailable for technicals: {e}")
+            return {}
+        equities = sorted(
+            (p for p in portfolio.positions if p.asset_class == "equity"),
+            key=lambda p: p.market_value or 0.0,
+            reverse=True,
+        )[: self._MAX_TECHNICALS_SYMBOLS]
+        out: dict = {}
+        for p in equities:
+            entry: dict = {}
+            try:
+                rows = provider.get_indicator(p.symbol, "rsi", window=14, limit=1)
+                if rows:
+                    entry["rsi_14"] = rows[0].get("value")
+            except Exception as e:
+                logger.debug(f"technicals rsi({p.symbol}) failed: {e}")
+            try:
+                rows = provider.get_indicator(p.symbol, "sma", window=50, limit=1)
+                if rows:
+                    entry["sma_50"] = rows[0].get("value")
+            except Exception as e:
+                logger.debug(f"technicals sma({p.symbol}) failed: {e}")
+            if entry:
+                out[p.symbol] = entry
+        return out

@@ -113,6 +113,16 @@ class SynthesisStage(PipelineStage):
                 # Extract data
                 report_data = report.get("data", report) if isinstance(report, dict) else {}
 
+                # Additive Massive enrichment: fundamentals context (ratios +
+                # short interest) for top holdings. Best-effort — skipped
+                # silently when Massive is absent or any call fails.
+                try:
+                    fundamentals = self._fetch_fundamentals(portfolio)
+                    if fundamentals:
+                        report_data["fundamentals"] = fundamentals
+                except Exception as e:
+                    logger.debug(f"fundamentals enrichment skipped: {e}")
+
                 return StageResult(
                     stage_name=self.stage_name,
                     status="success",
@@ -143,3 +153,53 @@ class SynthesisStage(PipelineStage):
                 status="failed",
                 error=str(e),
             )
+
+    # Cap per-symbol Massive fundamentals calls (2 calls/symbol) to bound
+    # API usage per pipeline run.
+    _MAX_FUNDAMENTALS_SYMBOLS = 10
+
+    @staticmethod
+    def _build_massive():
+        """Best-effort MassiveProvider; None when key absent/unavailable."""
+        import os
+
+        if not os.getenv("MASSIVE_API_KEY"):
+            return None
+        try:
+            from ic_engine.providers.price_provider import MassiveProvider
+
+            return MassiveProvider()
+        except Exception as e:
+            logger.debug(f"Massive unavailable for fundamentals: {e}")
+            return None
+
+    def _fetch_fundamentals(self, portfolio) -> dict:
+        """Per-symbol fundamentals (financial ratios + short interest) for
+        the top equity holdings by market value. Best-effort: {} when
+        Massive is absent; symbols with no data are omitted."""
+        provider = self._build_massive()
+        if provider is None:
+            return {}
+        equities = sorted(
+            (p for p in portfolio.positions if p.asset_class == "equity"),
+            key=lambda p: p.market_value or 0.0,
+            reverse=True,
+        )[: self._MAX_FUNDAMENTALS_SYMBOLS]
+        out: dict = {}
+        for p in equities:
+            entry: dict = {}
+            try:
+                ratios = provider.get_financial_ratios(p.symbol)
+                if ratios:
+                    entry["ratios"] = ratios
+            except Exception as e:
+                logger.debug(f"fundamentals ratios({p.symbol}) failed: {e}")
+            try:
+                short = provider.get_short_interest(p.symbol)
+                if short:
+                    entry["short_interest"] = short
+            except Exception as e:
+                logger.debug(f"fundamentals short_interest({p.symbol}) failed: {e}")
+            if entry:
+                out[p.symbol] = entry
+        return out
