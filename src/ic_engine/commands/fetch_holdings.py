@@ -887,7 +887,7 @@ class PortfolioFetcher:
 
             # Cash heuristic: description matches cash-like keywords, OR null symbol + null CUSIP
             _cash_keywords = (
-                r"cash|credit balance|trade date balance|sweep|deposit account|"
+                r"\bcash\b|credit balance|trade date balance|sweep|deposit account|"
                 r"insured|money market|money fund|mmf|bank usa|bank deposit|"
                 r"sweep program|cash alternatives|certificate of deposit|brokered cd|"
                 r"\bcd\b|interest|dividend"
@@ -1292,6 +1292,7 @@ class PortfolioFetcher:
             lambda: {
                 "market_value": 0.0,
                 "shares": 0.0,
+                "unrealized_gl": 0.0,
                 "price": None,
                 "_row": None,
                 "_asset_type": None,
@@ -1327,6 +1328,15 @@ class PortfolioFetcher:
                 _sh_f = 0.0
             _agg[_agg_key]["market_value"] += _mv_f
             _agg[_agg_key]["shares"] += _sh_f
+            try:
+                _u = (
+                    float(_row.get("unrealized_gain_loss"))
+                    if _row.get("unrealized_gain_loss") is not None
+                    else 0.0
+                )
+            except (ValueError, TypeError):
+                _u = 0.0
+            _agg[_agg_key]["unrealized_gl"] += _u
             if _agg[_agg_key]["price"] is None:
                 _agg[_agg_key]["price"] = _row.get("price")
             if _agg[_agg_key]["_row"] is None:
@@ -1357,6 +1367,11 @@ class PortfolioFetcher:
         for _agg_key, _data in _agg.items():
             _base = dict(_data["_row"])  # copy first row for non-aggregated fields
             _base["market_value"] = _data["market_value"]
+            _base["unrealized_gain_loss"] = _data["unrealized_gl"]
+            _cost_basis = _data["market_value"] - _data["unrealized_gl"]
+            _base["unrealized_gain_loss_pct"] = (
+                _data["unrealized_gl"] / _cost_basis * 100 if _cost_basis != 0 else 0.0
+            )
             _base["shares"] = _data["shares"]
             if _data["price"] is not None:
                 _base["price"] = _data["price"]
