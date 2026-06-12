@@ -285,7 +285,7 @@ def _load_managed_accounts_from_env() -> set:
     Load the set of account names that are discretionary-managed (e.g. UBS managed strategies).
 
     Format: MANAGED_ACCOUNTS=account_id1,account_id2,...
-    Partial substring match is supported (e.g. "JT Value Stock" matches "(BX 12345) JT Value Stock")
+    Partial substring match is supported (e.g. "My Brokerage" matches "(BX 12345) My Brokerage")
 
     Returns: set of raw account IDs/substrings to match against
     """
@@ -314,7 +314,7 @@ def _load_account_labels_from_env() -> Dict[str, str]:
 
     Format: ACCOUNT_LABELS=account_id:display_name,account_id2:display_name2
     Example:
-      ACCOUNT_LABELS=(BX 12345):Retirement 401K,(BX 67890) JT Brokerage:Joint Brokerage
+      ACCOUNT_LABELS=(BX 12345):Retirement 401K,(BX 67890) Joint Brokerage:Joint Brokerage
 
     Returns: Dict mapping raw account ID (as it appears in CSV) -> friendly display name
     """
