@@ -581,7 +581,7 @@ def build_trade_list(
     # Second pass: wash-sale flags on SELL orders
     sell_orders = [t for t in trade_list if t["action"] == "SELL"]
     wash_flags = (
-        detect_wash_sales(sell_orders, lot_records, as_of) if is_fa_pro_enabled() or True else []
+        detect_wash_sales(sell_orders, lot_records, as_of) if is_fa_pro_enabled() else []
     )
     flagged_symbols = {f["symbol"] for f in wash_flags}
     for t in trade_list:

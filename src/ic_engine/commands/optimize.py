@@ -288,11 +288,11 @@ def fetch_bond_returns_fred(symbols: List[str], period: str = "1y") -> pd.DataFr
         idx = pd.bdate_range(end=pd.Timestamp.now().normalize(), periods=periods)
         return pd.DataFrame({sym: [value] * periods for sym in symbols}, index=idx)
 
-    fred_key = os.environ.get("FRED_API_KEY") or os.environ.get("FRED_API_KEY")
+    fred_key = os.environ.get("FRED_API_KEY")
     if not fred_key:
         logger.warning("FRED_API_KEY not found, falling back to constant returns for bonds")
         # Fallback: use bond ETF proxy yields
-        return _constant_bond_returns(0.04)
+        return _constant_bond_returns(0.04 / 252)
 
     try:
         import requests

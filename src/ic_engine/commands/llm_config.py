@@ -29,6 +29,7 @@ import os
 import socket
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 from typing import Dict, Optional
 
 logging.basicConfig(level=logging.WARNING)
@@ -74,13 +75,13 @@ def detect_local_llama_server() -> Optional[str]:
 def test_endpoint(endpoint: str, api_key: str = "", model: str = "") -> bool:
     """Test if an endpoint is reachable."""
     try:
-        if endpoint.startswith("http://localhost") or endpoint.startswith("http://127.0.0.1"):
-            return port_open(
-                endpoint.split("://")[1].split(":")[0],
-                int(endpoint.split(":")[-1]),
-            )
+        parsed = urlparse(endpoint)
+        hostname = parsed.hostname
+        if not hostname:
+            return False
+        if hostname in {"localhost", "127.0.0.1"}:
+            return port_open(hostname, parsed.port or 80)
         # For cloud endpoints, just test DNS resolution
-        hostname = endpoint.split("://")[1].split(":")[0]
         socket.gethostbyname(hostname)
         return True
     except Exception:

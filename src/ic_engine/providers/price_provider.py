@@ -567,45 +567,50 @@ class MassiveProvider(MassiveSurfaceMixin):
         ticker call with an unsupported batch kwarg.
         """
         results: Dict[str, Dict] = {}
+        forex_symbols = [s for s in symbols if "/" in s]
+        stock_symbols = [s for s in symbols if "/" not in s]
 
-        # Try batch snapshot (Starter+ plan only)
-        try:
-            # Support stocks and forex via market_type
-            market = "forex" if any("/" in s for s in symbols) else "stocks"
-            data = self._client.get_snapshot_all(market_type=market, tickers=symbols)
-            if data:
-                for t in data:
-                    day = getattr(t, "day", None)
-                    last = getattr(t, "last_trade", None)
-                    ticker = getattr(t, "ticker", None)
-                    if not ticker:
-                        continue
-                    price = (
-                        (getattr(day, "close", None) or getattr(day, "c", None) if day else None)
-                        or (
-                            getattr(last, "price", None) or getattr(last, "p", None)
-                            if last
-                            else None
-                        )
-                        or 0
+        def _snapshot_all(market_type: str, tickers: List[str]) -> None:
+            data = self._client.get_snapshot_all(market_type=market_type, tickers=tickers)
+            if not data:
+                return
+            for t in data:
+                day = getattr(t, "day", None)
+                last = getattr(t, "last_trade", None)
+                ticker = getattr(t, "ticker", None)
+                if not ticker:
+                    continue
+                price = (
+                    (getattr(day, "close", None) or getattr(day, "c", None) if day else None)
+                    or (
+                        getattr(last, "price", None) or getattr(last, "p", None)
+                        if last
+                        else None
                     )
-                    results[ticker] = {
-                        "symbol": ticker,
-                        "price": price,
-                        "open": (getattr(day, "open", None) or getattr(day, "o", None))
-                        if day
-                        else 0,
-                        "high": (getattr(day, "high", None) or getattr(day, "h", None))
-                        if day
-                        else 0,
-                        "low": (getattr(day, "low", None) or getattr(day, "l", None)) if day else 0,
-                        "volume": (getattr(day, "volume", None) or getattr(day, "v", None))
-                        if day
-                        else 0,
-                        "provider": self.NAME,
-                    }
-                if results:
-                    return results
+                    or 0
+                )
+                results[ticker] = {
+                    "symbol": ticker,
+                    "price": price,
+                    "open": (getattr(day, "open", None) or getattr(day, "o", None)) if day else 0,
+                    "high": (getattr(day, "high", None) or getattr(day, "h", None)) if day else 0,
+                    "low": (getattr(day, "low", None) or getattr(day, "l", None)) if day else 0,
+                    "volume": (getattr(day, "volume", None) or getattr(day, "v", None))
+                    if day
+                    else 0,
+                    "provider": self.NAME,
+                }
+
+        # Try batch snapshot (Starter+ plan only). Forex and stocks use different
+        # market_type values; keep mixed batches split so equity quotes are not
+        # accidentally sent to the forex endpoint.
+        try:
+            if stock_symbols:
+                _snapshot_all("stocks", stock_symbols)
+            if forex_symbols:
+                _snapshot_all("forex", forex_symbols)
+            if results:
+                return results
         except Exception as e:
             logger.debug(f"Massive snapshot_all unavailable: {e}; falling back to sequential")
 

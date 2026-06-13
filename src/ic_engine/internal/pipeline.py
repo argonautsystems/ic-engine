@@ -495,7 +495,6 @@ class PortfolioPipeline:
             "bonds",
             "analyst",
             "news",
-            "synthesis",
             "optimization",
             "cashflow",
             "peer",
@@ -550,6 +549,23 @@ class PortfolioPipeline:
                 self.metrics.stages_failed += 1
                 logger.warning("Full pipeline stage %s failed: %s", result.stage_name, result.error)
 
+        synthesis_start = time.time()
+        synthesis_result = await execute_full_stage("synthesis")
+        synthesis_elapsed = (time.time() - synthesis_start) * 1000
+        self.metrics.p2_duration_ms = synthesis_elapsed
+        context.upstream_results[synthesis_result.stage_name] = synthesis_result
+        if synthesis_result.status == "success":
+            self.metrics.stages_completed += 1
+        elif synthesis_result.status == "skipped":
+            self.metrics.stages_skipped += 1
+        else:
+            self.metrics.stages_failed += 1
+            logger.warning(
+                "Full pipeline stage %s failed: %s",
+                synthesis_result.stage_name,
+                synthesis_result.error,
+            )
+
         total_elapsed = (time.time() - start_time) * 1000
         self.metrics.total_duration_ms = total_elapsed
 
@@ -570,6 +586,7 @@ class PortfolioPipeline:
                 "detailed_metrics": self.metrics.to_dict(),
                 "full_pipeline": True,
                 "parallel_sections": fanout_stages,
+                "serial_sections": ["synthesis"],
             },
         )
 

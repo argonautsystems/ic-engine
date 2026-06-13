@@ -190,9 +190,10 @@ class Holding:
         """
         if self.market_value is not None:
             return self.market_value
-        if self.asset_type in self._FUTURES_ASSET_TYPES:
+        asset_type = self.asset_type.lower()
+        if asset_type in self._FUTURES_ASSET_TYPES:
             return self.shares * self.current_price * self._futures_multiplier()
-        if self.asset_type in self._OPTION_ASSET_TYPES:
+        if asset_type in self._OPTION_ASSET_TYPES:
             # Options: premium is quoted per share; one contract controls
             # 100 shares, so dollar value is price × 100 × contracts.
             return self._option_contracts() * self.current_price * self._option_multiplier()
@@ -213,11 +214,12 @@ class Holding:
         (price − entry) × multiplier × contracts.  For all other asset types,
         purchase_price is already in dollars-per-unit.
         """
-        if self.asset_type in self._BOND_ASSET_TYPES:
+        asset_type = self.asset_type.lower()
+        if asset_type in self._BOND_ASSET_TYPES:
             return self.shares * self.purchase_price / 100.0
-        if self.asset_type in self._FUTURES_ASSET_TYPES:
+        if asset_type in self._FUTURES_ASSET_TYPES:
             return self.shares * self.purchase_price * self._futures_multiplier()
-        if self.asset_type in self._OPTION_ASSET_TYPES:
+        if asset_type in self._OPTION_ASSET_TYPES:
             # Same ×100 multiplier as :attr:`value` so unrealized P&L is
             # (premium − entry premium) × 100 × contracts.
             return self._option_contracts() * self.purchase_price * self._option_multiplier()

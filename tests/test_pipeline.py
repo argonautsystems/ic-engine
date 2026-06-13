@@ -395,6 +395,40 @@ def test_report_exporter_exports_cdm_bond_quantity_and_cash_amount(tmp_path):
     assert float(cash_row["Amount"]) == 2_500.0
 
 
+def test_report_exporter_xlsx_escapes_formula_like_cells(tmp_path):
+    pytest.importorskip("openpyxl")
+    from openpyxl import load_workbook
+
+    from ic_engine.commands.export_report import ReportExporter
+
+    exporter = ReportExporter()
+    exporter.holdings_data = {
+        "portfolio": {
+            "equity": {
+                "=HYPERLINK(\"https://example.com\")": {
+                    "shares": 1,
+                    "current_price": 10,
+                    "market_value": 10,
+                    "purchase_price": 9,
+                    "sector": "+Tech",
+                }
+            },
+            "bonds": {},
+            "cash": {},
+            "margin": {},
+        }
+    }
+    exporter.performance_data = {}
+
+    output_file = tmp_path / "portfolio_report.xlsx"
+    exporter.export_to_excel(str(output_file))
+
+    wb = load_workbook(output_file, data_only=False)
+    ws = wb["Equities"]
+    assert ws["B2"].value.startswith("'=HYPERLINK")
+    assert ws["K2"].value == "'+Tech"
+
+
 def test_pipeline_external_cdm_exports_report_csv_without_keyerror(tmp_path, monkeypatch):
     """An external raw CDM input gets normalized into .raw/holdings.json and
     then loaded by the real ReportExporter. The second normalization pass must

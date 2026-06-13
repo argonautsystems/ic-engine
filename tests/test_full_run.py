@@ -32,15 +32,20 @@ class _FakeHoldingsLoader:
 
 
 class _SleepStage:
-    def __init__(self, stage_name: str, delay: float = 0.0):
+    def __init__(self, stage_name: str, delay: float = 0.0, seen: list[str] | None = None):
         self.stage_name = stage_name
         self.delay = delay
+        self.seen = seen
         self.holdings_file = None
 
     async def execute(self, context):
-        del context
+        if self.stage_name == "synthesis":
+            required = {"performance", "bonds", "analyst", "news"}
+            assert required.issubset(context.upstream_results)
         if self.delay:
             await asyncio.sleep(self.delay)
+        if self.seen is not None:
+            self.seen.append(self.stage_name)
         return StageResult(
             stage_name=self.stage_name,
             status="success",
@@ -86,16 +91,17 @@ def test_portfolio_pipeline_run_full_fans_out_downstream_sections(tmp_path, monk
 
     monkeypatch.setattr(holdings_loader_mod, "HoldingsLoader", _FakeHoldingsLoader)
     pipeline = PortfolioPipeline(cache_dir=tmp_path / "cache")
+    seen: list[str] = []
     pipeline.stages = {
-        "holdings": _SleepStage("holdings"),
-        "performance": _SleepStage("performance", 0.1),
-        "bonds": _SleepStage("bonds", 0.1),
-        "analyst": _SleepStage("analyst", 0.1),
-        "news": _SleepStage("news", 0.1),
-        "synthesis": _SleepStage("synthesis", 0.1),
-        "optimization": _SleepStage("optimization", 0.1),
-        "cashflow": _SleepStage("cashflow", 0.1),
-        "peer": _SleepStage("peer", 0.1),
+        "holdings": _SleepStage("holdings", seen=seen),
+        "performance": _SleepStage("performance", 0.1, seen),
+        "bonds": _SleepStage("bonds", 0.1, seen),
+        "analyst": _SleepStage("analyst", 0.1, seen),
+        "news": _SleepStage("news", 0.1, seen),
+        "synthesis": _SleepStage("synthesis", 0.1, seen),
+        "optimization": _SleepStage("optimization", 0.1, seen),
+        "cashflow": _SleepStage("cashflow", 0.1, seen),
+        "peer": _SleepStage("peer", 0.1, seen),
     }
     holdings_file = _holdings_file(tmp_path)
 
@@ -107,5 +113,9 @@ def test_portfolio_pipeline_run_full_fans_out_downstream_sections(tmp_path, monk
     assert set(result.stages) == set(pipeline.stages)
     assert elapsed < 0.45
     assert result._metadata["full_pipeline"] is True
-    assert len(result._metadata["parallel_sections"]) == 8
+    assert len(result._metadata["parallel_sections"]) == 7
+    assert result._metadata["serial_sections"] == ["synthesis"]
+    assert seen.index("synthesis") > max(
+        seen.index(stage) for stage in ["performance", "bonds", "analyst", "news"]
+    )
 

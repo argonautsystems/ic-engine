@@ -32,6 +32,7 @@ import json
 import tempfile
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 # ---------------------------------------------------------------------------
@@ -78,6 +79,34 @@ def test_cost_basis_government_bond_divides_by_100():
     assert abs(h.cost_basis - 1_000.00) < 0.01
 
 
+def test_cost_basis_capitalized_bond_type_divides_by_100():
+    h = _make_holding("Bond", 10_000, 99.769)
+    assert h.cost_basis == pytest.approx(9_976.90)
+
+
+def test_value_capitalized_futures_type_uses_multiplier():
+    h = Holding(
+        symbol="ES",
+        asset_type="Futures",
+        shares=2,
+        current_price=5000,
+        purchase_price=4900,
+        futures_multiplier=50,
+    )
+    assert h.value == pytest.approx(500_000)
+
+
+def test_value_capitalized_option_type_uses_multiplier():
+    h = Holding(
+        symbol="AAPL250117C00100000",
+        asset_type="Option",
+        shares=3,
+        current_price=5,
+        purchase_price=4,
+    )
+    assert h.value == pytest.approx(1_500)
+
+
 def test_cost_basis_bond_not_inflated_100x():
     """Regression: cost_basis must NOT equal shares * purchase_price for bonds."""
     h = _make_holding("bond", 3_000, 99.769)
@@ -121,6 +150,23 @@ def test_holding_prefers_explicit_unrealized_gain_loss():
 
     assert h.unrealized_gain_loss == pytest.approx(123.45)
     assert h.unrealized_gain_loss_pct == pytest.approx(0.1234)
+
+
+def test_calculate_max_drawdown_seeds_initial_wealth():
+    from ic_engine.services.portfolio_utils import calculate_max_drawdown
+
+    assert calculate_max_drawdown(np.array([100.0, 90.0, 95.0])) == pytest.approx(-0.10)
+
+
+def test_calculate_beta_uses_sample_variance_to_match_covariance():
+    from ic_engine.services.portfolio_utils import calculate_beta
+
+    asset_returns = np.array([0.01, 0.02, 0.04])
+    benchmark_returns = np.array([0.005, 0.015, 0.025])
+    expected = np.cov(asset_returns, benchmark_returns)[0][1] / np.var(
+        benchmark_returns, ddof=1
+    )
+    assert calculate_beta(asset_returns, benchmark_returns) == pytest.approx(expected)
 
 
 # ---------------------------------------------------------------------------
@@ -400,6 +446,35 @@ def test_massive_provider_news_uses_reference_news_results(monkeypatch):
             "provider": "massive",
         }
     ]
+
+
+def test_massive_provider_get_quotes_splits_mixed_stock_and_forex_batches():
+    from ic_engine.providers.price_provider import MassiveProvider
+
+    class Snapshot:
+        def __init__(self, ticker, close):
+            self.ticker = ticker
+            self.day = type("Day", (), {"close": close, "open": close, "high": close, "low": close, "volume": 1})()
+            self.last_trade = None
+
+    class FakeClient:
+        def __init__(self):
+            self.calls = []
+
+        def get_snapshot_all(self, market_type, tickers):
+            self.calls.append((market_type, tickers))
+            return [Snapshot(ticker, idx + 1) for idx, ticker in enumerate(tickers)]
+
+    provider = MassiveProvider.__new__(MassiveProvider)
+    provider._client = FakeClient()
+
+    quotes = provider.get_quotes(["AAPL", "EUR/USD", "MSFT"])
+
+    assert provider._client.calls == [
+        ("stocks", ["AAPL", "MSFT"]),
+        ("forex", ["EUR/USD"]),
+    ]
+    assert set(quotes) == {"AAPL", "MSFT", "EUR/USD"}
 
 
 def test_bond_analyzer_excludes_cash_equivalent_cusip_rows():

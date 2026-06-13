@@ -211,7 +211,7 @@ def calculate_max_drawdown(prices: np.ndarray) -> float:
     if len(prices) < 2:
         return 0.0
     daily_returns = np.diff(prices) / prices[:-1]
-    cumulative = np.cumprod(1 + daily_returns)
+    cumulative = np.concatenate(([1.0], np.cumprod(1 + daily_returns)))
     running_max = np.maximum.accumulate(cumulative)
     drawdown = (cumulative - running_max) / running_max
     return float(np.min(drawdown))
@@ -237,7 +237,7 @@ def calculate_beta(asset_returns: np.ndarray, benchmark_returns: np.ndarray) -> 
     a = asset_returns[-min_len:]
     b = benchmark_returns[-min_len:]
 
-    benchmark_variance = float(np.var(b))
+    benchmark_variance = float(np.var(b, ddof=1))
     if benchmark_variance == 0:
         return 1.0
 

@@ -2810,11 +2810,11 @@ class PortfolioFetcher:
                     f"  {Colors.CYAN}Cash{Colors.RESET}: {format_currency(summary.get('cash_value', 0))} ({summary.get('cash_pct', 0):.1f}%)"
                 )
 
-                if summary.get("accounts"):
+                if compact.get("accounts"):
                     print(format_header("Accounts", width=50))
-                    for acct_name, acct_data in summary.get("accounts", {}).items():
+                    for acct_name, acct_data in compact.get("accounts", {}).items():
                         print(
-                            f"  {Colors.CYAN}{acct_name}{Colors.RESET}: {format_currency(acct_data.get('total_value', 0))}"
+                            f"  {Colors.CYAN}{acct_name}{Colors.RESET}: {format_currency(acct_data.get('value', 0))} ({acct_data.get('weight_pct', 0):.1f}%)"
                         )
 
                 if compact.get("top_equity"):
@@ -2822,7 +2822,7 @@ class PortfolioFetcher:
                     for holding in compact.get("top_equity", [])[:5]:
                         symbol = holding.get("symbol", "?")
                         value = holding.get("value", 0)
-                        pct = holding.get("pct", 0)
+                        pct = holding.get("weight_pct", 0)
                         print(
                             f"  {Colors.CYAN}{symbol:6s}{Colors.RESET} {format_currency(value):>12s} ({pct:5.1f}%)"
                         )

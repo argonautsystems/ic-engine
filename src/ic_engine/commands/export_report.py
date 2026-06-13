@@ -44,6 +44,13 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 
+def _excel_safe_cell(value):
+    """Prevent Excel formula injection for string-like cell values."""
+    if isinstance(value, str) and value.startswith(("=", "+", "-", "@")):
+        return f"'{value}"
+    return value
+
+
 class ReportExporter:
     def __init__(self):
         self.holdings_data = {}
@@ -435,11 +442,11 @@ class ReportExporter:
                 ws = wb.create_sheet(title=sheet_name)
 
                 # Write header row
-                ws.append(df.columns)
+                ws.append([_excel_safe_cell(col) for col in df.columns])
 
                 # Write data rows
                 for row in df.rows():
-                    ws.append(list(row))
+                    ws.append([_excel_safe_cell(value) for value in row])
 
             wb.save(str(output_path))
             logger.info(f"Exported complete portfolio report to {output_path}")
