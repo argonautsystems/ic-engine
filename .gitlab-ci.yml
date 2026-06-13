@@ -16,7 +16,10 @@
 
 workflow:
   rules:
-    - if: $CI_COMMIT_BRANCH =~ /^(hive|zcbuild)/
+    # Skip CI on transient/snapshot branches that otherwise flood the shared
+    # ARGOS runner: hive/* + zcbuild/* worker branches, archive/* job-result
+    # snapshots, wip/* scratch. CI runs only on default branch, MRs, and tags.
+    - if: $CI_COMMIT_BRANCH =~ /^(hive|zcbuild|archive|wip)/
       when: never
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
