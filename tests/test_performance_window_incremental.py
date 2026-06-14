@@ -390,6 +390,38 @@ def test_split_triggers_full_window_rebuild(monkeypatch, tmp_path):
     assert meta.get("split_rebuilt_at") == "2026-06-14"
 
 
+def test_narrow_then_wide_same_end_keeps_older_dividends(monkeypatch, tmp_path):
+    """M1(rev): a narrow window must not poison a later wider same-end window's
+    dividends (full history is synced through end, not just the narrow tail)."""
+    monkeypatch.setenv("INVESTORCLAW_OHLCV_PANEL_DIR", str(tmp_path / "panel"))
+    from ic_engine.commands import performance_window_cache as cache
+
+    # Full dated history; the older event is outside the narrow window but inside
+    # the wide one.
+    all_events = [
+        {"date": "2026-01-15", "amount": 1.00, "source": "test"},
+        {"date": "2026-06-13", "amount": 0.25, "source": "test"},
+    ]
+    monkeypatch.setattr(
+        cache,
+        "_fetch_dividend_events",
+        lambda sym, s, e, agg: [ev for ev in all_events if s <= ev["date"] <= e],
+    )
+    analyzer = _FakeAnalyzer()
+
+    # Narrow window first (only the 06-13 event falls inside).
+    _pl, narrow_div, _f = cache.update_and_slice_panel(
+        analyzer, ["AAA"], "2026-06-10", "2026-06-14"
+    )
+    assert abs(narrow_div["AAA"] - 0.25) < 1e-9
+
+    # Wider window, SAME end: must still see the older 2026-01-15 dividend.
+    _pl, wide_div, _f = cache.update_and_slice_panel(
+        analyzer, ["AAA"], "2026-01-01", "2026-06-14"
+    )
+    assert abs(wide_div["AAA"] - 1.25) < 1e-9
+
+
 def test_new_symbol_triggers_its_fetch_only(monkeypatch, tmp_path):
     monkeypatch.setenv("INVESTORCLAW_OHLCV_PANEL_DIR", str(tmp_path / "panel"))
     analyzer = _FakeAnalyzer()

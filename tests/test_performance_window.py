@@ -153,6 +153,16 @@ def test_build_performance_window_reuses_analyzer_total_returns(monkeypatch, tmp
         "ic_engine.commands.analyze_performance_polars.PerformanceAnalyzer.calculate_returns",
         fake_returns,
     )
+    # Dated dividend events are the authoritative source; mock them so the test
+    # is hermetic (no live Massive) and AAA carries a 0.20 in-window dividend.
+    monkeypatch.setattr(
+        "ic_engine.commands.performance_window_cache._fetch_dividend_events",
+        lambda sym, s, e, agg: (
+            [{"date": "2026-06-14", "amount": 0.20, "source": "test"}]
+            if sym.upper() == "AAA"
+            else []
+        ),
+    )
 
     envelope = build_performance_window(_holdings_file(tmp_path), period="1w", today=date(2026, 6, 14))
     validate_envelope(envelope)

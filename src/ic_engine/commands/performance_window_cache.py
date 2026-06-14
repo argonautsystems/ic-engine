@@ -33,24 +33,28 @@ def panel_root() -> Path:
 
 
 def _safe_symbol(symbol: str) -> str:
-    cleaned = "".join(ch if ch.isalnum() or ch in ("-", "_", ".") else "_" for ch in symbol.upper())
+    # No dots in the stem: a dot would let Path.with_suffix / extension handling
+    # truncate the disambiguating digest (e.g. "BRK.B.<hash>" -> "BRK.B"), so
+    # distinct symbols could collide on the same panel/meta/lock file.
+    cleaned = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in symbol.upper())
     digest = hashlib.sha256(symbol.upper().encode("utf-8")).hexdigest()[:10]
-    return f"{cleaned}.{digest}"
+    return f"{cleaned}_{digest}"
 
 
 def _symbol_paths(symbol: str) -> tuple[Path, Path]:
     base = panel_root() / "symbols" / _safe_symbol(symbol)
-    return base.with_suffix(".parquet"), base.with_suffix(".meta.json")
+    # Append extensions instead of with_suffix so the digest is never dropped.
+    return base.parent / f"{base.name}.parquet", base.parent / f"{base.name}.meta.json"
 
 
 def _symbol_dividend_path(symbol: str) -> Path:
     base = panel_root() / "dividends" / _safe_symbol(symbol)
-    return base.with_suffix(".dividends.json")
+    return base.parent / f"{base.name}.dividends.json"
 
 
 def _symbol_lock_path(symbol: str) -> Path:
     base = panel_root() / "locks" / _safe_symbol(symbol)
-    return base.with_suffix(".lock")
+    return base.parent / f"{base.name}.lock"
 
 
 @contextlib.contextmanager
@@ -335,11 +339,13 @@ def _looks_like_split(existing: pd.DataFrame, fetched: pd.DataFrame) -> bool:
     new_close = float(new.iloc[0])
     if prev_close <= 0 or new_close <= 0:
         return False
+    # Any large day-over-day discontinuity (≥1.5x either direction) signals a
+    # split/adjustment-basis change rather than a normal return — this covers
+    # odd-ratio (7:1, 20:1) and reverse splits, not just {2,3,4,5,10}. A genuine
+    # >50% single-session move on adjusted closes is essentially never a real
+    # equity return, so the worst case is a (rare) extra full refetch.
     ratio = max(prev_close / new_close, new_close / prev_close)
-    return any(
-        abs(ratio - candidate) / candidate <= 0.03
-        for candidate in (2.0, 3.0, 4.0, 5.0, 10.0)
-    )
+    return ratio >= 1.5
 
 
 def _fetch_dividend_events(
@@ -552,14 +558,36 @@ def update_and_slice_panel(
         symbol = str(raw_symbol).upper()
         with _symbol_file_lock(symbol):
             panel = _load_symbol_panel(symbol)
+            prior_panel_max = (
+                pd.Timestamp(panel.index.max()).date() if not panel.empty else None
+            )
             meta = _load_meta(symbol)
             div_events = _load_dividend_events(symbol)
+            prior_div_dates = {e["date"] for e in div_events}
             changed = False
-            split_detected = False
+            discontinuity = False
             aggregate_hint = 0.0
+            today_anchor = date.today()
+
+            def _record_attempted(
+                fstart: date, fend: date, got_dates: set[date]
+            ) -> None:
+                # Finalize past holes (weekends/holidays) so they aren't retried,
+                # but never finalize today/future days whose bar we did not get:
+                # an intraday call before the EOD bar exists must be able to
+                # refetch today once the data lands.
+                last_final = fend
+                while (
+                    last_final >= today_anchor
+                    and last_final not in got_dates
+                    and last_final >= fstart
+                ):
+                    last_final = last_final - timedelta(days=1)
+                if last_final >= fstart:
+                    _add_attempted_range(meta, fstart, last_final)
 
             def fetch_and_merge(fetch_start: date, fetch_end: date) -> None:
-                nonlocal panel, changed, split_detected, aggregate_hint
+                nonlocal panel, changed, discontinuity, aggregate_hint
                 if fetch_start > fetch_end:
                     return
                 try:
@@ -568,56 +596,31 @@ def update_and_slice_panel(
                     )
                     aggregate_hint = max(aggregate_hint, aggregate)
                     if _looks_like_split(panel, fetched):
-                        # The fresh bars are on a different split/adjustment basis
-                        # than the cached bars. Flag for a full rebuild so the whole
-                        # series shares one basis (avoids a boundary return that
-                        # diverges from an uncached full fetch).
-                        split_detected = True
+                        # Fresh bars sit on a different split/adjustment basis than
+                        # the cached bars (any large day-over-day discontinuity).
+                        discontinuity = True
+                    got = {pd.Timestamp(i).date() for i in getattr(fetched, "index", [])}
                     panel = _merge_panel(panel, fetched)
-                    _add_attempted_range(meta, fetch_start, fetch_end)
+                    _record_attempted(fetch_start, fetch_end, got)
                     changed = True
                 except Exception as exc:
                     logger.warning(
                         "OHLCV panel delta fetch failed for %s %s..%s: %s",
                         symbol, fetch_start, fetch_end, exc,
                     )
-                    # Record failed attempts so empty/no-data symbols do not
-                    # refetch the same range every call.
-                    _add_attempted_range(meta, fetch_start, fetch_end)
+                    _record_attempted(fetch_start, fetch_end, set())
                     changed = True
 
             for fetch_start, fetch_end in _missing_ranges(panel, meta, start, end):
                 fetch_and_merge(fetch_start, fetch_end)
 
-            if split_detected:
-                # Corporate action: drop the symbol's cached history and refetch
-                # the whole window once so every bar is on today's adjustment
-                # basis. Rare (≈ splits) so the one-time full fetch is acceptable.
-                logger.info(
-                    "OHLCV panel adjustment-basis change for %s; full window rebuild", symbol
-                )
-                panel = pd.DataFrame(columns=list(_OHLCV_FIELDS))
-                meta["attempted_ranges"] = []
-                meta.pop("dividend_synced_through", None)
-                meta["split_rebuilt_at"] = end.isoformat()
-                try:
-                    fetched, aggregate = _fetch_symbol_range(
-                        analyzer, symbol, start.isoformat(), end.isoformat()
-                    )
-                    aggregate_hint = max(aggregate_hint, aggregate)
-                    panel = _merge_panel(panel, fetched)
-                    _add_attempted_range(meta, start, end)
-                except Exception as exc:
-                    logger.warning("OHLCV panel split rebuild failed for %s: %s", symbol, exc)
-                changed = True
-
-            # Sync dividends at most once per symbol per window end: the event
-            # store already holds the full dated history, so re-pulling Massive's
-            # 1000-row dividend feed for every price hole is wasteful.
+            # Sync dividends at most once per symbol per window end. Fetch the FULL
+            # dated history (start "1900-01-01") so a later WIDER same-end window
+            # is not starved of older dividends by a prior narrow sync.
             div_synced_through = str(meta.get("dividend_synced_through") or "")
             if end.isoformat() > div_synced_through:
                 fresh_events = _fetch_dividend_events(
-                    symbol, start_date, end_date, aggregate_hint
+                    symbol, "1900-01-01", end_date, aggregate_hint
                 )
                 merged_events = _normalize_dividend_events([*div_events, *fresh_events])
                 if merged_events != div_events:
@@ -626,12 +629,53 @@ def update_and_slice_panel(
                 meta["dividend_synced_through"] = end.isoformat()
                 changed = True
 
+            # Corporate-action rebuild trigger: a large price discontinuity OR a
+            # newly-discovered dividend whose ex-date lands inside the already-cached
+            # range (Massive re-adjusts cached bars retroactively for it).
+            new_div_in_cached_range = bool(
+                prior_panel_max is not None
+                and any(
+                    e["date"] not in prior_div_dates
+                    and e["date"] <= prior_panel_max.isoformat()
+                    for e in div_events
+                )
+            )
+            rebuilt = False
+            if discontinuity or new_div_in_cached_range:
+                logger.info(
+                    "OHLCV panel adjustment-basis change for %s; full window rebuild", symbol
+                )
+                panel = pd.DataFrame(columns=list(_OHLCV_FIELDS))
+                meta["attempted_ranges"] = []
+                meta["split_rebuilt_at"] = end.isoformat()
+                rebuilt = True
+                try:
+                    fetched, aggregate = _fetch_symbol_range(
+                        analyzer, symbol, start.isoformat(), end.isoformat()
+                    )
+                    aggregate_hint = max(aggregate_hint, aggregate)
+                    got = {pd.Timestamp(i).date() for i in getattr(fetched, "index", [])}
+                    panel = _merge_panel(panel, fetched)
+                    _record_attempted(start, end, got)
+                except Exception as exc:
+                    logger.warning("OHLCV panel split rebuild failed for %s: %s", symbol, exc)
+                changed = True
+
             if changed:
-                # Merge with the latest on-disk state while still locked; this
-                # preserves updates if a prior writer refreshed overlapping data.
-                disk_panel = _load_symbol_panel(symbol)
-                if not disk_panel.empty and disk_panel is not panel:
-                    panel = _merge_panel(disk_panel, panel)
+                if not rebuilt:
+                    # Merge with the latest on-disk state while still locked so a
+                    # concurrent writer's overlapping refresh is preserved.
+                    disk_panel = _load_symbol_panel(symbol)
+                    if not disk_panel.empty and disk_panel is not panel:
+                        panel = _merge_panel(disk_panel, panel)
+                elif panel is None or panel.empty:
+                    # Rebuild produced nothing; remove the stale parquet so the old
+                    # adjustment basis cannot linger on disk.
+                    stale_panel_path, _stale_meta = _symbol_paths(symbol)
+                    try:
+                        stale_panel_path.unlink()
+                    except OSError:
+                        pass
                 _save_symbol_panel(symbol, panel)
                 _save_meta(symbol, meta)
                 _save_dividend_events(symbol, div_events)
