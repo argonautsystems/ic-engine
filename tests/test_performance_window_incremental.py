@@ -497,6 +497,72 @@ def test_removed_dividend_clears_store_and_rebuilds(monkeypatch, tmp_path):
     assert cache._load_meta("AAA").get("split_rebuilt_at") == "2026-06-06"
 
 
+def test_massive_authoritative_empty_short_circuits_yfinance(monkeypatch):
+    """R6 blocker: a Massive authoritative-empty must WIN (clear), not be
+    overridden by a stale yfinance dividend."""
+    import sys
+    import types
+
+    from ic_engine.commands import performance_window_cache as cache
+
+    class _FakeMassive:
+        def __init__(self, *a, **k):
+            pass
+
+        def get_dividends_authoritative(self, s, limit=1000):
+            return [], True  # authoritative: no dividends
+
+    monkeypatch.setattr(
+        "ic_engine.providers.price_provider.MassiveProvider", _FakeMassive
+    )
+
+    fake_yf = types.ModuleType("yfinance")
+
+    class _Tk:
+        @property
+        def dividends(self):
+            return pd.Series([0.5], index=[pd.Timestamp("2026-06-03")])  # stale
+
+    fake_yf.Ticker = lambda s: _Tk()
+    monkeypatch.setitem(sys.modules, "yfinance", fake_yf)
+
+    events, ok = cache._fetch_dividend_events("AAA", "2026-06-01", "2026-06-10", 0.0)
+    assert ok is True and events == []  # Massive empty won; yfinance not consulted
+
+
+def test_massive_transient_with_empty_yfinance_is_not_authoritative(monkeypatch):
+    """R6 blocker: a Massive transient failure must not become authoritative via
+    an empty yfinance response (which would wipe the store)."""
+    import sys
+    import types
+
+    from ic_engine.commands import performance_window_cache as cache
+
+    class _FakeMassive:
+        def __init__(self, *a, **k):
+            pass
+
+        def get_dividends_authoritative(self, s, limit=1000):
+            return [], False  # transient failure
+
+    monkeypatch.setattr(
+        "ic_engine.providers.price_provider.MassiveProvider", _FakeMassive
+    )
+
+    fake_yf = types.ModuleType("yfinance")
+
+    class _Tk:
+        @property
+        def dividends(self):
+            return pd.Series(dtype="float64")  # empty -> cannot confirm
+
+    fake_yf.Ticker = lambda s: _Tk()
+    monkeypatch.setitem(sys.modules, "yfinance", fake_yf)
+
+    _events, ok = cache._fetch_dividend_events("AAA", "2026-06-01", "2026-06-10", 0.0)
+    assert ok is False  # not authoritative -> caller keeps prior store
+
+
 def test_dividend_after_cached_tail_triggers_rebuild(monkeypatch, tmp_path):
     """R5-#3: a new dividend whose ex-date lands AFTER the cached tail still
     retro-adjusts older cached bars, so it must trigger a rebuild."""

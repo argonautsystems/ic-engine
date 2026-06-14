@@ -360,53 +360,59 @@ def _fetch_dividend_events(
     source raised and no aggregate fallback was available.
     """
     sym = symbol.upper()
-    events: list[dict[str, Any]] = []
-    ok = False
+
+    # 1. Massive is the authoritative adjusted-price dividend source. When it
+    #    responds authoritatively (ok=True) its result WINS — even when empty —
+    #    and short-circuits, so a stale yfinance/aggregate value can never block
+    #    an intended clear+rebuild. ok=False means a transient/entitlement
+    #    failure: fall through to the fallbacks below.
     try:
         from ic_engine.providers.price_provider import MassiveProvider
 
-        # Authoritative variant: ok=False on a transient/entitlement failure,
-        # ok=True (even with []) on a genuine response, so the caller never wipes
-        # a valid stored dividend on a blip.
         rows, massive_ok = MassiveProvider().get_dividends_authoritative(sym, limit=1000)
-        ok = ok or massive_ok
-        for row in rows or []:
-            raw_date = row.get("ex_date") or row.get("pay_date")
-            if not raw_date:
-                continue
-            event_date = str(raw_date)[:10]
-            if start_date <= event_date <= end_date:
-                amount = float(row.get("cash_amount") or 0.0)
-                if amount > 0.0:
-                    events.append({"date": event_date, "amount": amount, "source": "massive"})
-        if events:
+        if massive_ok:
+            events: list[dict[str, Any]] = []
+            for row in rows or []:
+                raw_date = row.get("ex_date") or row.get("pay_date")
+                if not raw_date:
+                    continue
+                event_date = str(raw_date)[:10]
+                if start_date <= event_date <= end_date:
+                    amount = float(row.get("cash_amount") or 0.0)
+                    if amount > 0.0:
+                        events.append({"date": event_date, "amount": amount, "source": "massive"})
             return events, True
     except Exception as exc:
         logger.debug("Massive dividend-event fetch failed for %s: %s", sym, exc)
 
+    # 2. yfinance fallback (only reached when Massive was NOT authoritative). Only
+    #    a NON-empty yfinance series is treated as authoritative; an empty series
+    #    cannot confirm "no dividends" and must not launder a Massive transient
+    #    failure into an authoritative empty that wipes the store.
     try:
         import yfinance as yf
 
         div_data = yf.Ticker(sym).dividends
-        ok = True  # yfinance call completed (a raise is caught below)
         if div_data is not None and not div_data.empty:
+            events = []
             for idx, value in div_data.items():
                 event_date = pd.Timestamp(idx).date().isoformat()
                 if start_date <= event_date <= end_date:
                     amount = float(value or 0.0)
                     if amount > 0.0:
                         events.append({"date": event_date, "amount": amount, "source": "yfinance"})
-        if events:
             return events, True
     except Exception as exc:
         logger.debug("yfinance dividend-event fetch failed for %s: %s", sym, exc)
 
+    # 3. Legacy aggregate fallback (mocks + the price-fetch yfinance aggregate).
     if aggregate_value > 0.0:
-        # Compatibility for tests/mocks that model only the legacy aggregate.
         return [
             {"date": end_date, "amount": float(aggregate_value), "source": "aggregate_fallback"}
         ], True
-    return events, ok
+
+    # 4. No authoritative source available -> keep the prior store, retry later.
+    return [], False
 
 
 def _normalize_dividend_events(events: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
