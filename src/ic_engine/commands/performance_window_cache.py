@@ -365,9 +365,12 @@ def _fetch_dividend_events(
     try:
         from ic_engine.providers.price_provider import MassiveProvider
 
-        rows = MassiveProvider().get_dividends(sym, limit=1000) or []
-        ok = True  # provider responded (even if rows is empty)
-        for row in rows:
+        # Authoritative variant: ok=False on a transient/entitlement failure,
+        # ok=True (even with []) on a genuine response, so the caller never wipes
+        # a valid stored dividend on a blip.
+        rows, massive_ok = MassiveProvider().get_dividends_authoritative(sym, limit=1000)
+        ok = ok or massive_ok
+        for row in rows or []:
             raw_date = row.get("ex_date") or row.get("pay_date")
             if not raw_date:
                 continue
@@ -385,7 +388,7 @@ def _fetch_dividend_events(
         import yfinance as yf
 
         div_data = yf.Ticker(sym).dividends
-        ok = True  # provider responded
+        ok = True  # yfinance call completed (a raise is caught below)
         if div_data is not None and not div_data.empty:
             for idx, value in div_data.items():
                 event_date = pd.Timestamp(idx).date().isoformat()
@@ -485,6 +488,14 @@ def _fetch_symbol_range(
         # with an empty result, which the caller finalizes as attempted. Any
         # other error (network/API/transient) propagates so the hole stays
         # retryable rather than becoming permanent.
+        #
+        # KNOWN BOUND: the underlying panel collapses a both-providers-down
+        # transient into the same empty -> "No data returned", so a simultaneous
+        # Massive+yfinance outage during one delta could finalize a PAST day's
+        # hole. This self-heals: today is never finalized (_record_attempted),
+        # the result-cache TTL recomputes relative windows, and any later
+        # corporate-action rebuild re-fetches the full window. Acceptable vs the
+        # alternative of refetching a genuinely-delisted symbol every call.
         if "No data returned" in str(exc):
             return pd.DataFrame(columns=list(_OHLCV_FIELDS)), 0.0
         raise
@@ -578,8 +589,8 @@ def update_and_slice_panel(
         symbol = str(raw_symbol).upper()
         with _symbol_file_lock(symbol):
             panel = _load_symbol_panel(symbol)
-            prior_panel_max = (
-                pd.Timestamp(panel.index.max()).date() if not panel.empty else None
+            prior_panel_min = (
+                pd.Timestamp(panel.index.min()).date() if not panel.empty else None
             )
             meta = _load_meta(symbol)
             div_events = _load_dividend_events(symbol)
@@ -653,22 +664,24 @@ def update_and_slice_panel(
                 # dividend_synced_through, so it retries next call.
                 if div_ok:
                     fresh_norm = _normalize_dividend_events(fresh_events)
-                    # Any change (new, removed, or corrected amount) to a dividend
-                    # whose ex-date sits inside the already-cached price range means
-                    # the provider retroactively re-adjusted those bars -> rebuild.
-                    if prior_panel_max is not None:
-                        cutoff = prior_panel_max.isoformat()
-                        prior_in_range = {
+                    # A dividend at ex-date D retroactively re-adjusts every bar
+                    # BEFORE D, so any change (new/removed/corrected) to a dividend
+                    # with ex-date > the earliest cached bar affects cached rows
+                    # and requires a rebuild — including a brand-new dividend that
+                    # lands AFTER the cached tail but still re-bases older bars.
+                    if prior_panel_min is not None:
+                        floor = prior_panel_min.isoformat()
+                        prior_affecting = {
                             (e["date"], round(e["amount"], 12))
                             for e in div_events
-                            if e["date"] <= cutoff
+                            if e["date"] > floor
                         }
-                        fresh_in_range = {
+                        fresh_affecting = {
                             (e["date"], round(e["amount"], 12))
                             for e in fresh_norm
-                            if e["date"] <= cutoff
+                            if e["date"] > floor
                         }
-                        if prior_in_range != fresh_in_range:
+                        if prior_affecting != fresh_affecting:
                             dividend_drift = True
                     # Replace with the authoritative snapshot even when empty (a
                     # removed dividend must clear the stale stored event).

@@ -497,6 +497,28 @@ def test_removed_dividend_clears_store_and_rebuilds(monkeypatch, tmp_path):
     assert cache._load_meta("AAA").get("split_rebuilt_at") == "2026-06-06"
 
 
+def test_dividend_after_cached_tail_triggers_rebuild(monkeypatch, tmp_path):
+    """R5-#3: a new dividend whose ex-date lands AFTER the cached tail still
+    retro-adjusts older cached bars, so it must trigger a rebuild."""
+    monkeypatch.setenv("INVESTORCLAW_OHLCV_PANEL_DIR", str(tmp_path / "panel"))
+    from ic_engine.commands import performance_window_cache as cache
+
+    state = {"events": []}
+    monkeypatch.setattr(
+        cache,
+        "_fetch_dividend_events",
+        lambda sym, s, e, agg: ([ev for ev in state["events"] if s <= ev["date"] <= e], True),
+    )
+    analyzer = _FakeAnalyzer()
+
+    # Seed bars 06-01..06-05 (panel_min=06-01), no dividends yet.
+    cache.update_and_slice_panel(analyzer, ["AAA"], "2026-06-01", "2026-06-05")
+    # A dividend appears on 06-08 (after the cached tail, before the new end).
+    state["events"] = [{"date": "2026-06-08", "amount": 0.50, "source": "test"}]
+    cache.update_and_slice_panel(analyzer, ["AAA"], "2026-06-01", "2026-06-10")
+    assert cache._load_meta("AAA").get("split_rebuilt_at") == "2026-06-10"
+
+
 def test_transient_dividend_failure_keeps_prior_store(monkeypatch, tmp_path):
     """M-A2(rev): a transient dividend failure (ok False) must NOT wipe the store
     and must not advance dividend_synced_through (so it retries)."""

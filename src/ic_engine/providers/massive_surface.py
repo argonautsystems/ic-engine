@@ -324,6 +324,38 @@ class MassiveSurfaceMixin:
             )
         return out
 
+    def get_dividends_authoritative(
+        self, symbol: str, limit: int = 12
+    ) -> tuple[List[Dict], bool]:
+        """Like ``get_dividends`` but also reports whether the response was
+        authoritative. ``_surface_get`` returns None on any failure (network,
+        rate-limit, non-OK status, not-entitled) and a dict on success — even
+        when the result set is empty. The boolean lets callers distinguish a
+        genuine "no dividends" (ok=True, []) from a transient failure (ok=False),
+        so an incremental cache never wipes a valid stored dividend on a blip.
+        """
+        data = self._surface_get(
+            "/v3/reference/dividends",
+            {"ticker": symbol.upper(), "limit": limit, "sort": "ex_dividend_date", "order": "desc"},
+        )
+        if data is None:
+            return [], False
+        out = []
+        for r in self._results(data):
+            out.append(
+                {
+                    "symbol": symbol.upper(),
+                    "ex_date": r.get("ex_dividend_date"),
+                    "pay_date": r.get("pay_date"),
+                    "record_date": r.get("record_date"),
+                    "declaration_date": r.get("declaration_date"),
+                    "cash_amount": r.get("cash_amount"),
+                    "frequency": r.get("frequency"),
+                    "dividend_type": r.get("dividend_type"),
+                }
+            )
+        return out, True
+
     def get_splits(self, symbol: str, limit: int = 10) -> List[Dict]:
         """Stock split history (newest first)."""
         data = self._surface_get(
