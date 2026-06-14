@@ -3,7 +3,7 @@ name: investorclaw
 description: Deterministic-first portfolio analyzer for Hermes via MCP-HTTP at localhost:18090. Holdings, performance, Sharpe + Sortino, FRED yields, bond duration, scenario rebalancing.
 homepage: https://github.com/argonautsystems/InvestorClaw
 user-invocable: true
-metadata: {"license":"MIT-0","version":"4.7.6","runtime":"hermes","image":"ghcr.io/argonautsystems/ic-engine:4.7.6-cpu","mcp-endpoint":"http://localhost:18090/mcp"}
+metadata: {"license":"MIT-0","version":"4.7.7","runtime":"hermes","image":"ghcr.io/argonautsystems/ic-engine:4.7.7-cpu","mcp-endpoint":"http://localhost:18090/mcp"}
 ---
 
 <!--
@@ -76,7 +76,7 @@ hermes (host)
   │     mnemos       → http://localhost:5002/mcp
   ▼
 Docker compose (~/.investorclaw/compose.yml)
-  ├── argonautsystems/ic-engine:4.7.6-cpu       :8090   portfolio analysis MCP
+  ├── argonautsystems/ic-engine:4.7.7-cpu       :8090   portfolio analysis MCP
   └── mnemos-os/mnemos-rs:4.2       :5002   memory + KG MCP
        (dashboard at :8092 for portfolio upload + key config)
 ```
