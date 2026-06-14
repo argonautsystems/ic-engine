@@ -145,6 +145,32 @@ def test_narrator_recovers_performance_answer_from_llm_refusal(envelope, monkeyp
     assert result.validation_passed is True
 
 
+def test_narrator_portfolio_refusal_kept_when_no_performance_data(envelope, monkeypatch):
+    # Portfolio-mode prompt, but the envelope carries NO performance/whatchanged
+    # data (only null/missing fields). The OUT_OF_SCOPE recovery must NOT mask
+    # the genuine refusal by emitting literal "None" lines.
+    envelope["sections"]["performance"] = {
+        "portfolio_summary": {"weighted_annual_return": None},
+        "top_performers": [],
+    }
+    envelope["sections"]["whatchanged"] = {
+        "window_days": None,
+        "attribution_summary": {"total_return": None},
+        "top_movers": [],
+    }
+    attach_hmac(envelope)
+    monkeypatch.setattr(
+        "ic_engine.runtime.narrator._call_llm",
+        lambda _system, _user: (OUT_OF_SCOPE_RESPONSE, "fake"),
+    )
+
+    result = narrate(envelope, "How did my portfolio perform last week?")
+
+    assert result.answer.startswith(OUT_OF_SCOPE_RESPONSE)
+    assert "None" not in result.answer.split("ic_result.hmac")[0]
+    assert envelope["ic_result"]["hmac"] in result.answer
+
+
 @pytest.mark.parametrize(
     "question,expected_mode",
     [

@@ -350,8 +350,15 @@ def _heuristic_narration(envelope: Envelope, question: str) -> str:
 
 
 def _plain_value(value: Any) -> str | None:
-    """Return scalar envelope values as display text without calculation."""
-    if isinstance(value, (str, int, float, bool)) or value is None:
+    """Return scalar envelope values as display text without calculation.
+
+    Returns None for missing/null fields so the recovery helper never emits a
+    literal ``"None"`` line — that would let the OUT_OF_SCOPE override mask a
+    genuine no-data refusal when no real performance/whatchanged data exists.
+    """
+    if value is None:
+        return None
+    if isinstance(value, (str, int, float, bool)):
         return str(value)
     return None
 
