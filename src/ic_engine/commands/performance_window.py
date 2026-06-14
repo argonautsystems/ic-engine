@@ -15,10 +15,12 @@
 """Deterministic time-window portfolio performance.
 
 This command is intentionally non-narrative and LLM-free. It reuses the
-existing ``PerformanceAnalyzer.fetch_equity_data`` and
-``PerformanceAnalyzer.calculate_returns`` path (Massive → provider fallbacks →
-yfinance) for explicit date windows, then emits a signed v2.5 ic_result
-envelope with per-holding total returns, contribution, and portfolio totals.
+existing ``PerformanceAnalyzer.calculate_returns`` math while sourcing prices
+from a persistent per-symbol OHLCV panel.  Each call fetches only missing/new
+bars via ``PerformanceAnalyzer.fetch_equity_data`` (Massive → provider
+fallbacks → yfinance), then slices the requested window and emits a signed v2.5
+ic_result envelope with per-holding total returns, contribution, and portfolio
+totals.
 """
 
 from __future__ import annotations
@@ -39,6 +41,11 @@ import numpy as np
 import pandas as pd
 
 from ic_engine.commands.analyze_performance_polars import PerformanceAnalyzer
+from ic_engine.commands.performance_window_cache import (
+    load_result_cache,
+    save_result_cache,
+    update_and_slice_panel,
+)
 from ic_engine.runtime.envelope import (
     attach_hmac,
     new_ic_result,
@@ -235,9 +242,14 @@ def build_performance_window(
     if not symbols:
         raise ValueError("No equity holdings found for performance-window analysis")
 
+    holdings_hash = portfolio_id_for_holdings(holdings_path)
+    cached_envelope = load_result_cache(holdings_hash, resolved.start_date, resolved.end_date)
+    if cached_envelope is not None:
+        return cached_envelope
+
     analyzer = PerformanceAnalyzer()
-    price_pl, dividends, fetched_symbols = analyzer.fetch_equity_data(
-        symbols, resolved.start_date, resolved.end_date
+    price_pl, dividends, fetched_symbols = update_and_slice_panel(
+        analyzer, symbols, resolved.start_date, resolved.end_date
     )
     price_pd = price_pl.to_pandas()
     date_col = next((c for c in ("Date", "Datetime", "index") if c in price_pd.columns), None)
@@ -341,14 +353,14 @@ def build_performance_window(
                 for r in movers
             ],
         },
-        "calculation": "Returns reuse PerformanceAnalyzer.calculate_returns (total-return path including analyzer dividend treatment).",
-        "disclaimer": "Deterministic historical window using available OHLCV provider data; yfinance fallback may be slow for large windows.",
+        "calculation": "Returns reuse PerformanceAnalyzer.calculate_returns (total-return path including analyzer dividend treatment) on an incremental per-symbol OHLCV panel.",
+        "disclaimer": "Deterministic historical window using cached OHLCV provider data; only missing/new bars are fetched via the provider fallback chain.",
     }
     generated_at = utc_now_iso()
     envelope = {
         "schema_version": "v2.5.0",
         "generated_at": generated_at,
-        "portfolio_id": portfolio_id_for_holdings(holdings_path),
+        "portfolio_id": holdings_hash,
         "ic_result": new_ic_result(command="performance-window", run_id=str(uuid.uuid4())),
         "sections": {"performance_window": section},
         "section_meta": {
@@ -361,7 +373,9 @@ def build_performance_window(
         },
         "failed_sections": [],
     }
-    return attach_hmac(envelope)
+    signed = attach_hmac(envelope)
+    save_result_cache(holdings_hash, resolved.start_date, resolved.end_date, signed)
+    return signed
 
 
 def main(argv: list[str] | None = None) -> int:

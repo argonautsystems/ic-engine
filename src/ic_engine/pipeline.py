@@ -592,6 +592,15 @@ def run_pipeline(
     # discovery paths working without forcing a lookup.py change.
     analyzer = PerformanceAnalyzer()
     analyzer.analyze_portfolio(str(analyzer_input), str(performance_out))
+    try:
+        from ic_engine.commands.performance_window_cache import prewarm_performance_windows
+
+        prewarm_performance_windows(str(analyzer_input))
+    except Exception:
+        # Pre-warming is an opportunistic latency optimization for the agent
+        # path; a pipeline refresh must still succeed if it cannot warm one of
+        # the standard performance windows.
+        pass
     raw_performance_out = raw_dir / "performance.json"
     try:
         raw_performance_out.write_text(

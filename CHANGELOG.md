@@ -9,6 +9,24 @@ Distribution-edge artifacts (`SKILL.md`, `compose.yml`, `install.yaml`,
 `agent-skills/**`) are MIT-0; substantive code (bridge, dashboard,
 Dockerfile, tests) is Apache 2.0.
 
+## [4.8.1] — 2026-06-14
+
+### Added
+
+- **Incremental-delta OHLCV panel for `portfolio_performance_window`.** The
+  time-window performance path now keeps persistent per-symbol parquet panels
+  under `/data/ohlcv_panel`, fetches only missing/new bars via the existing
+  Massive → fallback → yfinance provider chain, and slices the cached panel for
+  each requested window. Same-day repeats fetch nothing; a new trading day
+  typically fetches only the newest bar, preserving the analyzer's total-return
+  and dividend math while avoiding the previous full-history re-fetch for every
+  holding.
+- **Signed result cache + pre-warm.** Computed signed envelopes are cached by
+  `(resolved_start, resolved_end, holdings-hash)`, so standard windows such as
+  `1w`, `1mo`, `3mo`, `ytd`, and `1y` become warm cache hits (<2s target,
+  replacing the observed ~59s cold full re-fetch path). Refresh runs best-effort
+  pre-warm these common windows so the agent's first call is already warm.
+
 ## [4.8.0] — 2026-06-14
 
 ### Added

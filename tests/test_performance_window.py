@@ -65,6 +65,7 @@ def test_period_resolver_tokens(period, start):
 
 def test_max_period_requests_full_provider_history_and_clamps_to_earliest_available(monkeypatch, tmp_path):
     monkeypatch.setenv("INVESTORCLAW_CONSULTATION_HMAC_KEY", "perf-window-test-key")
+    monkeypatch.setenv("INVESTORCLAW_OHLCV_PANEL_DIR", str(tmp_path / "panel"))
     seen = {}
 
     def fake_fetch(self, symbols, start_date, end_date):
@@ -123,6 +124,7 @@ def test_period_resolver_invalid_rejected(kwargs):
 
 def test_build_performance_window_reuses_analyzer_total_returns(monkeypatch, tmp_path):
     monkeypatch.setenv("INVESTORCLAW_CONSULTATION_HMAC_KEY", "perf-window-test-key")
+    monkeypatch.setenv("INVESTORCLAW_OHLCV_PANEL_DIR", str(tmp_path / "panel"))
     calls = []
 
     def fake_fetch(self, symbols, start_date, end_date):
@@ -166,6 +168,7 @@ def test_build_performance_window_reuses_analyzer_total_returns(monkeypatch, tmp
 
 def test_router_path_accepts_default_verbose_and_emits_signed_envelope(monkeypatch, tmp_path, capsys):
     monkeypatch.setenv("INVESTORCLAW_CONSULTATION_HMAC_KEY", "perf-window-test-key")
+    monkeypatch.setenv("INVESTORCLAW_OHLCV_PANEL_DIR", str(tmp_path / "panel"))
     monkeypatch.setenv("INVESTOR_CLAW_REPORTS_DIR", str(tmp_path / "reports"))
     monkeypatch.setenv("INVESTOR_CLAW_DATED_REPORTS", "false")
     reports_dir = tmp_path / "reports"

@@ -121,6 +121,14 @@ async def run_full_async(
     """Run all deterministic sections and return a signed envelope."""
     pipeline = PortfolioPipeline(config_path=config_path, cache_dir=cache_dir)
     pipeline_result = await pipeline.run_full(str(Path(holdings_path).expanduser()))
+    try:
+        from ic_engine.commands.performance_window_cache import prewarm_performance_windows
+
+        prewarm_performance_windows(holdings_path)
+    except Exception:
+        # Performance-window warming is best-effort and must not turn a
+        # successful refresh into a failed canonical envelope run.
+        pass
     return envelope_from_pipeline_result(
         pipeline_result,
         holdings_path,
