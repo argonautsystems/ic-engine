@@ -27,6 +27,23 @@ Dockerfile, tests) is Apache 2.0.
   replacing the observed ~59s cold full re-fetch path). Refresh runs best-effort
   pre-warm these common windows so the agent's first call is already warm.
 
+### Fixed
+
+- **True provider-layer delta.** `PerformanceAnalyzer.fetch_equity_data` gained an
+  `exact_range=True` path used by the incremental panel: instead of inflating
+  every delta back to a `days=max(window, 30)` rolling fetch, the provider is now
+  asked only for the missing tail `[first-missing-day, today]`. A one-day delta
+  fetches one day at the provider, not a 30-day window; a same-day repeat fetches
+  nothing. Verified by a provider-mock test asserting the exact `days=` handed to
+  `get_ohlcv_panel`.
+- **Result-cache concurrency + freshness.** Result-cache load→compute→save is now
+  serialized by a per-key `flock`, so the warmth cron and an agent request landing
+  in the same second no longer race the atomic replace. The cache validates a
+  signed engine-version stamp (a redeploy invalidates stale-shaped envelopes) and
+  honours the section TTL (a same-trading-day window can be force-refreshed once
+  stale), and the cache key includes the resolved `period` so a `custom` request
+  cannot collide with a token window and return the wrong `period` metadata.
+
 ## [4.8.0] — 2026-06-14
 
 ### Added

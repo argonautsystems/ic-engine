@@ -14,7 +14,7 @@ import json
 import logging
 import os
 import uuid
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable, Iterator
 
@@ -94,22 +94,103 @@ def _atomic_write_parquet(path: Path, df: pd.DataFrame) -> None:
             pass
 
 
-def result_cache_path(holdings_hash: str, start_date: str, end_date: str) -> Path:
+def _engine_version() -> str:
+    try:
+        from ic_engine import __version__
+
+        return str(__version__)
+    except Exception:
+        return "unknown"
+
+
+def _result_cache_key(holdings_hash: str, start_date: str, end_date: str, period: str) -> str:
     payload = json.dumps(
-        {"holdings_hash": holdings_hash, "start_date": start_date, "end_date": end_date},
+        {
+            "holdings_hash": holdings_hash,
+            "start_date": start_date,
+            "end_date": end_date,
+            # Include the requested period token so a "custom" request with the
+            # same start/end as a "1w" token does not collide and return the
+            # other request's period metadata.
+            "period": period or "",
+        },
         sort_keys=True,
         separators=(",", ":"),
     )
-    key = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:32]
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:32]
+
+
+def result_cache_path(
+    holdings_hash: str, start_date: str, end_date: str, period: str = ""
+) -> Path:
+    key = _result_cache_key(holdings_hash, start_date, end_date, period)
     return panel_root() / "results" / f"performance_window.{key}.json"
 
 
-def load_result_cache(holdings_hash: str, start_date: str, end_date: str) -> dict[str, Any] | None:
-    path = result_cache_path(holdings_hash, start_date, end_date)
+def _result_lock_path(
+    holdings_hash: str, start_date: str, end_date: str, period: str
+) -> Path:
+    key = _result_cache_key(holdings_hash, start_date, end_date, period)
+    return panel_root() / "locks" / f"result.{key}.lock"
+
+
+@contextlib.contextmanager
+def result_cache_lock(
+    holdings_hash: str, start_date: str, end_date: str, period: str = ""
+) -> Iterator[None]:
+    """Serialize load→compute→save for one result-cache key.
+
+    Concurrent same-key writers (e.g. the warmth cron and an agent request
+    landing in the same second) would otherwise race the atomic replace with
+    different ``generated_at``/``run_id``/HMAC; the lock makes the first writer
+    compute and the rest read the fresh cache.
+    """
+    path = _result_lock_path(holdings_hash, start_date, end_date, period)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a+", encoding="utf-8") as fh:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+
+
+def _envelope_age_seconds(envelope: dict[str, Any]) -> float | None:
+    meta = (envelope.get("section_meta") or {}).get("performance_window") or {}
+    stamp = meta.get("computed_at") or envelope.get("generated_at")
+    if not stamp:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - parsed).total_seconds()
+    except Exception:
+        return None
+
+
+def load_result_cache(
+    holdings_hash: str, start_date: str, end_date: str, period: str = ""
+) -> dict[str, Any] | None:
+    path = result_cache_path(holdings_hash, start_date, end_date, period)
     if not path.exists():
         return None
     try:
         envelope = json.loads(path.read_text(encoding="utf-8"))
+        section_meta = (envelope.get("section_meta") or {}).get("performance_window") or {}
+        # Engine-version stamp (signed into section_meta at build time): a code
+        # change to the window math invalidates the cache so a redeploy does not
+        # serve stale-shaped envelopes.
+        if section_meta.get("engine_version") != _engine_version():
+            logger.info("performance-window result cache version miss for %s", path)
+            return None
+        # TTL freshness: lets the warmth cron / intraday refresh re-pull a window
+        # whose start/end have not changed (same trading day) once it is stale.
+        ttl = section_meta.get("ttl_seconds")
+        age = _envelope_age_seconds(envelope)
+        if ttl is not None and age is not None and age > float(ttl):
+            logger.info("performance-window result cache stale (%ss > %ss) for %s", age, ttl, path)
+            return None
         from ic_engine.runtime.envelope import validate_envelope
 
         validate_envelope(envelope)
@@ -120,9 +201,15 @@ def load_result_cache(holdings_hash: str, start_date: str, end_date: str) -> dic
 
 
 def save_result_cache(
-    holdings_hash: str, start_date: str, end_date: str, envelope: dict[str, Any]
+    holdings_hash: str,
+    start_date: str,
+    end_date: str,
+    envelope: dict[str, Any],
+    period: str = "",
 ) -> None:
-    path = result_cache_path(holdings_hash, start_date, end_date)
+    path = result_cache_path(holdings_hash, start_date, end_date, period)
+    # The envelope is written byte-for-byte as signed; freshness/version live in
+    # the (signed) section_meta so HMAC validation on load still passes.
     try:
         _atomic_write_text(path, json.dumps(envelope, indent=2, sort_keys=True))
     except OSError as exc:
@@ -366,7 +453,7 @@ def _fetch_symbol_range(
 ) -> tuple[pd.DataFrame, list[dict[str, Any]]]:
     logger.info("OHLCV panel delta fetch %s %s..%s", symbol, start_date, end_date)
     price_pl, dividends, fetched_symbols = analyzer.fetch_equity_data(
-        [symbol], start_date, end_date
+        [symbol], start_date, end_date, exact_range=True
     )
     fetched_set = {str(s).upper() for s in fetched_symbols}
     aggregate_value = float(dividends.get(symbol.upper(), 0.0) or 0.0)

@@ -68,7 +68,7 @@ def test_max_period_requests_full_provider_history_and_clamps_to_earliest_availa
     monkeypatch.setenv("INVESTORCLAW_OHLCV_PANEL_DIR", str(tmp_path / "panel"))
     seen = {}
 
-    def fake_fetch(self, symbols, start_date, end_date):
+    def fake_fetch(self, symbols, start_date, end_date, *, exact_range=False):
         seen["start_date"] = start_date
         seen["end_date"] = end_date
         frame = pd.DataFrame(
@@ -127,7 +127,7 @@ def test_build_performance_window_reuses_analyzer_total_returns(monkeypatch, tmp
     monkeypatch.setenv("INVESTORCLAW_OHLCV_PANEL_DIR", str(tmp_path / "panel"))
     calls = []
 
-    def fake_fetch(self, symbols, start_date, end_date):
+    def fake_fetch(self, symbols, start_date, end_date, *, exact_range=False):
         assert start_date == "2026-06-07"
         assert end_date == "2026-06-14"
         frame = pd.DataFrame(
@@ -176,7 +176,7 @@ def test_router_path_accepts_default_verbose_and_emits_signed_envelope(monkeypat
     raw_dir.mkdir(parents=True)
     holdings_path = _holdings_file(raw_dir)
 
-    def fake_fetch(self, symbols, start_date, end_date):
+    def fake_fetch(self, symbols, start_date, end_date, *, exact_range=False):
         frame = pd.DataFrame(
             {
                 "Date": ["2026-06-07", "2026-06-14"],

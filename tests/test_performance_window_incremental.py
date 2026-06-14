@@ -41,9 +41,11 @@ class _FakeAnalyzer:
         base = {"AAA": 10.0, "BBB": 20.0, "CCC": 30.0}.get(sym, 40.0)
         return base + (day.date() - date(2026, 6, 1)).days
 
-    def fetch_equity_data(self, symbols, start_date, end_date):
+    def fetch_equity_data(self, symbols, start_date, end_date, *, exact_range=False):
         syms = tuple(str(s).upper() for s in symbols)
         self.calls.append((syms, start_date, end_date))
+        self.exact_range_calls = getattr(self, "exact_range_calls", [])
+        self.exact_range_calls.append(exact_range)
         dates = pd.date_range(start_date, end_date, freq="D")
         frame = pd.DataFrame({"Date": dates})
         fetched = []
@@ -223,6 +225,90 @@ def test_same_day_repeat_uses_signed_result_cache_no_provider_call(monkeypatch, 
     two = build_performance_window(holdings, period="1w", today=date(2026, 6, 14))
     assert second.calls == []
     assert two["ic_result"]["hmac"] == one["ic_result"]["hmac"]
+
+
+def test_fetch_equity_data_exact_range_requests_tight_provider_days(monkeypatch):
+    """Guard the pure-delta seam at the PROVIDER layer.
+
+    The earlier blocker: the cache asked for a 1-day delta but the real
+    analyzer inflated it to ``get_ohlcv_panel(days=max(..., 30))``, so the
+    provider refetched a 30-day rolling window. This asserts the actual ``days``
+    handed to the provider, not just the analyzer-wrapper range.
+    """
+    from ic_engine.commands import analyze_performance_polars as mod
+
+    captured: dict[str, int | None] = {}
+
+    def fake_panel(symbols, *, days=None, period=None, provider=None):
+        captured["days"] = days
+        end = pd.Timestamp.now().normalize()
+        idx = pd.date_range(end=end, periods=max(int(days or 1), 1), freq="D")
+        return pd.DataFrame(
+            {"Open": 1.0, "High": 1.0, "Low": 1.0, "Close": 1.0, "Volume": 1}, index=idx
+        )
+
+    monkeypatch.setattr("ic_engine.providers.price_panel.get_ohlcv_panel", fake_panel)
+
+    class _NoDividends:
+        def get_dividends(self, *args, **kwargs):
+            return []
+
+    monkeypatch.setattr(
+        "ic_engine.providers.price_provider.MassiveProvider", _NoDividends
+    )
+
+    class _Ticker:
+        dividends = pd.Series(dtype="float64")
+
+    monkeypatch.setattr(mod.yf, "Ticker", lambda *a, **k: _Ticker())
+
+    today = pd.Timestamp.now().normalize()
+    start = (today - pd.Timedelta(days=3)).date().isoformat()
+    end = today.date().isoformat()
+    analyzer = mod.PerformanceAnalyzer()
+
+    # Pure-delta path: provider asked for ONLY the 4-day tail (start..today).
+    analyzer.fetch_equity_data(["AAA"], start, end, exact_range=True)
+    assert captured["days"] == 4
+
+    # Default full-portfolio path keeps the padded 30-day floor.
+    analyzer.fetch_equity_data(["AAA"], start, end)
+    assert captured["days"] == 30
+
+
+def test_panel_delta_uses_exact_range_path(monkeypatch, tmp_path):
+    """The incremental panel must invoke the analyzer with ``exact_range=True``."""
+    monkeypatch.setenv("INVESTORCLAW_OHLCV_PANEL_DIR", str(tmp_path / "panel"))
+    analyzer = _FakeAnalyzer()
+    update_and_slice_panel(analyzer, ["AAA"], "2026-06-01", "2026-06-10")
+    assert analyzer.exact_range_calls == [True]
+
+
+def test_result_cache_version_miss_forces_recompute(monkeypatch, tmp_path):
+    """An engine-version change must invalidate the result cache (no stale shape)."""
+    monkeypatch.setenv("INVESTORCLAW_OHLCV_PANEL_DIR", str(tmp_path / "panel"))
+    monkeypatch.setenv("INVESTORCLAW_CONSULTATION_HMAC_KEY", "perf-window-incremental")
+    holdings = _holdings_file(tmp_path)
+
+    first = _FakeAnalyzer()
+    monkeypatch.setattr("ic_engine.commands.performance_window.PerformanceAnalyzer", lambda: first)
+    build_performance_window(holdings, period="1w", today=date(2026, 6, 14))
+    assert first.calls
+
+    # Bump the engine version both producers read; the prior cache entry is now
+    # a version miss. The warm panel means no provider refetch, but the result
+    # is re-signed with the new version rather than served stale.
+    monkeypatch.setattr(
+        "ic_engine.commands.performance_window._ic_engine_version", lambda: "test-bumped"
+    )
+    monkeypatch.setattr(
+        "ic_engine.commands.performance_window_cache._engine_version", lambda: "test-bumped"
+    )
+    second = _FakeAnalyzer()
+    monkeypatch.setattr("ic_engine.commands.performance_window.PerformanceAnalyzer", lambda: second)
+    out = build_performance_window(holdings, period="1w", today=date(2026, 6, 14))
+    # Recomputed under the new version (not the stale-version cache entry).
+    assert out["section_meta"]["performance_window"]["engine_version"] == "test-bumped"
 
 
 def test_new_symbol_triggers_its_fetch_only(monkeypatch, tmp_path):

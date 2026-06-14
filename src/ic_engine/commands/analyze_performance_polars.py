@@ -225,7 +225,7 @@ class PerformanceAnalyzer:
             return date_str
 
     def fetch_equity_data(
-        self, symbols: list, start_date: str, end_date: str
+        self, symbols: list, start_date: str, end_date: str, *, exact_range: bool = False
     ) -> Tuple[pl.DataFrame, Dict, list]:
         """Fetch OHLC and dividend data for equities using Polars.
 
@@ -234,6 +234,12 @@ class PerformanceAnalyzer:
         - Multiple symbols: columns are MultiIndex like ('Open', 'AAPL'), ('Open', 'GOOGL'), etc.
 
         This method normalizes multi-symbol data into flat columns like 'Close_AAPL', 'Close_GOOGL'.
+
+        ``exact_range=True`` is the incremental-panel delta path: the provider is
+        asked for only the tail covering [start_date, today] with no 30-day floor
+        or weekend pad, so a one-day delta fetches one day at the provider layer
+        instead of refetching a 30-day rolling window. The default full-portfolio
+        path keeps the padded floor for robustness.
         """
         try:
             logger.info(f"Fetching data for {len(symbols)} symbols from {start_date} to {end_date}")
@@ -246,12 +252,20 @@ class PerformanceAnalyzer:
                 from ic_engine.providers.price_panel import get_ohlcv_panel
 
                 # Compute lookback in days from the requested date range so PriceProvider
-                # returns at least the window the analyzer asked for. Pad by 7 days to
-                # cover weekends/holidays at the leading edge.
+                # returns at least the window the analyzer asked for.
                 start_dt = pd.to_datetime(start_date)
                 end_dt = pd.to_datetime(end_date)
                 today = pd.Timestamp.now().normalize()
-                lookback_days = max(int((today - start_dt).days) + 7, 30)
+                if exact_range:
+                    # Pure-delta path: fetch only the tail [start_date, today].
+                    # No 30-day floor and no 7-day pad — the panel cache's
+                    # attempted-range tracking already prevents re-trying holiday
+                    # holes, so padding would only refetch already-cached bars.
+                    lookback_days = max(int((today - start_dt).days) + 1, 1)
+                else:
+                    # Full-portfolio path: pad by 7 days to cover weekends/holidays
+                    # at the leading edge, floor at 30 for robustness.
+                    lookback_days = max(int((today - start_dt).days) + 7, 30)
 
                 data_pd = get_ohlcv_panel(symbols, days=lookback_days)
 

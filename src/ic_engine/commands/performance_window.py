@@ -43,6 +43,7 @@ import pandas as pd
 from ic_engine.commands.analyze_performance_polars import PerformanceAnalyzer
 from ic_engine.commands.performance_window_cache import (
     load_result_cache,
+    result_cache_lock,
     save_result_cache,
     update_and_slice_panel,
 )
@@ -87,6 +88,15 @@ class ResolvedWindow:
     end_date: str
     requested_start_date: str
     requested_end_date: str
+
+
+def _ic_engine_version() -> str:
+    try:
+        from ic_engine import __version__
+
+        return str(__version__)
+    except Exception:
+        return "unknown"
 
 
 def _today() -> date:
@@ -243,10 +253,30 @@ def build_performance_window(
         raise ValueError("No equity holdings found for performance-window analysis")
 
     holdings_hash = portfolio_id_for_holdings(holdings_path)
-    cached_envelope = load_result_cache(holdings_hash, resolved.start_date, resolved.end_date)
-    if cached_envelope is not None:
-        return cached_envelope
+    # Serialize load→compute→save for this exact window so concurrent same-key
+    # writers (warmth cron + agent request) don't race the atomic replace.
+    with result_cache_lock(
+        holdings_hash, resolved.start_date, resolved.end_date, resolved.period
+    ):
+        cached_envelope = load_result_cache(
+            holdings_hash, resolved.start_date, resolved.end_date, resolved.period
+        )
+        if cached_envelope is not None:
+            return cached_envelope
+        signed = _compute_window_envelope(resolved, equity_holdings, symbols, holdings_hash)
+        save_result_cache(
+            holdings_hash, resolved.start_date, resolved.end_date, signed, resolved.period
+        )
+        return signed
 
+
+def _compute_window_envelope(
+    resolved: ResolvedWindow,
+    equity_holdings: list[dict[str, Any]],
+    symbols: list[str],
+    holdings_hash: str,
+) -> dict[str, Any]:
+    """Fetch the incremental panel and build a signed performance-window envelope."""
     analyzer = PerformanceAnalyzer()
     price_pl, dividends, fetched_symbols = update_and_slice_panel(
         analyzer, symbols, resolved.start_date, resolved.end_date
@@ -369,13 +399,17 @@ def build_performance_window(
                 "ttl_seconds": 300,
                 "source": "performance_window",
                 "status": "success",
+                # Signed engine-version + request identity so the result cache can
+                # validate freshness (version miss / TTL) without breaking HMAC.
+                "engine_version": _ic_engine_version(),
+                "period": resolved.period,
+                "requested_start_date": resolved.requested_start_date,
+                "requested_end_date": resolved.requested_end_date,
             }
         },
         "failed_sections": [],
     }
-    signed = attach_hmac(envelope)
-    save_result_cache(holdings_hash, resolved.start_date, resolved.end_date, signed)
-    return signed
+    return attach_hmac(envelope)
 
 
 def main(argv: list[str] | None = None) -> int:
