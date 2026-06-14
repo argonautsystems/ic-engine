@@ -100,6 +100,7 @@ class Holding:
     contract_symbol: Optional[str] = None  # e.g. /ESZ25
     expiry_date: Optional[str] = None  # YYYY-MM-DD
     contract_size: Optional[float] = None  # e.g. 50 (ES = $50/point)
+    futures_multiplier: Optional[float] = None  # legacy alias for contract_size
     notional_value: Optional[float] = None  # contract_size × price × shares
     margin_requirement: Optional[float] = None  # initial/maintenance margin
 
@@ -150,6 +151,8 @@ class Holding:
         """
         if self.contract_size:
             return float(self.contract_size)
+        if self.futures_multiplier:
+            return float(self.futures_multiplier)
         from ic_engine.providers.futures_spec import contract_multiplier
 
         return contract_multiplier(self.contract_symbol or self.symbol or "")

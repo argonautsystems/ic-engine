@@ -115,6 +115,8 @@ COMMANDS: dict = {
     "snapshot": "fetch_holdings.py",
     "prices": "fetch_holdings.py",
     "performance": "analyze_performance_polars.py",
+    "performance-window": "performance_window.py",
+    "performance_window": "performance_window.py",
     "analyze": "analyze_performance_polars.py",
     "returns": "analyze_performance_polars.py",
     "synthesize": "portfolio_analyzer.py",
@@ -298,6 +300,8 @@ _AUTO_SYNTHESIZE: frozenset = frozenset(
         "portfolio-analysis",
         "analyze",
         "performance",
+        "performance-window",
+        "performance_window",
         "returns",
         "report",
         "export",
@@ -367,6 +371,8 @@ _VERBOSE_AWARE_COMMANDS: frozenset = frozenset(
         "snapshot",
         "prices",
         "performance",
+        "performance-window",
+        "performance_window",
         "analyze",
         "returns",
         "bonds",
@@ -479,6 +485,8 @@ _HOLDINGS_CONSUMERS = frozenset(
     {
         # Performance / analysis
         "performance",
+        "performance-window",
+        "performance_window",
         "analyze",
         "returns",
         "analysis",
@@ -818,6 +826,22 @@ def synthesize_args(
     # than defaulting to concept mode.
     if effective_command in ("market", "macro", "market-wide") and not user_args:
         return ["market"], 0
+
+    # Explicit-window performance accepts flag-only calls from MCP/REST
+    # (`investorclaw performance-window --period 1w`). Inject the current
+    # holdings + output path before those flags, while preserving caller-
+    # supplied period/start/end.
+    if (
+        effective_command in ("performance-window", "performance_window")
+        and args
+        and args[0].startswith("--")
+    ):
+        from ic_engine.config.command_builders import synthesize_command_args
+
+        base_args, error_code = synthesize_command_args(effective_command, [], reports_dir)
+        if error_code != 0:
+            return [], error_code
+        args = base_args[:2] + args
 
     # General argument synthesis for all other auto-synthesize commands
     if effective_command in _AUTO_SYNTHESIZE and not args:

@@ -16,10 +16,10 @@ with the agentic-cobol harness.
 """
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from .._runtime import _run_ic_engine
-
 
 # ──────────────────────────────────────────────────────────────────────
 # Pure tool handlers (transport-agnostic)
@@ -74,6 +74,40 @@ async def portfolio_holdings() -> dict[str, Any]:
     return await _run_ic_engine(
         ["ask", "What is in my portfolio? Show me holdings, values, and weights."]
     )
+
+
+async def portfolio_performance_window(
+    period: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> dict[str, Any]:
+    """Deterministic per-holding + portfolio return/P&L over a time window.
+
+    Use for ANY temporal/historical performance query. This path passes
+    explicit parameters to ic-engine and does not depend on NL narration.
+    """
+    args = ["performance-window"]
+    if period:
+        args.extend(["--period", period])
+    if start_date:
+        args.extend(["--start", start_date])
+    if end_date:
+        args.extend(["--end", end_date])
+    result = await _run_ic_engine(args, timeout_sec=1800.0)
+    narrative = result.get("narrative") or ""
+    if isinstance(narrative, str):
+        for line in reversed(narrative.splitlines()):
+            raw = line.strip()
+            if raw.startswith("{") and '"sections"' in raw and '"ic_result"' in raw:
+                try:
+                    envelope = json.loads(raw)
+                    if isinstance(envelope, dict):
+                        result.clear()
+                        result.update(envelope)
+                    break
+                except json.JSONDecodeError:
+                    pass
+    return result
 
 
 async def portfolio_refresh() -> dict[str, Any]:
@@ -312,6 +346,30 @@ TOOLS: dict[str, dict[str, Any]] = {
         parameters={},
         required=[],
         handler=portfolio_holdings,
+    ),
+    "portfolio_performance_window": _tool(
+        description=(
+            "Deterministic per-holding + portfolio return/P&L and top movers "
+            "over an explicit time window (period like 1w/1mo/3mo/ytd/1y/max, "
+            "or start_date/end_date). Use for ANY 'last week / last month / "
+            "past X / since DATE / historical' question — does not depend on narration."
+        ),
+        parameters={
+            "period": {
+                "type": "string",
+                "description": "Optional period token: 1d, 1w, 2w, 1mo, 3mo, 6mo, ytd, 1y, 2y, max.",
+            },
+            "start_date": {
+                "type": "string",
+                "description": "Optional ISO YYYY-MM-DD inclusive start date; use for 'since DATE'.",
+            },
+            "end_date": {
+                "type": "string",
+                "description": "Optional ISO YYYY-MM-DD inclusive end date; defaults to engine EOD.",
+            },
+        },
+        required=[],
+        handler=portfolio_performance_window,
     ),
     "portfolio_refresh": _tool(
         description=(

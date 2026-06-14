@@ -3,7 +3,7 @@ name: investorclaw
 description: Deterministic-first portfolio analyzer for ZeroClaw via MCP-HTTP at localhost:18090. Holdings, performance, Sharpe + Sortino, FRED yields, bond duration, scenario rebalancing.
 homepage: https://github.com/argonautsystems/InvestorClaw
 user-invocable: true
-metadata: {"license":"MIT-0","version":"4.7.7","runtime":"zeroclaw","image":"ghcr.io/argonautsystems/ic-engine:4.7.7-cpu","mcp-endpoint":"http://localhost:18090/mcp"}
+metadata: {"license":"MIT-0","version":"4.8.0","runtime":"zeroclaw","image":"ghcr.io/argonautsystems/ic-engine:4.8.0-cpu","mcp-endpoint":"http://localhost:18090/mcp"}
 ---
 
 <!--
@@ -46,7 +46,7 @@ agent startup. No skill code, no shell-out, no per-tool wiring.
 The two services run as a Docker compose stack, bound to localhost:
 
 - `mnemos-os/mnemos-rs:4.2` → `localhost:5002`
-- `argonautsystems/ic-engine:4.7.7-cpu` → `localhost:18090`
+- `argonautsystems/ic-engine:4.8.0-cpu` → `localhost:18090`
 
 **Quick install via ClawHub:**
 
@@ -264,3 +264,7 @@ This skill describes the InvestorClaw service. If a tool returns an
 unexpected result, the bug is in the service (Apache 2.0, see
 `mnemos-os/ic-engine` and `mnemos-os/mnemos-rs`), not in this
 manifest.
+
+## Time-window / historical questions
+
+Route last week / last month / last quarter / since DATE / historical performance questions to investorclaw.portfolio_performance_window, not portfolio_ask. Cookbook mapping: last week to period=1w; past two weeks to period=2w; last month or past month to period=1mo; last quarter to period=3mo; past six months to period=6mo; this year or YTD to period=ytd; last year to period=1y; last N days to the nearest supported period token when possible (1d/1w/2w/1mo/3mo/6mo/1y/2y) or to start_date=YYYY-MM-DD plus end_date=YYYY-MM-DD; since DATE to start_date=YYYY-MM-DD; explicit ranges to start_date=YYYY-MM-DD and end_date=YYYY-MM-DD. The tool returns signed per-holding start/end prices, return_pct, contribution, total_return_pct, total_pnl, and top_movers without narration. Keep portfolio_ask for open-ended why/explanation questions after quoting the deterministic window result.
