@@ -7,7 +7,7 @@ This package is consumed by two adapters:
 The canonical agent-skill contract template lives in `contract/` (sibling to src/).
 """
 
-__version__ = "2.5.2"
+__version__ = "4.7.7"
 
 # Install yfinance disk-cache before any analyzer imports yfinance.
 # Without this, every subprocess invocation re-fetches prices from Yahoo

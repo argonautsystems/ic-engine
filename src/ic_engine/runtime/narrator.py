@@ -494,17 +494,23 @@ def _is_performance_hedge(response: str, question: str, envelope: Envelope) -> b
     if deterministic is None:
         return False
 
-    # If the response already includes any envelope number, it is not the bare
-    # hedge this recovery targets. This avoids replacing substantive, envelope-
-    # grounded answers that happen to contain cautious wording.
-    if _NUMERIC_CLAIM_RE.search(response):
+    # Strip the hmac/ic_result footer the narrator is told to append — its hex
+    # digits would otherwise trip the numeric guard below and defeat recovery
+    # for a genuine hedge that still carries the signature footer.
+    body = re.split(r"ic_result\.hmac:", response, maxsplit=1)[0]
+    body_lowered = body.lower()
+
+    # If the response BODY already includes any envelope number, it is not the
+    # bare hedge this recovery targets. This avoids replacing substantive,
+    # envelope-grounded answers that happen to contain cautious wording.
+    if _NUMERIC_CLAIM_RE.search(body):
         return False
 
     # Also avoid overriding when a scalar non-numeric fact (symbol/driver/etc.)
-    # from the deterministic answer already appears in the response.
+    # from the deterministic answer already appears in the response body.
     for value in re.findall(r": ([^\n,]+)", deterministic):
         value = value.strip()
-        if value and value.lower() in lowered:
+        if value and value.lower() in body_lowered:
             return False
     return True
 

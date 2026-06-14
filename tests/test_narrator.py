@@ -359,3 +359,23 @@ def test_narrate_truncates_runaway_llm_response(envelope, monkeypatch):
     body = result.answer.split("ic_result.hmac:")[0]
     assert len(body.split()) <= _MAX_NARRATOR_WORDS + 5
 
+
+def test_temporal_hedge_with_hmac_footer_still_recovers(envelope, monkeypatch):
+    # The narrator appends an ic_result.hmac footer (hex digits). The hedge
+    # detector must strip it before the numeric guard, else a real temporal
+    # hedge is wrongly kept. Regression for the inert-recovery bug.
+    envelope["sections"]["whatchanged"] = {
+        "window_days": "7",
+        "attribution_summary": {"total_return": "3.21%"},
+        "top_movers": [{"symbol": "AAPL", "contribution": "$1,234.56", "driver": "earnings"}],
+    }
+    now = envelope["generated_at"]
+    envelope["section_meta"]["whatchanged"] = {"computed_at": now, "ttl_seconds": 300, "source": "whatchanged", "status": "success"}
+    attach_hmac(envelope)
+    h = envelope["ic_result"]["hmac"]
+    hedge = "I couldn't retrieve your portfolio's specific performance for last week.\n\nic_result.hmac: " + h
+    monkeypatch.setattr("ic_engine.runtime.narrator._call_llm", lambda _s, _u: (hedge, "fake"))
+    result = narrate(envelope, "How did my portfolio do last week?")
+    assert "couldn't retrieve" not in result.answer.lower()
+    assert "whatchanged.top_movers" in result.answer
+
