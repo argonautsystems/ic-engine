@@ -36,6 +36,19 @@ Dockerfile, tests) is Apache 2.0.
   fetches one day at the provider, not a 30-day window; a same-day repeat fetches
   nothing. Verified by a provider-mock test asserting the exact `days=` handed to
   `get_ohlcv_panel`.
+- **Tight delta below `get_ohlcv_panel`.** Two provider-layer floors that re-broke
+  the delta are fixed: the Massive `get_history` row `limit` now covers the
+  `from..to` span (a `days=1` delta previously truncated to `limit=1` and returned
+  only yesterday, so the new day filtered to empty), and the yfinance batch
+  fallback now date-bounds its fetch to the requested tail instead of flooring
+  every request to a 1-year `period` (a 1-day delta no longer pulls a full year).
+- **Corporate-action consistency.** When a delta fetch lands on a different
+  split/adjustment basis than the cached bars (`_looks_like_split`), the symbol's
+  cached history is dropped and the whole window is refetched once on a single
+  basis, so a cached window can no longer diverge from an uncached full fetch
+  across a split. Dividends are synced at most once per symbol per window end
+  (tracked by `dividend_synced_through`) rather than re-pulling the full dividend
+  feed for every price hole.
 - **Result-cache concurrency + freshness.** Result-cache load→compute→save is now
   serialized by a per-key `flock`, so the warmth cron and an agent request landing
   in the same second no longer race the atomic replace. The cache validates a

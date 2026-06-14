@@ -167,23 +167,20 @@ def _yf_batch_fallback(symbols: List[str], days: int) -> Dict[str, List[Dict]]:
     except ImportError:
         return out
 
-    if days <= 365:
-        period = "1y"
-    elif days <= 730:
-        period = "2y"
-    elif days <= 1825:
-        period = "5y"
-    elif days <= 3650:
-        period = "10y"
-    else:
-        period = "max"
+    # Date-bound the fallback fetch to the requested tail instead of flooring
+    # every request to a 1-year period: a one-day incremental delta must not
+    # refetch a full year of bars at the provider layer. ``end`` is exclusive in
+    # yfinance, so add a day; pad the start by 4 days for weekend/holiday holes.
+    end_dt = pd.Timestamp.now().normalize() + pd.Timedelta(days=1)
+    start_dt = end_dt - pd.Timedelta(days=max(int(days) + 4, 1))
 
     try:
         yf_syms = [s.replace(".", "-") for s in symbols]
         reverse = {yf_syms[i]: symbols[i] for i in range(len(symbols))}
         data = yf.download(
             yf_syms if len(yf_syms) > 1 else yf_syms[0],
-            period=period,
+            start=start_dt.strftime("%Y-%m-%d"),
+            end=end_dt.strftime("%Y-%m-%d"),
             progress=False,
             auto_adjust=True,
             threads=False,

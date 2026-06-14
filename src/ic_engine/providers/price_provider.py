@@ -805,6 +805,11 @@ class MassiveProvider(MassiveSurfaceMixin):
             to_date = datetime.now().strftime("%Y-%m-%d")
             from_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
 
+            # ``limit`` must cover the inclusive ``from_..to`` calendar span, not
+            # ``days``: an incremental one-day delta (days=1) spans yesterday..today
+            # (2 calendar days), so limit=1 + ascending sort would return only
+            # yesterday and the caller would filter the new day to empty. Pad by 7
+            # for weekends/holidays at the leading edge.
             aggs = self._with_retry(
                 f"history({symbol})",
                 lambda: list(
@@ -815,7 +820,7 @@ class MassiveProvider(MassiveSurfaceMixin):
                         from_=from_date,
                         to=to_date,
                         adjusted=True,
-                        limit=min(days, 50000),
+                        limit=min(days + 7, 50000),
                         sort="asc",
                     )
                 ),

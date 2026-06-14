@@ -311,6 +311,85 @@ def test_result_cache_version_miss_forces_recompute(monkeypatch, tmp_path):
     assert out["section_meta"]["performance_window"]["engine_version"] == "test-bumped"
 
 
+def test_yf_batch_fallback_uses_tight_date_range_not_year_period(monkeypatch):
+    """B1: a 1-day delta must not pull a 1-year yfinance period at the provider."""
+    import sys
+    import types
+
+    from ic_engine.providers import price_panel
+
+    captured: dict[str, object] = {}
+
+    fake_yf = types.ModuleType("yfinance")
+
+    def fake_download(symbols, **kwargs):
+        captured.update(kwargs)
+        return pd.DataFrame()  # empty -> fallback returns {} cleanly
+
+    fake_yf.download = fake_download
+    monkeypatch.setitem(sys.modules, "yfinance", fake_yf)
+
+    price_panel._yf_batch_fallback(["AAA"], days=1)
+    assert "period" not in captured  # no coarse 1y bucket
+    assert "start" in captured and "end" in captured
+    span = (pd.Timestamp(captured["end"]) - pd.Timestamp(captured["start"])).days
+    assert span <= 10  # tight tail, not ~365
+
+
+def test_massive_get_history_limit_covers_span_for_one_day_delta(monkeypatch):
+    """B2: days=1 must request enough rows to include today, not limit=1."""
+    from ic_engine.providers.price_provider import MassiveProvider
+
+    monkeypatch.setenv("MASSIVE_API_KEY", "test-key")
+
+    class _FakeAggClient:
+        def __init__(self):
+            self.kwargs = None
+
+        def list_aggs(self, **kwargs):
+            self.kwargs = kwargs
+            return []  # empty -> get_history returns [] before dividend adjust
+
+    provider = MassiveProvider(api_key="test-key")
+    fake_client = _FakeAggClient()
+    provider._client = fake_client
+    provider._with_retry = lambda _label, fn: fn()
+
+    provider.get_history("AAA", days=1)
+    assert fake_client.kwargs is not None
+    # limit must cover the yesterday..today span (+pad), not be truncated to 1.
+    assert fake_client.kwargs["limit"] >= 2
+
+
+class _SplitAnalyzer(_FakeAnalyzer):
+    """Exactly-2x price jump after the split date to trip split detection."""
+
+    SPLIT_DATE = date(2026, 6, 11)
+
+    def _close(self, sym: str, day: pd.Timestamp) -> float:  # type: ignore[override]
+        return 200.0 if day.date() >= self.SPLIT_DATE else 100.0
+
+
+def test_split_triggers_full_window_rebuild(monkeypatch, tmp_path):
+    """M1: a split/adjustment discontinuity must rebuild the whole window on one
+    basis rather than merge old-basis cached bars with new-basis fresh bars."""
+    monkeypatch.setenv("INVESTORCLAW_OHLCV_PANEL_DIR", str(tmp_path / "panel"))
+    from ic_engine.commands import performance_window_cache as cache
+
+    analyzer = _SplitAnalyzer()
+    # Seed pre-split bars.
+    cache.update_and_slice_panel(analyzer, ["AAA"], "2026-06-01", "2026-06-10")
+    analyzer.calls.clear()
+
+    # Extend across the split; detection must force a full-window refetch.
+    cache.update_and_slice_panel(analyzer, ["AAA"], "2026-06-01", "2026-06-14")
+    full_refetch = (("AAA",), "2026-06-01", "2026-06-14")
+    assert full_refetch in analyzer.calls
+
+    meta = cache._load_meta("AAA")
+    assert meta.get("split_rebuilt_at") == "2026-06-14"
+
+
 def test_new_symbol_triggers_its_fetch_only(monkeypatch, tmp_path):
     monkeypatch.setenv("INVESTORCLAW_OHLCV_PANEL_DIR", str(tmp_path / "panel"))
     analyzer = _FakeAnalyzer()

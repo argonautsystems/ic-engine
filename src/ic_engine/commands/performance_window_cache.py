@@ -450,17 +450,23 @@ def _sum_dividends(events: Iterable[dict[str, Any]], start_date: str, end_date: 
 
 def _fetch_symbol_range(
     analyzer: Any, symbol: str, start_date: str, end_date: str
-) -> tuple[pd.DataFrame, list[dict[str, Any]]]:
+) -> tuple[pd.DataFrame, float]:
+    """Fetch only the price bars for [start_date, end_date] (delta path).
+
+    Dividends are synced separately, at most once per symbol per window, so the
+    per-range delta fetch does not re-pull full dividend history for every hole.
+    Returns the OHLCV frame plus the legacy aggregate dividend value (used only
+    as a compatibility fallback for mocks that model the aggregate, not events).
+    """
     logger.info("OHLCV panel delta fetch %s %s..%s", symbol, start_date, end_date)
     price_pl, dividends, fetched_symbols = analyzer.fetch_equity_data(
         [symbol], start_date, end_date, exact_range=True
     )
     fetched_set = {str(s).upper() for s in fetched_symbols}
     aggregate_value = float(dividends.get(symbol.upper(), 0.0) or 0.0)
-    events = _fetch_dividend_events(symbol.upper(), start_date, end_date, aggregate_value)
     if symbol.upper() not in fetched_set:
-        return pd.DataFrame(columns=list(_OHLCV_FIELDS)), events
-    return _symbol_frame_from_fetch(price_pl, symbol.upper()), events
+        return pd.DataFrame(columns=list(_OHLCV_FIELDS)), aggregate_value
+    return _symbol_frame_from_fetch(price_pl, symbol.upper()), aggregate_value
 
 
 def _date_range(start: date, end: date) -> list[date]:
@@ -549,21 +555,24 @@ def update_and_slice_panel(
             meta = _load_meta(symbol)
             div_events = _load_dividend_events(symbol)
             changed = False
+            split_detected = False
+            aggregate_hint = 0.0
 
             def fetch_and_merge(fetch_start: date, fetch_end: date) -> None:
-                nonlocal panel, div_events, changed
+                nonlocal panel, changed, split_detected, aggregate_hint
                 if fetch_start > fetch_end:
                     return
                 try:
-                    fetched, events = _fetch_symbol_range(
+                    fetched, aggregate = _fetch_symbol_range(
                         analyzer, symbol, fetch_start.isoformat(), fetch_end.isoformat()
                     )
-                    div_events = _normalize_dividend_events([*div_events, *events])
+                    aggregate_hint = max(aggregate_hint, aggregate)
                     if _looks_like_split(panel, fetched):
-                        # Flag the discontinuity for observability, but keep the
-                        # delta invariant: never refetch/overwrite existing bars
-                        # from the performance-window warm path.
-                        meta["split_suspected_at"] = end.isoformat()
+                        # The fresh bars are on a different split/adjustment basis
+                        # than the cached bars. Flag for a full rebuild so the whole
+                        # series shares one basis (avoids a boundary return that
+                        # diverges from an uncached full fetch).
+                        split_detected = True
                     panel = _merge_panel(panel, fetched)
                     _add_attempted_range(meta, fetch_start, fetch_end)
                     changed = True
@@ -579,6 +588,43 @@ def update_and_slice_panel(
 
             for fetch_start, fetch_end in _missing_ranges(panel, meta, start, end):
                 fetch_and_merge(fetch_start, fetch_end)
+
+            if split_detected:
+                # Corporate action: drop the symbol's cached history and refetch
+                # the whole window once so every bar is on today's adjustment
+                # basis. Rare (≈ splits) so the one-time full fetch is acceptable.
+                logger.info(
+                    "OHLCV panel adjustment-basis change for %s; full window rebuild", symbol
+                )
+                panel = pd.DataFrame(columns=list(_OHLCV_FIELDS))
+                meta["attempted_ranges"] = []
+                meta.pop("dividend_synced_through", None)
+                meta["split_rebuilt_at"] = end.isoformat()
+                try:
+                    fetched, aggregate = _fetch_symbol_range(
+                        analyzer, symbol, start.isoformat(), end.isoformat()
+                    )
+                    aggregate_hint = max(aggregate_hint, aggregate)
+                    panel = _merge_panel(panel, fetched)
+                    _add_attempted_range(meta, start, end)
+                except Exception as exc:
+                    logger.warning("OHLCV panel split rebuild failed for %s: %s", symbol, exc)
+                changed = True
+
+            # Sync dividends at most once per symbol per window end: the event
+            # store already holds the full dated history, so re-pulling Massive's
+            # 1000-row dividend feed for every price hole is wasteful.
+            div_synced_through = str(meta.get("dividend_synced_through") or "")
+            if end.isoformat() > div_synced_through:
+                fresh_events = _fetch_dividend_events(
+                    symbol, start_date, end_date, aggregate_hint
+                )
+                merged_events = _normalize_dividend_events([*div_events, *fresh_events])
+                if merged_events != div_events:
+                    div_events = merged_events
+                    changed = True
+                meta["dividend_synced_through"] = end.isoformat()
+                changed = True
 
             if changed:
                 # Merge with the latest on-disk state while still locked; this
