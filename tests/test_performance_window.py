@@ -160,7 +160,8 @@ def test_build_performance_window_reuses_analyzer_total_returns(monkeypatch, tmp
         lambda sym, s, e, agg: (
             [{"date": "2026-06-14", "amount": 0.20, "source": "test"}]
             if sym.upper() == "AAA"
-            else []
+            else [],
+            True,
         ),
     )
 

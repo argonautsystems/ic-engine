@@ -350,14 +350,23 @@ def _looks_like_split(existing: pd.DataFrame, fetched: pd.DataFrame) -> bool:
 
 def _fetch_dividend_events(
     symbol: str, start_date: str, end_date: str, aggregate_value: float
-) -> list[dict[str, Any]]:
-    """Fetch dated dividend events for a symbol/range."""
+) -> tuple[list[dict[str, Any]], bool]:
+    """Fetch dated dividend events for a symbol/range.
+
+    Returns ``(events, ok)``. ``ok`` is True when a provider actually responded
+    (even with zero dividends) so the caller can distinguish a legitimate empty
+    snapshot (e.g. a dividend was removed -> replace the store) from a transient
+    failure (keep the prior store, retry later). ``ok`` is False only when every
+    source raised and no aggregate fallback was available.
+    """
     sym = symbol.upper()
     events: list[dict[str, Any]] = []
+    ok = False
     try:
         from ic_engine.providers.price_provider import MassiveProvider
 
         rows = MassiveProvider().get_dividends(sym, limit=1000) or []
+        ok = True  # provider responded (even if rows is empty)
         for row in rows:
             raw_date = row.get("ex_date") or row.get("pay_date")
             if not raw_date:
@@ -368,7 +377,7 @@ def _fetch_dividend_events(
                 if amount > 0.0:
                     events.append({"date": event_date, "amount": amount, "source": "massive"})
         if events:
-            return events
+            return events, True
     except Exception as exc:
         logger.debug("Massive dividend-event fetch failed for %s: %s", sym, exc)
 
@@ -376,6 +385,7 @@ def _fetch_dividend_events(
         import yfinance as yf
 
         div_data = yf.Ticker(sym).dividends
+        ok = True  # provider responded
         if div_data is not None and not div_data.empty:
             for idx, value in div_data.items():
                 event_date = pd.Timestamp(idx).date().isoformat()
@@ -384,7 +394,7 @@ def _fetch_dividend_events(
                     if amount > 0.0:
                         events.append({"date": event_date, "amount": amount, "source": "yfinance"})
         if events:
-            return events
+            return events, True
     except Exception as exc:
         logger.debug("yfinance dividend-event fetch failed for %s: %s", sym, exc)
 
@@ -392,8 +402,8 @@ def _fetch_dividend_events(
         # Compatibility for tests/mocks that model only the legacy aggregate.
         return [
             {"date": end_date, "amount": float(aggregate_value), "source": "aggregate_fallback"}
-        ]
-    return []
+        ], True
+    return events, ok
 
 
 def _normalize_dividend_events(events: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -465,9 +475,19 @@ def _fetch_symbol_range(
     as a compatibility fallback for mocks that model the aggregate, not events).
     """
     logger.info("OHLCV panel delta fetch %s %s..%s", symbol, start_date, end_date)
-    price_pl, dividends, fetched_symbols = analyzer.fetch_equity_data(
-        [symbol], start_date, end_date, exact_range=True
-    )
+    try:
+        price_pl, dividends, fetched_symbols = analyzer.fetch_equity_data(
+            [symbol], start_date, end_date, exact_range=True
+        )
+    except ValueError as exc:
+        # A typed "no data" outcome means the provider responded and the range
+        # legitimately has no bars (delisted / market-closed span) — a SUCCESS
+        # with an empty result, which the caller finalizes as attempted. Any
+        # other error (network/API/transient) propagates so the hole stays
+        # retryable rather than becoming permanent.
+        if "No data returned" in str(exc):
+            return pd.DataFrame(columns=list(_OHLCV_FIELDS)), 0.0
+        raise
     fetched_set = {str(s).upper() for s in fetched_symbols}
     aggregate_value = float(dividends.get(symbol.upper(), 0.0) or 0.0)
     if symbol.upper() not in fetched_set:
@@ -625,14 +645,17 @@ def update_and_slice_panel(
             dividend_drift = False
             div_synced_through = str(meta.get("dividend_synced_through") or "")
             if end.isoformat() > div_synced_through:
-                fresh_events = _fetch_dividend_events(
+                fresh_events, div_ok = _fetch_dividend_events(
                     symbol, "1900-01-01", end_date, aggregate_hint
                 )
-                fresh_norm = _normalize_dividend_events(fresh_events)
-                if fresh_norm:
+                # Only act on an authoritative response. A transient failure
+                # (div_ok False) keeps the prior store and does NOT advance
+                # dividend_synced_through, so it retries next call.
+                if div_ok:
+                    fresh_norm = _normalize_dividend_events(fresh_events)
                     # Any change (new, removed, or corrected amount) to a dividend
                     # whose ex-date sits inside the already-cached price range means
-                    # Massive retroactively re-adjusted those bars -> rebuild.
+                    # the provider retroactively re-adjusted those bars -> rebuild.
                     if prior_panel_max is not None:
                         cutoff = prior_panel_max.isoformat()
                         prior_in_range = {
@@ -647,11 +670,13 @@ def update_and_slice_panel(
                         }
                         if prior_in_range != fresh_in_range:
                             dividend_drift = True
+                    # Replace with the authoritative snapshot even when empty (a
+                    # removed dividend must clear the stale stored event).
                     if fresh_norm != div_events:
                         div_events = fresh_norm
                         changed = True
-                meta["dividend_synced_through"] = end.isoformat()
-                changed = True
+                    meta["dividend_synced_through"] = end.isoformat()
+                    changed = True
 
             # Corporate-action rebuild trigger: a large price discontinuity OR a
             # dividend change inside the already-cached range (Massive re-adjusts

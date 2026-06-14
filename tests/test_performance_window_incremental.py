@@ -156,7 +156,7 @@ def test_cached_window_with_dividend_matches_uncached_full_window(monkeypatch, t
             {"date": event_date, "amount": amount, "source": "test"}
             for event_date, amount in dividends.get(symbol, {}).items()
             if start_date <= event_date <= end_date
-        ]
+        ], True
 
     monkeypatch.setattr(
         "ic_engine.commands.performance_window_cache._fetch_dividend_events", fake_events
@@ -395,7 +395,7 @@ def test_transient_fetch_exception_is_retryable_not_finalized(monkeypatch, tmp_p
     monkeypatch.setenv("INVESTORCLAW_OHLCV_PANEL_DIR", str(tmp_path / "panel"))
     from ic_engine.commands import performance_window_cache as cache
 
-    monkeypatch.setattr(cache, "_fetch_dividend_events", lambda *a, **k: [])
+    monkeypatch.setattr(cache, "_fetch_dividend_events", lambda *a, **k: ([], True))
 
     class _Flaky(_FakeAnalyzer):
         def __init__(self):
@@ -433,7 +433,7 @@ def test_dividend_correction_triggers_rebuild_no_double_count(monkeypatch, tmp_p
 
     def fake_events(sym, s, e, agg):
         ev = {"date": "2026-06-03", "amount": state["amount"], "source": "test"}
-        return [ev] if s <= ev["date"] <= e else []
+        return ([ev] if s <= ev["date"] <= e else []), True
 
     monkeypatch.setattr(cache, "_fetch_dividend_events", fake_events)
     analyzer = _FakeAnalyzer()
@@ -448,6 +448,78 @@ def test_dividend_correction_triggers_rebuild_no_double_count(monkeypatch, tmp_p
     # Replaced, not accumulated (would be 2.50 if double-counted).
     assert abs(div2["AAA"] - 1.50) < 1e-9
     assert cache._load_meta("AAA").get("split_rebuilt_at") == "2026-06-06"
+
+
+def test_typed_no_data_is_finalized_not_retried_forever(monkeypatch, tmp_path):
+    """M-B2: a typed 'No data returned' outcome is a successful-empty response and
+    must finalize the hole (delisted/closed span), not retry every call."""
+    monkeypatch.setenv("INVESTORCLAW_OHLCV_PANEL_DIR", str(tmp_path / "panel"))
+    from ic_engine.commands import performance_window_cache as cache
+
+    monkeypatch.setattr(cache, "_fetch_dividend_events", lambda *a, **k: ([], True))
+
+    class _NoData(_FakeAnalyzer):
+        def fetch_equity_data(self, symbols, start_date, end_date, *, exact_range=False):
+            self.calls.append(
+                (tuple(str(s).upper() for s in symbols), start_date, end_date)
+            )
+            raise ValueError("No data returned from Yahoo Finance. Check symbols and date range.")
+
+    analyzer = _NoData()
+    cache.update_and_slice_panel(analyzer, ["AAA"], "2026-06-02", "2026-06-05")
+    n_after_first = len(analyzer.calls)
+    cache.update_and_slice_panel(analyzer, ["AAA"], "2026-06-02", "2026-06-05")
+    assert len(analyzer.calls) == n_after_first  # finalized, no re-fetch
+
+
+def test_removed_dividend_clears_store_and_rebuilds(monkeypatch, tmp_path):
+    """M-A2: an authoritative empty snapshot (dividend removed) must clear the
+    stored event and rebuild, not retain stale income."""
+    monkeypatch.setenv("INVESTORCLAW_OHLCV_PANEL_DIR", str(tmp_path / "panel"))
+    from ic_engine.commands import performance_window_cache as cache
+
+    state = {"present": True}
+
+    def fake_events(sym, s, e, agg):
+        ev = {"date": "2026-06-03", "amount": 1.00, "source": "test"}
+        present = state["present"] and s <= ev["date"] <= e
+        return ([ev] if present else []), True
+
+    monkeypatch.setattr(cache, "_fetch_dividend_events", fake_events)
+    analyzer = _FakeAnalyzer()
+
+    _pl, d1, _f = cache.update_and_slice_panel(analyzer, ["AAA"], "2026-06-01", "2026-06-05")
+    assert abs(d1["AAA"] - 1.00) < 1e-9
+
+    state["present"] = False  # provider authoritatively reports the dividend gone
+    _pl, d2, _f = cache.update_and_slice_panel(analyzer, ["AAA"], "2026-06-01", "2026-06-06")
+    assert abs(d2["AAA"] - 0.0) < 1e-9  # store cleared, no stale income
+    assert cache._load_meta("AAA").get("split_rebuilt_at") == "2026-06-06"
+
+
+def test_transient_dividend_failure_keeps_prior_store(monkeypatch, tmp_path):
+    """M-A2(rev): a transient dividend failure (ok False) must NOT wipe the store
+    and must not advance dividend_synced_through (so it retries)."""
+    monkeypatch.setenv("INVESTORCLAW_OHLCV_PANEL_DIR", str(tmp_path / "panel"))
+    from ic_engine.commands import performance_window_cache as cache
+
+    state = {"ok": True}
+
+    def fake_events(sym, s, e, agg):
+        if not state["ok"]:
+            return [], False  # transient failure
+        ev = {"date": "2026-06-03", "amount": 1.00, "source": "test"}
+        return ([ev] if s <= ev["date"] <= e else []), True
+
+    monkeypatch.setattr(cache, "_fetch_dividend_events", fake_events)
+    analyzer = _FakeAnalyzer()
+
+    cache.update_and_slice_panel(analyzer, ["AAA"], "2026-06-01", "2026-06-05")
+    state["ok"] = False
+    _pl, d2, _f = cache.update_and_slice_panel(analyzer, ["AAA"], "2026-06-01", "2026-06-06")
+    assert abs(d2["AAA"] - 1.00) < 1e-9  # prior store kept
+    assert "dividend_synced_through" in cache._load_meta("AAA")
+    assert cache._load_meta("AAA")["dividend_synced_through"] == "2026-06-05"  # not advanced
 
 
 def test_narrow_then_wide_same_end_keeps_older_dividends(monkeypatch, tmp_path):
@@ -465,7 +537,7 @@ def test_narrow_then_wide_same_end_keeps_older_dividends(monkeypatch, tmp_path):
     monkeypatch.setattr(
         cache,
         "_fetch_dividend_events",
-        lambda sym, s, e, agg: [ev for ev in all_events if s <= ev["date"] <= e],
+        lambda sym, s, e, agg: ([ev for ev in all_events if s <= ev["date"] <= e], True),
     )
     analyzer = _FakeAnalyzer()
 
