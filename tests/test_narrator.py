@@ -57,6 +57,39 @@ def envelope() -> Envelope:
     return attach_hmac(env)
 
 
+def _add_performance_and_whatchanged(envelope: Envelope) -> Envelope:
+    envelope["sections"]["performance"] = {
+        "portfolio_summary": {
+            "weighted_annual_return": "12.34%",
+            "total_value": "$123,456.78",
+        },
+        "top_performers": [
+            {"symbol": "NVDA", "return_pct": "4.20%", "sharpe": "1.5x"},
+        ],
+    }
+    envelope["sections"]["whatchanged"] = {
+        "window_days": "7",
+        "attribution_summary": {"total_return": "3.21%"},
+        "top_movers": [
+            {"symbol": "AAPL", "contribution": "$1,234.56", "driver": "earnings"},
+        ],
+    }
+    now = envelope["generated_at"]
+    envelope["section_meta"]["performance"] = {
+        "computed_at": now,
+        "ttl_seconds": 300,
+        "source": "performance",
+        "status": "success",
+    }
+    envelope["section_meta"]["whatchanged"] = {
+        "computed_at": now,
+        "ttl_seconds": 300,
+        "source": "whatchanged",
+        "status": "success",
+    }
+    return attach_hmac(envelope)
+
+
 def test_narrator_accepts_verbatim_numbers(envelope, monkeypatch):
     def _fake_llm(system_prompt, user_prompt):
         assert "Use ONLY data from this JSON envelope" in system_prompt
@@ -90,36 +123,7 @@ def test_narrator_out_of_scope_refusal_gets_hmac_footer(envelope, monkeypatch):
 
 
 def test_narrator_recovers_performance_answer_from_llm_refusal(envelope, monkeypatch):
-    envelope["sections"]["performance"] = {
-        "portfolio_summary": {
-            "weighted_annual_return": "12.34%",
-            "total_value": "$123,456.78",
-        },
-        "top_performers": [
-            {"symbol": "NVDA", "return_pct": "4.20%", "sharpe": "1.5x"},
-        ],
-    }
-    envelope["sections"]["whatchanged"] = {
-        "window_days": "7",
-        "attribution_summary": {"total_return": "3.21%"},
-        "top_movers": [
-            {"symbol": "AAPL", "contribution": "$1,234.56", "driver": "earnings"},
-        ],
-    }
-    now = envelope["generated_at"]
-    envelope["section_meta"]["performance"] = {
-        "computed_at": now,
-        "ttl_seconds": 300,
-        "source": "performance",
-        "status": "success",
-    }
-    envelope["section_meta"]["whatchanged"] = {
-        "computed_at": now,
-        "ttl_seconds": 300,
-        "source": "whatchanged",
-        "status": "success",
-    }
-    attach_hmac(envelope)
+    _add_performance_and_whatchanged(envelope)
     monkeypatch.setattr(
         "ic_engine.runtime.narrator._call_llm",
         lambda _system, _user: (OUT_OF_SCOPE_RESPONSE, "fake"),
@@ -143,6 +147,72 @@ def test_narrator_recovers_performance_answer_from_llm_refusal(envelope, monkeyp
     ):
         assert expected in result.answer
     assert result.validation_passed is True
+
+
+@pytest.mark.parametrize(
+    "time_window",
+    [
+        "last week",
+        "this week",
+        "today",
+    ],
+)
+def test_narrator_recovers_temporal_performance_hedge(
+    envelope, monkeypatch, time_window
+):
+    _add_performance_and_whatchanged(envelope)
+    hedge = f"I couldn't retrieve your portfolio's specific performance for {time_window}."
+    monkeypatch.setattr(
+        "ic_engine.runtime.narrator._call_llm",
+        lambda _system, _user: (hedge, "fake"),
+    )
+
+    result = narrate(envelope, f"How did my portfolio perform {time_window}?")
+
+    assert hedge not in result.answer
+    for expected in (
+        "weighted_annual_return: 12.34%",
+        "total_value: $123,456.78",
+        "symbol: NVDA",
+        "return_pct: 4.20%",
+        "sharpe: 1.5x",
+        "whatchanged.window_days: 7",
+        "whatchanged.attribution_summary.total_return: 3.21%",
+        "symbol: AAPL",
+        "contribution: $1,234.56",
+        "driver: earnings",
+        f"ic_result.hmac: {envelope['ic_result']['hmac']}",
+    ):
+        assert expected in result.answer
+    assert result.validation_passed is True
+
+
+def test_narrator_keeps_temporal_performance_hedge_when_no_data(
+    envelope, monkeypatch
+):
+    envelope["sections"]["performance"] = {
+        "portfolio_summary": {"weighted_annual_return": None},
+        "top_performers": [],
+    }
+    envelope["sections"]["whatchanged"] = {
+        "window_days": None,
+        "attribution_summary": {"total_return": None},
+        "top_movers": [],
+    }
+    attach_hmac(envelope)
+    hedge = "I couldn't retrieve your portfolio's specific performance for last week."
+    monkeypatch.setattr(
+        "ic_engine.runtime.narrator._call_llm",
+        lambda _system, _user: (hedge, "fake"),
+    )
+
+    result = narrate(envelope, "How did my portfolio perform last week?")
+
+    assert result.answer.startswith(hedge)
+    assert "weighted_annual_return:" not in result.answer
+    assert "whatchanged.window_days:" not in result.answer
+    assert "None" not in result.answer.split("ic_result.hmac")[0]
+    assert envelope["ic_result"]["hmac"] in result.answer
 
 
 def test_narrator_portfolio_refusal_kept_when_no_performance_data(envelope, monkeypatch):

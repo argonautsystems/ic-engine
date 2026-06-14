@@ -363,6 +363,31 @@ def _plain_value(value: Any) -> str | None:
     return None
 
 
+_PERFORMANCE_HEDGE_MARKERS = (
+    "couldn't retrieve",
+    "could not retrieve",
+    "do not have",
+    "don't have",
+    "does not include",
+    "doesn't include",
+    "no data for",
+    "not available for",
+    "unable to",
+)
+
+_TEMPORAL_PERFORMANCE_MARKERS = (
+    "last week",
+    "last-week",
+    "this week",
+    "this-week",
+    "today",
+    "this month",
+    "this-month",
+    "week",
+    "day",
+)
+
+
 def _deterministic_performance_answer(envelope: Envelope, question: str) -> str | None:
     """Recover from LLM portfolio-performance refusals using envelope data.
 
@@ -436,6 +461,52 @@ def _deterministic_performance_answer(envelope: Envelope, question: str) -> str 
     if not lines:
         return None
     return "\n".join(lines)
+
+
+def _is_performance_hedge(response: str, question: str, envelope: Envelope) -> bool:
+    """Return True for short temporal/performance refusals worth recovering.
+
+    Gemini sometimes answers portfolio-window questions with a non-sentinel
+    hedge (for example, "I couldn't retrieve ... last week") even though the
+    envelope carries performance/whatchanged data. This detector is deliberately
+    narrow: it requires hedge wording (or a brief response), temporal wording
+    in the response or question, and no verbatim scalar values from the
+    deterministic recovery answer. The caller still only overrides when that
+    deterministic answer is non-None, so genuine no-data cases remain refusals.
+    """
+    text = (response or "").strip()
+    if not text:
+        return False
+
+    lowered = text.lower()
+    question_lowered = (question or "").lower()
+    is_short = len(text.split()) <= 60
+    has_hedge = any(marker in lowered for marker in _PERFORMANCE_HEDGE_MARKERS)
+    if not (is_short or has_hedge):
+        return False
+    if not any(
+        marker in lowered or marker in question_lowered
+        for marker in _TEMPORAL_PERFORMANCE_MARKERS
+    ):
+        return False
+
+    deterministic = _deterministic_performance_answer(envelope, question)
+    if deterministic is None:
+        return False
+
+    # If the response already includes any envelope number, it is not the bare
+    # hedge this recovery targets. This avoids replacing substantive, envelope-
+    # grounded answers that happen to contain cautious wording.
+    if _NUMERIC_CLAIM_RE.search(response):
+        return False
+
+    # Also avoid overriding when a scalar non-numeric fact (symbol/driver/etc.)
+    # from the deterministic answer already appears in the response.
+    for value in re.findall(r": ([^\n,]+)", deterministic):
+        value = value.strip()
+        if value and value.lower() in lowered:
+            return False
+    return True
 
 
 def _ensure_hmac_footer(response: str, hmac_value: str) -> str:
@@ -881,6 +952,8 @@ def narrate(envelope: Envelope, question: str, focus: str | None = None) -> Narr
     if not response:
         response = _heuristic_narration(envelope, question)
     elif response.strip().startswith(OUT_OF_SCOPE_RESPONSE):
+        response = _deterministic_performance_answer(envelope, question) or response
+    elif _is_performance_hedge(response, question, envelope):
         response = _deterministic_performance_answer(envelope, question) or response
     response = _truncate_runaway(response)
     response = _ensure_hmac_footer(response, hmac_value)
