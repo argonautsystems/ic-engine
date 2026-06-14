@@ -349,6 +349,88 @@ def _heuristic_narration(envelope: Envelope, question: str) -> str:
     return "\n".join(lines)
 
 
+def _plain_value(value: Any) -> str | None:
+    """Return scalar envelope values as display text without calculation."""
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return str(value)
+    return None
+
+
+def _deterministic_performance_answer(envelope: Envelope, question: str) -> str | None:
+    """Recover from LLM portfolio-performance refusals using envelope data.
+
+    This helper never computes, rounds, or infers values. It only copies
+    scalar values from the signed envelope's performance/whatchanged sections
+    into labeled lines, then validate_narration still runs on the final answer.
+    """
+    del question
+    sections = envelope.get("sections", {}) or {}
+    performance = sections.get("performance") or {}
+    whatchanged = sections.get("whatchanged") or {}
+    lines: list[str] = []
+
+    if isinstance(performance, dict):
+        portfolio_summary = performance.get("portfolio_summary") or {}
+        if isinstance(portfolio_summary, dict):
+            summary_lines = []
+            for key, value in portfolio_summary.items():
+                text = _plain_value(value)
+                if text is not None:
+                    summary_lines.append(f"  - {key}: {text}")
+            if summary_lines:
+                lines.append("performance.portfolio_summary:")
+                lines.extend(summary_lines)
+
+        top_performers = performance.get("top_performers") or []
+        if isinstance(top_performers, list):
+            performer_lines = []
+            for item in top_performers:
+                if not isinstance(item, dict):
+                    continue
+                parts = []
+                for key in ("symbol", "return_pct", "sharpe"):
+                    text = _plain_value(item.get(key))
+                    if text is not None:
+                        parts.append(f"{key}: {text}")
+                if parts:
+                    performer_lines.append(f"  - {', '.join(parts)}")
+            if performer_lines:
+                lines.append("performance.top_performers:")
+                lines.extend(performer_lines)
+
+    if isinstance(whatchanged, dict):
+        window_days = _plain_value(whatchanged.get("window_days"))
+        if window_days is not None:
+            lines.append(f"whatchanged.window_days: {window_days}")
+
+        attribution_summary = whatchanged.get("attribution_summary") or {}
+        if isinstance(attribution_summary, dict):
+            total_return = _plain_value(attribution_summary.get("total_return"))
+            if total_return is not None:
+                lines.append(f"whatchanged.attribution_summary.total_return: {total_return}")
+
+        top_movers = whatchanged.get("top_movers") or []
+        if isinstance(top_movers, list):
+            mover_lines = []
+            for item in top_movers:
+                if not isinstance(item, dict):
+                    continue
+                parts = []
+                for key in ("symbol", "contribution", "driver"):
+                    text = _plain_value(item.get(key))
+                    if text is not None:
+                        parts.append(f"{key}: {text}")
+                if parts:
+                    mover_lines.append(f"  - {', '.join(parts)}")
+            if mover_lines:
+                lines.append("whatchanged.top_movers:")
+                lines.extend(mover_lines)
+
+    if not lines:
+        return None
+    return "\n".join(lines)
+
+
 def _ensure_hmac_footer(response: str, hmac_value: str) -> str:
     if hmac_value in response:
         return response.strip()
@@ -590,7 +672,7 @@ _NA_METRIC_TERMS = (
 # (am/are/have/did/where + i/we) so they don't false-positive on generic
 # market questions like "How is the S&P doing?".
 _FIRST_PERSON_PERF_SIGNALS = (
-    "how am i doing", "how are we doing",
+    "how am i doing", "how are we doing", "how did i do", "how did we do",
     "how have i done", "how have we done",
     "how was i doing", "how am i performing", "how are we performing",
     "am i making", "am i losing", "am i up", "am i down",
@@ -791,6 +873,8 @@ def narrate(envelope: Envelope, question: str, focus: str | None = None) -> Narr
     response, model = _call_llm(SYSTEM_PROMPT, user_prompt)
     if not response:
         response = _heuristic_narration(envelope, question)
+    elif response.strip().startswith(OUT_OF_SCOPE_RESPONSE):
+        response = _deterministic_performance_answer(envelope, question) or response
     response = _truncate_runaway(response)
     response = _ensure_hmac_footer(response, hmac_value)
     validate_narration(response, envelope)

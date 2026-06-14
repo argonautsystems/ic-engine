@@ -89,12 +89,70 @@ def test_narrator_out_of_scope_refusal_gets_hmac_footer(envelope, monkeypatch):
     assert envelope["ic_result"]["hmac"] in result.answer
 
 
+def test_narrator_recovers_performance_answer_from_llm_refusal(envelope, monkeypatch):
+    envelope["sections"]["performance"] = {
+        "portfolio_summary": {
+            "weighted_annual_return": "12.34%",
+            "total_value": "$123,456.78",
+        },
+        "top_performers": [
+            {"symbol": "NVDA", "return_pct": "4.20%", "sharpe": "1.5x"},
+        ],
+    }
+    envelope["sections"]["whatchanged"] = {
+        "window_days": "7",
+        "attribution_summary": {"total_return": "3.21%"},
+        "top_movers": [
+            {"symbol": "AAPL", "contribution": "$1,234.56", "driver": "earnings"},
+        ],
+    }
+    now = envelope["generated_at"]
+    envelope["section_meta"]["performance"] = {
+        "computed_at": now,
+        "ttl_seconds": 300,
+        "source": "performance",
+        "status": "success",
+    }
+    envelope["section_meta"]["whatchanged"] = {
+        "computed_at": now,
+        "ttl_seconds": 300,
+        "source": "whatchanged",
+        "status": "success",
+    }
+    attach_hmac(envelope)
+    monkeypatch.setattr(
+        "ic_engine.runtime.narrator._call_llm",
+        lambda _system, _user: (OUT_OF_SCOPE_RESPONSE, "fake"),
+    )
+
+    result = narrate(envelope, "How did my portfolio PERFORM last week?")
+
+    assert not result.answer.startswith(OUT_OF_SCOPE_RESPONSE)
+    for expected in (
+        "weighted_annual_return: 12.34%",
+        "total_value: $123,456.78",
+        "symbol: NVDA",
+        "return_pct: 4.20%",
+        "sharpe: 1.5x",
+        "whatchanged.window_days: 7",
+        "whatchanged.attribution_summary.total_return: 3.21%",
+        "symbol: AAPL",
+        "contribution: $1,234.56",
+        "driver: earnings",
+        f"ic_result.hmac: {envelope['ic_result']['hmac']}",
+    ):
+        assert expected in result.answer
+    assert result.validation_passed is True
+
+
 @pytest.mark.parametrize(
     "question,expected_mode",
     [
         # First-person performance — portfolio (regression for #69)
         ("How am I doing this year?", "portfolio"),
         ("How are we doing year-to-date?", "portfolio"),
+        ("How did we do last week?", "portfolio"),
+        ("How did my portfolio PERFORM last week?", "portfolio"),
         ("Am I up or down?", "portfolio"),
         ("Have I made money this year?", "portfolio"),
         ("Where do I stand right now?", "portfolio"),
