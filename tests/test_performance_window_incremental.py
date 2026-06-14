@@ -390,6 +390,66 @@ def test_split_triggers_full_window_rebuild(monkeypatch, tmp_path):
     assert meta.get("split_rebuilt_at") == "2026-06-14"
 
 
+def test_transient_fetch_exception_is_retryable_not_finalized(monkeypatch, tmp_path):
+    """M-B: a provider exception must not mark the range permanently attempted."""
+    monkeypatch.setenv("INVESTORCLAW_OHLCV_PANEL_DIR", str(tmp_path / "panel"))
+    from ic_engine.commands import performance_window_cache as cache
+
+    monkeypatch.setattr(cache, "_fetch_dividend_events", lambda *a, **k: [])
+
+    class _Flaky(_FakeAnalyzer):
+        def __init__(self):
+            super().__init__()
+            self.fail_next = True
+
+        def fetch_equity_data(self, symbols, start_date, end_date, *, exact_range=False):
+            if self.fail_next:
+                self.fail_next = False
+                raise RuntimeError("transient provider error")
+            return super().fetch_equity_data(
+                symbols, start_date, end_date, exact_range=exact_range
+            )
+
+    analyzer = _Flaky()
+    # First call: the only range raises -> nothing cached, nothing finalized.
+    _pl, _div, fetched1 = cache.update_and_slice_panel(
+        analyzer, ["AAA"], "2026-06-02", "2026-06-05"
+    )
+    assert fetched1 == []
+    # Second call: the same range must be retried (not a permanent hole).
+    _pl, _div, fetched2 = cache.update_and_slice_panel(
+        analyzer, ["AAA"], "2026-06-02", "2026-06-05"
+    )
+    assert "AAA" in fetched2
+
+
+def test_dividend_correction_triggers_rebuild_no_double_count(monkeypatch, tmp_path):
+    """M-A: a corrected amount on an existing ex-date inside the cached range must
+    rebuild and replace (not accumulate) the dividend."""
+    monkeypatch.setenv("INVESTORCLAW_OHLCV_PANEL_DIR", str(tmp_path / "panel"))
+    from ic_engine.commands import performance_window_cache as cache
+
+    state = {"amount": 1.00}
+
+    def fake_events(sym, s, e, agg):
+        ev = {"date": "2026-06-03", "amount": state["amount"], "source": "test"}
+        return [ev] if s <= ev["date"] <= e else []
+
+    monkeypatch.setattr(cache, "_fetch_dividend_events", fake_events)
+    analyzer = _FakeAnalyzer()
+
+    # Seed: caches bars through 06-05 + dividend 1.00 on 06-03.
+    _pl, div1, _f = cache.update_and_slice_panel(analyzer, ["AAA"], "2026-06-01", "2026-06-05")
+    assert abs(div1["AAA"] - 1.00) < 1e-9
+
+    # Correction on a LATER day: same ex-date, amount now 1.50 (inside cached range).
+    state["amount"] = 1.50
+    _pl, div2, _f = cache.update_and_slice_panel(analyzer, ["AAA"], "2026-06-01", "2026-06-06")
+    # Replaced, not accumulated (would be 2.50 if double-counted).
+    assert abs(div2["AAA"] - 1.50) < 1e-9
+    assert cache._load_meta("AAA").get("split_rebuilt_at") == "2026-06-06"
+
+
 def test_narrow_then_wide_same_end_keeps_older_dividends(monkeypatch, tmp_path):
     """M1(rev): a narrow window must not poison a later wider same-end window's
     dividends (full history is synced through end, not just the narrow tail)."""

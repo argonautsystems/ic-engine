@@ -563,7 +563,6 @@ def update_and_slice_panel(
             )
             meta = _load_meta(symbol)
             div_events = _load_dividend_events(symbol)
-            prior_div_dates = {e["date"] for e in div_events}
             changed = False
             discontinuity = False
             aggregate_hint = 0.0
@@ -604,44 +603,61 @@ def update_and_slice_panel(
                     _record_attempted(fetch_start, fetch_end, got)
                     changed = True
                 except Exception as exc:
+                    # Transient provider failure: do NOT record an attempted range,
+                    # or the hole becomes a permanent no-refetch. A successful but
+                    # empty response (above, got=∅) still finalizes past holes; only
+                    # exceptions stay retryable on the next call.
                     logger.warning(
-                        "OHLCV panel delta fetch failed for %s %s..%s: %s",
+                        "OHLCV panel delta fetch failed for %s %s..%s: %s (retryable)",
                         symbol, fetch_start, fetch_end, exc,
                     )
-                    _record_attempted(fetch_start, fetch_end, set())
-                    changed = True
 
             for fetch_start, fetch_end in _missing_ranges(panel, meta, start, end):
                 fetch_and_merge(fetch_start, fetch_end)
 
             # Sync dividends at most once per symbol per window end. Fetch the FULL
             # dated history (start "1900-01-01") so a later WIDER same-end window
-            # is not starved of older dividends by a prior narrow sync.
+            # is not starved of older dividends by a prior narrow sync. The fresh
+            # snapshot is authoritative and REPLACES the stored events (rather than
+            # accumulating), so a corrected amount on an existing ex-date cannot
+            # double-count, and a legitimate same-date special+regular pair is
+            # still preserved by the (date, amount) identity in normalization.
+            dividend_drift = False
             div_synced_through = str(meta.get("dividend_synced_through") or "")
             if end.isoformat() > div_synced_through:
                 fresh_events = _fetch_dividend_events(
                     symbol, "1900-01-01", end_date, aggregate_hint
                 )
-                merged_events = _normalize_dividend_events([*div_events, *fresh_events])
-                if merged_events != div_events:
-                    div_events = merged_events
-                    changed = True
+                fresh_norm = _normalize_dividend_events(fresh_events)
+                if fresh_norm:
+                    # Any change (new, removed, or corrected amount) to a dividend
+                    # whose ex-date sits inside the already-cached price range means
+                    # Massive retroactively re-adjusted those bars -> rebuild.
+                    if prior_panel_max is not None:
+                        cutoff = prior_panel_max.isoformat()
+                        prior_in_range = {
+                            (e["date"], round(e["amount"], 12))
+                            for e in div_events
+                            if e["date"] <= cutoff
+                        }
+                        fresh_in_range = {
+                            (e["date"], round(e["amount"], 12))
+                            for e in fresh_norm
+                            if e["date"] <= cutoff
+                        }
+                        if prior_in_range != fresh_in_range:
+                            dividend_drift = True
+                    if fresh_norm != div_events:
+                        div_events = fresh_norm
+                        changed = True
                 meta["dividend_synced_through"] = end.isoformat()
                 changed = True
 
             # Corporate-action rebuild trigger: a large price discontinuity OR a
-            # newly-discovered dividend whose ex-date lands inside the already-cached
-            # range (Massive re-adjusts cached bars retroactively for it).
-            new_div_in_cached_range = bool(
-                prior_panel_max is not None
-                and any(
-                    e["date"] not in prior_div_dates
-                    and e["date"] <= prior_panel_max.isoformat()
-                    for e in div_events
-                )
-            )
+            # dividend change inside the already-cached range (Massive re-adjusts
+            # cached bars retroactively for either).
             rebuilt = False
-            if discontinuity or new_div_in_cached_range:
+            if discontinuity or dividend_drift:
                 logger.info(
                     "OHLCV panel adjustment-basis change for %s; full window rebuild", symbol
                 )
