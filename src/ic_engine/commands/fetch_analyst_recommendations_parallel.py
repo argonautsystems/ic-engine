@@ -380,11 +380,12 @@ class ParallelAnalystFetcher:
     def _fetch_via_provider_fallback(
         self, symbol: str, start: float
     ) -> Optional[Tuple[str, AnalystConsensus, float]]:
-        """Fall back to PriceProvider (Finnhub→yfinance→massive) when the
-        yfinance-direct path returned empty data — typically because Yahoo's
-        anonymous query API rate-limited us with HTTP 429. PriceProvider's
-        analyst chain prefers Finnhub which has a separate quota and is not
-        affected by Yahoo's throttling.
+        """Fall back to PriceProvider when direct Yahoo data is empty.
+
+        The provider chain is Massive → Finnhub → yfinance. All provider
+        outputs are normalized here so a yfinance.info or Massive/Benzinga
+        shape yields real analyst counts and price targets instead of a
+        zero-count Hold placeholder.
         """
         try:
             from ic_engine.providers.price_provider import PriceProvider
@@ -407,11 +408,42 @@ class ParallelAnalystFetcher:
             q = quotes.get(symbol) or {}
             current_price = q.get("price") or q.get("current") or q.get("close") or 0.0
 
-            buy_count = int(r.get("strong_buy", 0)) + int(r.get("buy", 0))
-            hold_count = int(r.get("hold", 0))
-            sell_count = int(r.get("sell", 0)) + int(r.get("strong_sell", 0))
-            analyst_count = int(r.get("total", 0)) or (buy_count + hold_count + sell_count)
-            consensus_rec = (
+            buy_count = int(r.get("strong_buy", 0) or 0) + int(r.get("buy", 0) or 0)
+            hold_count = int(r.get("hold", 0) or 0)
+            sell_count = int(r.get("sell", 0) or 0) + int(r.get("strong_sell", 0) or 0)
+            analyst_count = (
+                int(r.get("total", 0) or 0)
+                or int(r.get("total_analysts", 0) or 0)
+                or int(r.get("analyst_count", 0) or 0)
+                or (buy_count + hold_count + sell_count)
+            )
+            rec_mean = r.get("recommendation_mean")
+            if rec_mean is None and r.get("rating_value") is not None:
+                try:
+                    rv = float(r.get("rating_value"))
+                    rec_mean = 6.0 - rv if 1.0 <= rv <= 5.0 else None
+                except (TypeError, ValueError):
+                    rec_mean = None
+            if (
+                analyst_count > 0
+                and buy_count + hold_count + sell_count == 0
+                and rec_mean is not None
+            ):
+                rm = float(rec_mean)
+                if rm < 2.0:
+                    buy_count = int(analyst_count * 0.60)
+                    hold_count = int(analyst_count * 0.30)
+                elif rm < 2.5:
+                    buy_count = int(analyst_count * 0.50)
+                    hold_count = int(analyst_count * 0.40)
+                elif rm < 3.5:
+                    buy_count = int(analyst_count * 0.20)
+                    hold_count = int(analyst_count * 0.60)
+                else:
+                    buy_count = int(analyst_count * 0.10)
+                    hold_count = int(analyst_count * 0.30)
+                sell_count = analyst_count - buy_count - hold_count
+            consensus_rec = r.get("rating") or r.get("consensus") or (
                 "Buy" if buy_count > hold_count and buy_count > sell_count
                 else "Sell" if sell_count > hold_count and sell_count > buy_count
                 else "Hold"
@@ -420,17 +452,19 @@ class ParallelAnalystFetcher:
             consensus = AnalystConsensus(
                 symbol=symbol,
                 current_price=float(current_price or 0.0),
-                consensus_recommendation=consensus_rec,
+                consensus_recommendation=str(consensus_rec).title() if consensus_rec else None,
                 buy_count=buy_count,
                 hold_count=hold_count,
                 sell_count=sell_count,
                 total_recommendations=analyst_count,
-                target_price_mean=None,  # Finnhub recommendation_trends doesn't carry targets
-                target_price_high=None,
-                target_price_low=None,
+                target_price_mean=(
+                    r.get("target_price") or r.get("target_mean") or r.get("targetPrice")
+                ),
+                target_price_high=r.get("target_high"),
+                target_price_low=r.get("target_low"),
                 target_price_current=float(current_price or 0.0),
                 analyst_count=analyst_count,
-                recommendation_mean=None,
+                recommendation_mean=float(rec_mean) if rec_mean is not None else None,
                 data_timestamp=datetime.now().isoformat(),
                 fetch_time_ms=int((time.time() - start) * 1000),
             )
@@ -447,10 +481,10 @@ class ParallelAnalystFetcher:
         then the PriceProvider chain. When Yahoo rate-limits us with a 429
         (which currently happens for unauthenticated anonymous query1
         traffic regardless of source IP), `info` comes back empty and we
-        fall back to PriceProvider — which prefers Finnhub for analyst
-        ratings and Massive for quotes, avoiding Yahoo entirely. The
-        Massive/fallback paths require MASSIVE_API_KEY and/or FINNHUB_KEY
-        to be set; if neither is, behavior is unchanged from before.
+        fall back to PriceProvider — Massive/Finnhub first, with yfinance
+        still present as the last-resort provider. The Massive/Finnhub paths
+        require MASSIVE_API_KEY and/or FINNHUB_KEY to be set; if neither is,
+        behavior is unchanged from before.
         """
         start = time.time()
 

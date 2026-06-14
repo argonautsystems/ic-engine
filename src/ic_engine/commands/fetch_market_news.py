@@ -79,6 +79,14 @@ _YAHOO_SOURCES: Dict[str, List[str]] = {
     "merger": [],  # GDELT is RFC primary; adapter not yet implemented; Finnhub used
 }
 
+# Final yfinance fallback proxies. Keep _YAHOO_SOURCES["merger"] empty so the
+# default/keyless merger path remains Finnhub-primary, but still retain a
+# last-resort Ticker.news source when Massive/Finnhub both miss.
+_YFINANCE_LAST_RESORT_SOURCES: Dict[str, List[str]] = {
+    **_YAHOO_SOURCES,
+    "merger": ["SPY"],
+}
+
 # ---------------------------------------------------------------------------
 # Sentiment helpers (reused from PortfolioNewsAnalyzer — import, don't copy)
 # ---------------------------------------------------------------------------
@@ -142,6 +150,77 @@ def _score_sentiment(text: str) -> Tuple[str, float]:
         return "negative", min(1.0, neg / max(10, total))
     return "neutral", 0.5
 
+
+# ---------------------------------------------------------------------------
+# Massive news fetcher (primary when a real filter exists)
+# ---------------------------------------------------------------------------
+
+
+def _normalise_topic_article(item: Dict, provider_name: str) -> Dict:
+    title = item.get("headline") or item.get("title") or ""
+    summary = item.get("summary") or item.get("description") or ""
+    sentiment, confidence = _score_sentiment(f"{title} {summary}")
+    return {
+        "title": title,
+        "summary": (summary or "")[:300],
+        "source": item.get("source") or item.get("provider") or "",
+        "url": item.get("url") or item.get("article_url") or "",
+        "publish_date": item.get("datetime") or item.get("published_utc") or "",
+        "sentiment": sentiment,
+        "confidence": round(confidence, 3),
+        "provider": provider_name,
+    }
+
+
+def _fetch_massive_news(topic: str, max_articles: int) -> List[Dict]:
+    """Fetch topic news from Massive without ever calling unfiltered news.
+
+    General/forex/crypto use explicit proxy tickers through MassiveProvider.get_news.
+    Merger/M&A uses Massive only through get_general_news(), which applies a
+    keyword search; if that method is unavailable, return [] so Finnhub then
+    yfinance fallback handles it.
+    """
+    try:
+        from ic_engine.providers.price_provider import MassiveProvider
+
+        provider = MassiveProvider()
+    except (ImportError, ValueError) as e:
+        logger.info(f"Massive unavailable ({e}); skipping Massive news")
+        return []
+    except Exception as e:
+        logger.debug(f"Massive init failed: {e}")
+        return []
+
+    raw: List[Dict] = []
+    if topic == "merger":
+        fn = getattr(provider, "get_general_news", None)
+        if fn is None:
+            return []
+        raw = fn("merger") or []
+    else:
+        tickers = {
+            "general": ["SPY", "DIA", "QQQ"],
+            "forex": ["UUP", "FXE"],
+            "crypto": ["BTC", "ETH"],
+        }.get(topic, [])
+        if not tickers:
+            return []
+        raw = provider.get_news(tickers, days=7) or []
+
+    articles: List[Dict] = []
+    seen_urls: set = set()
+    for item in raw:
+        article = _normalise_topic_article(item, "massive")
+        if not article["title"]:
+            continue
+        key = (article.get("url") or article["title"]).strip().lower()
+        if key in seen_urls:
+            continue
+        seen_urls.add(key)
+        articles.append(article)
+        if len(articles) >= max_articles:
+            break
+    return articles
 
 # ---------------------------------------------------------------------------
 # Yahoo news fetcher (free, keyless)
@@ -326,9 +405,25 @@ def fetch_market_news(topic: str = "general", max_articles: int = 10) -> Dict:
 
     headlines: List[Dict] = []
 
-    # Free-first: try Yahoo
+    # Massive primary when configured (fast/paid). Keyless runs preserve the
+    # historical free-first Yahoo→Finnhub path. If Massive is configured but
+    # misses, fall back Finnhub then yfinance as the final fallback.
+    import os
+
     yahoo_symbols = _YAHOO_SOURCES.get(topic, [])
-    if yahoo_symbols:
+    yf_fallback_symbols = _YFINANCE_LAST_RESORT_SOURCES.get(topic, [])
+    if os.getenv("MASSIVE_API_KEY"):
+        logger.info(f"Fetching Massive news for topic={topic}")
+        headlines = _fetch_massive_news(topic, max_articles)
+        if not headlines:
+            logger.info("Massive returned no articles; falling back to Finnhub")
+            headlines = _fetch_finnhub_news(topic, max_articles)
+        if not headlines and yf_fallback_symbols:
+            logger.info(
+                f"Finnhub returned no articles; falling back to yfinance for {yf_fallback_symbols}"
+            )
+            headlines = _fetch_yahoo_news(yf_fallback_symbols, max_articles)
+    elif yahoo_symbols:
         logger.info(f"Fetching Yahoo news for topic={topic} ({yahoo_symbols})")
         yahoo_articles = _fetch_yahoo_news(yahoo_symbols, max_articles)
         if yahoo_articles:
@@ -338,9 +433,14 @@ def fetch_market_news(topic: str = "general", max_articles: int = 10) -> Dict:
             logger.info("Yahoo returned no articles; falling back to Finnhub")
             headlines = _fetch_finnhub_news(topic, max_articles)
     else:
-        # No Yahoo symbols defined for this topic (e.g. merger) → Finnhub directly
+        # No Yahoo symbols defined for this topic (e.g. merger) → Finnhub directly.
         logger.info(f"No Yahoo sources for topic={topic}; fetching Finnhub")
         headlines = _fetch_finnhub_news(topic, max_articles)
+        if not headlines and yf_fallback_symbols:
+            logger.info(
+                f"Finnhub returned no articles; falling back to yfinance for {yf_fallback_symbols}"
+            )
+            headlines = _fetch_yahoo_news(yf_fallback_symbols, max_articles)
 
     # Trim to max_articles
     headlines = headlines[:max_articles]

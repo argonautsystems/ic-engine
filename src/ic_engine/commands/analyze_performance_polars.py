@@ -297,21 +297,39 @@ class PerformanceAnalyzer:
                     "No data returned from Yahoo Finance. Check symbols and date range."
                 )
 
-            # Fetch dividends for all symbols (parallelized)
+            # Fetch dividends for all symbols (Massive primary, yfinance fallback).
             def _fetch_one_dividend(sym):
+                try:
+                    from ic_engine.providers.price_provider import MassiveProvider
+
+                    provider = getattr(self, "_massive_dividend_provider", None)
+                    if provider is None:
+                        provider = MassiveProvider()
+                        self._massive_dividend_provider = provider
+                    rows = provider.get_dividends(sym, limit=1000) or []
+                    total = 0.0
+                    for row in rows:
+                        d = row.get("ex_date") or row.get("pay_date")
+                        if d and start_date <= str(d)[:10] <= end_date:
+                            total += float(row.get("cash_amount") or 0.0)
+                    if total > 0.0:
+                        return sym, total
+                    logger.debug(f"Massive dividends empty for {sym}; falling back to yfinance")
+                except Exception as e:
+                    logger.warning(
+                        f"Could not fetch Massive dividends for {sym}: {e}; falling back to yfinance"
+                    )
                 try:
                     ticker = yf.Ticker(sym)
                     div_data = ticker.dividends
-                    if not div_data.empty:
+                    if div_data is not None and not div_data.empty:
                         div_data = div_data[
                             (div_data.index >= start_date) & (div_data.index <= end_date)
                         ]
                         return sym, float(div_data.sum()) if len(div_data) > 0 else 0.0
-                    else:
-                        return sym, 0.0
                 except Exception as e:
-                    logger.warning(f"Could not fetch dividends for {sym}: {e}")
-                    return sym, 0.0
+                    logger.warning(f"Could not fetch yfinance dividends for {sym}: {e}")
+                return sym, 0.0
 
             dividends = {}
             with ThreadPoolExecutor(max_workers=8) as executor:
@@ -634,22 +652,34 @@ class PerformanceAnalyzer:
             }
 
     def _get_current_risk_free_rate(self) -> float:
-        """Fetch current risk-free rate (3-month T-bill yield) from yfinance.
+        """Fetch current risk-free rate (3-month T-bill yield).
 
-        Returns:
-            Annual risk-free rate as decimal (0.045 = 4.5%)
+        Uses the normalized PriceProvider treasury curve first (Massive when
+        available, then its configured fallback), then yfinance ``^IRX`` as the
+        final live fallback. Only if every provider fails do we use 2%.
         """
         try:
-            # Fetch 3-month T-bill yield
+            from ic_engine.providers.price_provider import PriceProvider
+
+            curve = PriceProvider().get_treasury_yields() or {}
+            current_yield = curve.get("3mo") or curve.get("3m") or curve.get("13_week")
+            if current_yield is not None:
+                risk_free_rate = max(0.0, float(current_yield) / 100)
+                logger.info(f"Fetched provider 3-month T-bill yield: {float(current_yield):.2f}%")
+                return risk_free_rate
+        except Exception as e:
+            logger.warning(f"Could not fetch provider T-bill yield: {e}; falling back to yfinance")
+
+        try:
             tbill = yf.Ticker("^IRX")
-            # IRX is quoted as annual percentage (e.g., 4.50 for 4.5%)
-            current_yield = tbill.info.get("regularMarketPrice", 2.0)
-            # Convert from percentage to decimal
-            risk_free_rate = max(0.0, current_yield / 100)
-            logger.info(f"Fetched current T-bill yield: {current_yield:.2f}%")
+            current_yield = tbill.info.get("regularMarketPrice")
+            if current_yield is None:
+                raise ValueError("^IRX regularMarketPrice missing")
+            risk_free_rate = max(0.0, float(current_yield) / 100)
+            logger.info(f"Fetched yfinance T-bill yield: {float(current_yield):.2f}%")
             return risk_free_rate
         except Exception as e:
-            logger.warning(f"Could not fetch current T-bill yield: {e}. Using 2.0% default.")
+            logger.warning(f"Could not fetch current T-bill yield from any provider: {e}. Using 2.0% default.")
             return 0.02
 
     def calculate_sharpe_ratio(

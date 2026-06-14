@@ -161,17 +161,88 @@ def _fetch_symbol_info(symbol: str) -> Dict:
         return {}
 
 
+def _normalise_fundamental_info(raw: Dict) -> Dict:
+    """Normalize provider fundamentals to yfinance-style info keys."""
+    if not isinstance(raw, dict):
+        return {}
+    out = dict(raw)
+    aliases = {
+        "price_to_earnings": "trailingPE",
+        "pe_ratio": "trailingPE",
+        "price_to_book": "priceToBook",
+        "price_to_sales": "priceToSalesTrailing12Months",
+        "dividend_yield": "dividendYield",
+        "market_cap": "marketCap",
+        "return_on_equity": "returnOnEquity",
+        "return_on_assets": "returnOnAssets",
+        "debt_to_equity": "debtToEquity",
+        "net_margin": "profitMargins",
+        "gross_margin": "grossMargins",
+        "operating_margin": "operatingMargins",
+    }
+    for src, dst in aliases.items():
+        if out.get(dst) is None and out.get(src) is not None:
+            out[dst] = out[src]
+    return out
+
+
+def _fetch_symbol_info_provider(symbol: str, massive=None, finnhub=None) -> Dict:
+    if massive is not None:
+        try:
+            merged = {}
+            overview = massive.get_ticker_overview(symbol) or {}
+            ratios = massive.get_financial_ratios(symbol) or {}
+            merged.update(overview)
+            merged.update(ratios)
+            norm = _normalise_fundamental_info(merged)
+            if norm:
+                return norm
+        except Exception as e:
+            logger.debug(f"{symbol}: Massive fundamentals failed: {e}")
+    if finnhub is not None:
+        try:
+            metric = finnhub._client.company_basic_financials(symbol, "all") or {}
+            norm = _normalise_fundamental_info(metric.get("metric") or metric)
+            if norm:
+                return norm
+        except Exception as e:
+            logger.debug(f"{symbol}: Finnhub fundamentals failed: {e}")
+    return {}
+
 def _bulk_fetch_info(symbols: List[str]) -> Dict[str, Dict]:
-    """Fetch yfinance `info` for many symbols in parallel."""
+    """Fetch fundamentals with Massive/Finnhub primary and yfinance last fallback."""
     out: Dict[str, Dict] = {}
     if not symbols:
         return out
+
+    massive = None
+    finnhub = None
+    try:
+        from ic_engine.providers.price_provider import FinnhubProvider, MassiveProvider
+
+        try:
+            massive = MassiveProvider()
+        except Exception as e:
+            logger.debug(f"Massive fundamentals unavailable: {e}")
+        try:
+            finnhub = FinnhubProvider()
+        except Exception as e:
+            logger.debug(f"Finnhub fundamentals unavailable: {e}")
+    except Exception as e:
+        logger.debug(f"Provider fundamentals unavailable: {e}")
+
+    def _one(sym: str) -> Dict:
+        info = _fetch_symbol_info_provider(sym, massive=massive, finnhub=finnhub)
+        if info:
+            return info
+        return _fetch_symbol_info(sym)
+
     with ThreadPoolExecutor(max_workers=8) as ex:
-        futures = {ex.submit(_fetch_symbol_info, s): s for s in symbols}
+        futures = {ex.submit(_one, s): s for s in symbols}
         for fut in as_completed(futures):
             sym = futures[fut]
             try:
-                out[sym] = fut.result()
+                out[sym] = _normalise_fundamental_info(fut.result())
             except Exception as e:
                 logger.debug(f"{sym}: info future failed: {e}")
                 out[sym] = {}
@@ -615,8 +686,8 @@ def run_peer_analysis(
     # 3. Active share (sector-proxied with top SPY constituents)
     active_share = compute_active_share(weights, benchmark=benchmark)
 
-    # 4. Fetch yfinance info for factor tilts + style scores (parallel)
-    logger.info(f"Fetching yfinance info for {len(rows)} symbols")
+    # 4. Fetch provider fundamentals for factor tilts + style scores (parallel)
+    logger.info(f"Fetching provider fundamentals for {len(rows)} symbols")
     info_map = _bulk_fetch_info([s for s, _ in rows])
 
     factor_tilts = compute_factor_tilts(info_map, weights)

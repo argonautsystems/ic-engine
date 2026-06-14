@@ -32,6 +32,7 @@ All methods return plain dicts / lists of dicts — no pandas, no external types
 import logging
 import math
 import os
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
@@ -391,19 +392,60 @@ class YFinanceProvider:
         return articles
 
     def get_analyst_ratings(self, symbols: List[str]) -> Dict[str, Dict]:
+        """Analyst consensus from yfinance.info, normalized to provider shape."""
+        import re
+
         results = {}
         for sym in symbols:
             try:
-                t = self._yf.Ticker(self._yf_symbol(sym))
-                rec = t.recommendations
-                if rec is None or rec.empty:
+                info = self._yf.Ticker(self._yf_symbol(sym)).info or {}
+                if not isinstance(info, dict) or not info:
                     continue
-                latest = rec.iloc[-1]
+                analyst_count = int(info.get("numberOfAnalystOpinions") or 0)
+                rec_mean = info.get("recommendationMean")
+                if rec_mean is None and info.get("averageAnalystRating"):
+                    m = re.match(
+                        r"^\s*([0-9]+(?:\.[0-9]+)?)",
+                        str(info.get("averageAnalystRating")),
+                    )
+                    rec_mean = float(m.group(1)) if m else None
+                if analyst_count <= 0 and rec_mean is None:
+                    continue
+
+                buy = hold = sell = 0
+                if analyst_count > 0 and rec_mean is not None:
+                    rm = float(rec_mean)
+                    if rm < 2.0:
+                        buy = int(analyst_count * 0.60)
+                        hold = int(analyst_count * 0.30)
+                    elif rm < 2.5:
+                        buy = int(analyst_count * 0.50)
+                        hold = int(analyst_count * 0.40)
+                    elif rm < 3.5:
+                        buy = int(analyst_count * 0.20)
+                        hold = int(analyst_count * 0.60)
+                    else:
+                        buy = int(analyst_count * 0.10)
+                        hold = int(analyst_count * 0.30)
+                    sell = analyst_count - buy - hold
+
+                rec_key = str(info.get("recommendationKey") or "").replace("_", " ").title()
                 results[sym] = {
                     "symbol": sym,
-                    "period": str(rec.index[-1])[:10],
-                    "consensus": str(latest.get("To Grade", latest.get("Action", ""))),
-                    "firm": str(latest.get("Firm", "")),
+                    "period": datetime.now().strftime("%Y-%m-%d"),
+                    "consensus": rec_key or None,
+                    "rating": rec_key or None,
+                    "recommendation_mean": float(rec_mean) if rec_mean is not None else None,
+                    "buy": buy,
+                    "hold": hold,
+                    "sell": sell,
+                    "strong_buy": 0,
+                    "strong_sell": 0,
+                    "total": analyst_count or (buy + hold + sell),
+                    "total_analysts": analyst_count or (buy + hold + sell),
+                    "target_price": info.get("targetMeanPrice"),
+                    "target_high": info.get("targetHighPrice"),
+                    "target_low": info.get("targetLowPrice"),
                     "provider": self.NAME,
                 }
             except Exception as e:
@@ -530,6 +572,24 @@ class MassiveProvider(MassiveSurfaceMixin):
                 "upgrade so the Massive base endpoint can be enforced."
             ) from e
 
+    def _with_retry(self, label: str, fn, *args, tries: int = 3, backoff: float = 0.5, **kwargs):
+        """Run a Massive SDK call with small exponential-backoff retries.
+
+        Iterator-returning SDK methods (for example list_aggs/list_dividends)
+        must be materialized by the callable passed here, otherwise transient
+        network errors raised during iteration happen outside the retry loop.
+        """
+        for attempt in range(1, tries + 1):
+            try:
+                return fn(*args, **kwargs)
+            except Exception as e:
+                if attempt >= tries:
+                    raise
+                wait = backoff * (2 ** (attempt - 1))
+                logger.debug("Massive %s failed: %s; retrying in %.1fs", label, e, wait)
+                time.sleep(wait)
+        return None
+
     def get_quote(self, symbol: str) -> Optional[Dict]:
         """Previous-day close (free tier).
 
@@ -540,7 +600,7 @@ class MassiveProvider(MassiveSurfaceMixin):
         .l/.v/.t).
         """
         try:
-            aggs = self._client.get_previous_close_agg(symbol)
+            aggs = self._with_retry(f"quote({symbol})", self._client.get_previous_close_agg, symbol)
             if not aggs:
                 return None
             r = aggs[0]
@@ -571,7 +631,12 @@ class MassiveProvider(MassiveSurfaceMixin):
         stock_symbols = [s for s in symbols if "/" not in s]
 
         def _snapshot_all(market_type: str, tickers: List[str]) -> None:
-            data = self._client.get_snapshot_all(market_type=market_type, tickers=tickers)
+            data = self._with_retry(
+                f"snapshot_all({market_type},{len(tickers)})",
+                self._client.get_snapshot_all,
+                market_type=market_type,
+                tickers=tickers,
+            )
             if not data:
                 return
             for t in data:
@@ -649,14 +714,17 @@ class MassiveProvider(MassiveSurfaceMixin):
         if not rows:
             return rows
 
-        divs = list(
-            self._client.list_dividends(
-                ticker=symbol,
-                ex_dividend_date_gte=rows[0]["date"],
-                ex_dividend_date_lte=rows[-1]["date"],
-                limit=1000,
-            )
-        )
+        divs = self._with_retry(
+            f"dividends({symbol})",
+            lambda: list(
+                self._client.list_dividends(
+                    ticker=symbol,
+                    ex_dividend_date_gte=rows[0]["date"],
+                    ex_dividend_date_lte=rows[-1]["date"],
+                    limit=1000,
+                )
+            ),
+        ) or []
 
         if not divs:
             logger.debug(f"Massive list_dividends({symbol}): no dividends in range")
@@ -737,18 +805,21 @@ class MassiveProvider(MassiveSurfaceMixin):
             to_date = datetime.now().strftime("%Y-%m-%d")
             from_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
 
-            aggs = list(
-                self._client.list_aggs(
-                    ticker=symbol,
-                    multiplier=1,
-                    timespan="day",
-                    from_=from_date,
-                    to=to_date,
-                    adjusted=True,
-                    limit=min(days, 50000),
-                    sort="asc",
-                )
-            )
+            aggs = self._with_retry(
+                f"history({symbol})",
+                lambda: list(
+                    self._client.list_aggs(
+                        ticker=symbol,
+                        multiplier=1,
+                        timespan="day",
+                        from_=from_date,
+                        to=to_date,
+                        adjusted=True,
+                        limit=min(days, 50000),
+                        sort="asc",
+                    )
+                ),
+            ) or []
 
             if not aggs:
                 return []
@@ -856,6 +927,12 @@ class MassiveProvider(MassiveSurfaceMixin):
                 "strong_buy": consensus.get("strong_buy"),
                 "strong_sell": consensus.get("strong_sell"),
                 "total_analysts": consensus.get("total_analysts"),
+                "total": consensus.get("total_analysts"),
+                "recommendation_mean": (
+                    6.0 - float(consensus.get("consensus_rating_value"))
+                    if consensus.get("consensus_rating_value") is not None
+                    else None
+                ),
                 "provider": "massive-benzinga",
             }
         return out
@@ -875,8 +952,22 @@ class MassiveProvider(MassiveSurfaceMixin):
             resp = requests.get(url, params=q, timeout=15)
             resp.raise_for_status()
             data = resp.json()
-            if isinstance(data, dict) and data.get("status") not in (None, "OK", "DELAYED"):
-                logger.warning("Massive futures %s: status=%s", path, data.get("status"))
+            if isinstance(data, dict):
+                status = data.get("status")
+                if status not in (None, "OK", "DELAYED"):
+                    logger.warning("Massive futures %s: status=%s", path, status)
+                    return None
+                if (
+                    status is None
+                    and (data.get("error") or data.get("message"))
+                    and not data.get("results")
+                ):
+                    logger.warning(
+                        "Massive futures %s: %s",
+                        path,
+                        data.get("error") or data.get("message"),
+                    )
+                    return None
             return data
         except Exception as e:
             logger.warning("Massive futures GET %s: %s", path, e)
@@ -1032,8 +1123,22 @@ class MassiveProvider(MassiveSurfaceMixin):
             resp = requests.get(url, params=q, timeout=15)
             resp.raise_for_status()
             data = resp.json()
-            if isinstance(data, dict) and data.get("status") not in (None, "OK", "DELAYED"):
-                logger.warning("Massive forex %s: status=%s", path, data.get("status"))
+            if isinstance(data, dict):
+                status = data.get("status")
+                if status not in (None, "OK", "DELAYED"):
+                    logger.warning("Massive forex %s: status=%s", path, status)
+                    return None
+                if (
+                    status is None
+                    and (data.get("error") or data.get("message"))
+                    and not data.get("results")
+                ):
+                    logger.warning(
+                        "Massive forex %s: %s",
+                        path,
+                        data.get("error") or data.get("message"),
+                    )
+                    return None
             return data
         except Exception as e:
             logger.warning("Massive forex GET %s: %s", path, e)
@@ -1586,11 +1691,11 @@ class PriceProvider:
         "futures": ["massive"],
         # Forex spot quotes: Massive first (paid, real-time), Frankfurter fallback (free).
         "forex": ["massive", "frankfurter"],
-        "news": ["marketaux", "finnhub", "newsapi", "yfinance"],
-        "general_news": ["finnhub", "marketaux"],
+        "news": ["massive", "marketaux", "finnhub", "newsapi", "yfinance"],
+        "general_news": ["massive", "finnhub", "marketaux"],
         "fx": ["frankfurter", "alpha_vantage"],
-        "treasury_yields": ["treasury_fiscaldata"],
-        "analyst": ["finnhub", "yfinance"],
+        "treasury_yields": ["massive", "treasury_fiscaldata"],
+        "analyst": ["massive", "finnhub", "yfinance"],
     }
 
     def __init__(
@@ -1870,10 +1975,59 @@ class PriceProvider:
                 logger.warning(f"{provider.NAME}.get_fx({from_ccy}->{to_ccy}) failed: {e}")
         return None
 
+    @staticmethod
+    def _normalize_massive_treasury_row(row: Dict) -> Dict[str, float]:
+        """Map Massive /fed/v1/treasury-yields row fields to curve tenor keys.
+
+        Downstream consumers expect a simple curve dict (``3mo``, ``10y``,
+        etc.), not Massive's raw ``yield_3_month`` field names. Values remain
+        percentage yields (4.47 means 4.47%).
+        """
+        mapping = {
+            "1mo": ("yield_1_month", "1_month", "month1"),
+            "3mo": (
+                "yield_3_month",
+                "three_month",
+                "3_month",
+                "month3",
+                "bc_3month",
+                "bc_3_month",
+            ),
+            "6mo": ("yield_6_month", "six_month", "6_month", "month6"),
+            "1y": ("yield_1_year", "one_year", "1_year", "year1"),
+            "2y": ("yield_2_year", "two_year", "2_year", "year2"),
+            "3y": ("yield_3_year", "three_year", "3_year", "year3"),
+            "5y": ("yield_5_year", "five_year", "5_year", "year5"),
+            "7y": ("yield_7_year", "seven_year", "7_year", "year7"),
+            "10y": ("yield_10_year", "ten_year", "10_year", "year10"),
+            "20y": ("yield_20_year", "twenty_year", "20_year", "year20"),
+            "30y": ("yield_30_year", "thirty_year", "30_year", "year30"),
+        }
+        curve: Dict[str, float] = {}
+        for tenor, keys in mapping.items():
+            for key in keys:
+                if row.get(key) is None:
+                    continue
+                try:
+                    curve[tenor] = float(row[key])
+                    break
+                except (TypeError, ValueError):
+                    continue
+        return curve
+
     def get_treasury_yields(self) -> Dict[str, float]:
-        """US Treasury yield curve. Returns dict keyed by security_desc.
-        Used as a no-key fallback when FRED_API_KEY is not configured."""
+        """US Treasury yield curve. Massive primary; public Treasury fallback."""
         for provider in self._providers_for_op("treasury_yields"):
+            if provider.NAME == "massive" and hasattr(provider, "get_treasury_yields"):
+                try:
+                    rows = provider.get_treasury_yields(limit=1)
+                    if rows:
+                        curve = self._normalize_massive_treasury_row(rows[0])
+                        if curve:
+                            return curve
+                except Exception as e:
+                    logger.warning(f"{provider.NAME}.get_treasury_yields failed: {e}")
+                continue
             fn = getattr(provider, "get_yield_curve", None)
             if fn is None:
                 continue

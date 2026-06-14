@@ -68,7 +68,24 @@ class MassiveSurfaceMixin:
                 self._not_entitled.add(family)
                 return None
             resp.raise_for_status()
-            return resp.json()
+            data = resp.json()
+            if isinstance(data, dict):
+                status = data.get("status")
+                if status not in (None, "OK", "DELAYED"):
+                    logger.warning("Massive surface %s: status=%s", path, status)
+                    return None
+                if (
+                    status is None
+                    and (data.get("error") or data.get("message"))
+                    and not data.get("results")
+                ):
+                    logger.warning(
+                        "Massive surface %s: %s",
+                        path,
+                        data.get("error") or data.get("message"),
+                    )
+                    return None
+            return data
         except Exception as e:
             logger.warning("Massive surface GET %s: %s", path, e)
             return None
@@ -84,6 +101,61 @@ class MassiveSurfaceMixin:
         if isinstance(r, dict):
             return [r]
         return []
+
+    def get_general_news(self, category: str = "general") -> List[Dict]:
+        """Topic news via Massive reference-news when a real filter exists.
+
+        The reference news endpoint is only used with explicit ticker or
+        keyword filters. In particular, merger/M&A uses a keyword search; an
+        unfiltered `/v2/reference/news` call would return generic market news
+        and mask the existing fallbacks.
+        """
+        category = (category or "general").lower()
+        topic_tickers = {
+            "general": ["SPY", "DIA", "QQQ"],
+            "forex": ["UUP", "FXE"],
+            "crypto": ["BTC", "ETH"],
+        }
+        params = {"limit": 25, "order": "desc", "sort": "published_utc"}
+        articles: List[Dict] = []
+        if category == "merger":
+            params["search"] = "merger acquisition M&A takeover buyout"
+            data = self._surface_get("/v2/reference/news", params)
+            raw_rows = self._results(data)
+            for r in raw_rows:
+                publisher = r.get("publisher") or {}
+                articles.append(
+                    {
+                        "category": category,
+                        "title": r.get("title") or "",
+                        "summary": r.get("description") or "",
+                        "source": (
+                            publisher.get("name", "") if isinstance(publisher, dict) else ""
+                        ),
+                        "url": r.get("article_url") or "",
+                        "datetime": (r.get("published_utc") or "")[:16].replace("T", " "),
+                        "provider": "massive",
+                    }
+                )
+            return articles
+
+        tickers = topic_tickers.get(category)
+        if not tickers:
+            return []
+        for t in tickers:
+            for item in self.get_news([t], days=7):
+                articles.append(
+                    {
+                        "category": category,
+                        "title": item.get("headline") or "",
+                        "summary": item.get("summary") or "",
+                        "source": item.get("source") or "",
+                        "url": item.get("url") or "",
+                        "datetime": item.get("datetime") or "",
+                        "provider": "massive",
+                    }
+                )
+        return articles
 
     # ── Benzinga partner feed ────────────────────────────────────────────
 

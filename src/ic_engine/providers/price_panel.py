@@ -167,7 +167,16 @@ def _yf_batch_fallback(symbols: List[str], days: int) -> Dict[str, List[Dict]]:
     except ImportError:
         return out
 
-    period = "1y" if days <= 365 else ("2y" if days <= 730 else "5y")
+    if days <= 365:
+        period = "1y"
+    elif days <= 730:
+        period = "2y"
+    elif days <= 1825:
+        period = "5y"
+    elif days <= 3650:
+        period = "10y"
+    else:
+        period = "max"
 
     try:
         yf_syms = [s.replace(".", "-") for s in symbols]

@@ -286,6 +286,29 @@ def _get_massive_provider():
     return _MASSIVE_PROVIDER or None
 
 
+def _stock_split_factor_at(provider: Any, symbol: str, today: date, event_date: date) -> float:
+    """Cumulative share-count factor for splits effective by one event date.
+
+    A future split affects dividends paid after its execution date, but must not
+    be applied to pre-split declared dividends. This is intentionally evaluated
+    per event date instead of once for the whole projection horizon.
+    """
+    try:
+        rows = provider.get_splits(symbol, limit=20) or []
+    except Exception as e:
+        logger.debug(f"{symbol}: Massive splits fetch failed: {e}")
+        return 1.0
+    factor = 1.0
+    for row in rows:
+        d = _parse_iso_date(row.get("execution_date"))
+        if d is None or not (today <= d <= event_date):
+            continue
+        split_from = _safe_float(row.get("split_from"), 0.0)
+        split_to = _safe_float(row.get("split_to"), 0.0)
+        if split_from > 0 and split_to > 0:
+            factor *= split_to / split_from
+    return factor
+
 def _project_equity_dividends_massive(
     provider: Any,
     symbol: str,
@@ -349,7 +372,9 @@ def _project_equity_dividends_massive(
                     date=d.isoformat(),
                     symbol=symbol,
                     type="dividend",
-                    amount=amt * shares,
+                    amount=(
+                        amt * shares * _stock_split_factor_at(provider, symbol, today, d)
+                    ),
                     tax_qualified=qualified,
                     tax_exempt=False,
                     asset_type="equity",
@@ -377,7 +402,11 @@ def _project_equity_dividends_massive(
                     date=next_date.isoformat(),
                     symbol=symbol,
                     type="dividend",
-                    amount=per_share * shares,
+                    amount=(
+                        per_share
+                        * shares
+                        * _stock_split_factor_at(provider, symbol, today, next_date)
+                    ),
                     tax_qualified=qualified,
                     tax_exempt=False,
                     asset_type="equity",
