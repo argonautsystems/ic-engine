@@ -9,6 +9,21 @@ Distribution-edge artifacts (`SKILL.md`, `compose.yml`, `install.yaml`,
 `agent-skills/**`) are MIT-0; substantive code (bridge, dashboard,
 Dockerfile, tests) is Apache 2.0.
 
+## [4.8.0] — 2026-06-14
+
+### Added
+
+- **Deterministic time-window performance tool.** Added the signed
+  `performance-window` engine command and MCP/REST
+  `portfolio_performance_window` surface for explicit historical windows
+  (`1w`, `1mo`, `3mo`, `ytd`, `1y`, `max`, or ISO start/end dates). It
+  reuses the existing performance analyzer/provider chain and returns
+  per-holding start/end prices, returns, contribution, portfolio P&L,
+  total return, and top movers without any LLM narration. Agent skill
+  cookbooks now route temporal questions (last week, past month, last
+  quarter, since DATE) to this primary path; narrator temporal-hedge
+  recovery remains as a harmless fallback.
+
 ## [4.4.4] — 2026-05-19
 
 ### Fixed

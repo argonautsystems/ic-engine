@@ -19,15 +19,12 @@ stay put.
 """
 from __future__ import annotations
 
-import os
 from typing import Any
 
 from pydantic import BaseModel as _BaseModel
 
-from . import _runtime
 from ._runtime import logger
 from .tools import TOOL_REGISTRY
-
 
 # ──────────────────────────────────────────────────────────────────────
 # MCP transport (FastMCP streamable-http)
@@ -50,6 +47,17 @@ def register_tools(app: Any) -> None:
     async def portfolio_holdings() -> dict[str, Any]:
         """Current portfolio holdings snapshot."""
         return await TOOL_REGISTRY["portfolio_holdings"]["handler"]()
+
+    @app.tool()
+    async def portfolio_performance_window(
+        period: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> dict[str, Any]:
+        """Deterministic explicit-window portfolio performance."""
+        return await TOOL_REGISTRY["portfolio_performance_window"]["handler"](
+            period, start_date, end_date
+        )
 
     @app.tool()
     async def portfolio_refresh() -> dict[str, Any]:
@@ -129,6 +137,13 @@ class AskBody(_BaseModel):
 class InitializeBody(_BaseModel):
     """Optional seed_question for portfolio_initialize. Empty string skips the seed ask."""
     seed_question: str = ""
+
+
+class PerformanceWindowBody(_BaseModel):
+    """Explicit time-window performance body."""
+    period: str | None = None
+    start_date: str | None = None
+    end_date: str | None = None
 
 
 class KeysSetBody(_BaseModel):
@@ -220,7 +235,7 @@ def register_rest_routes(app: Any) -> None:
     refresh,setup,tools}; agents that have shell+curl can hit these
     without going through the MCP handshake.
     """
-    from fastapi import HTTPException, Body
+    from fastapi import Body, HTTPException
 
     @app.post("/api/portfolio/ask")
     async def rest_portfolio_ask(body: AskBody = Body(...)) -> dict[str, Any]:
@@ -231,6 +246,14 @@ def register_rest_routes(app: Any) -> None:
     @app.post("/api/portfolio/holdings")
     async def rest_portfolio_holdings() -> dict[str, Any]:
         return await TOOL_REGISTRY["portfolio_holdings"]["handler"]()
+
+    @app.post("/api/portfolio/performance_window")
+    async def rest_portfolio_performance_window(
+        body: PerformanceWindowBody = Body(default_factory=PerformanceWindowBody),
+    ) -> dict[str, Any]:
+        return await TOOL_REGISTRY["portfolio_performance_window"]["handler"](
+            body.period, body.start_date, body.end_date
+        )
 
     @app.post("/api/portfolio/refresh")
     async def rest_portfolio_refresh() -> dict[str, Any]:
@@ -257,10 +280,12 @@ def register_rest_routes(app: Any) -> None:
         get push updates when the state changes (or every 2s as keepalive).
         Closes the connection once the state reaches `ready` or `failed`.
         """
-        from fastapi.responses import StreamingResponse
-        from .tools import get_init_state as _get_init_state
         import asyncio as _asyncio
         import json as _json
+
+        from fastapi.responses import StreamingResponse
+
+        from .tools import get_init_state as _get_init_state
 
         async def _gen():
             last_payload = None

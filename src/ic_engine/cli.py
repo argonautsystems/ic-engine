@@ -160,6 +160,8 @@ STONKMODE_EXCLUDED_COMMANDS: frozenset = frozenset(
         "identity",
         "ask",
         "refresh",
+        "performance-window",
+        "performance_window",
     }
 )
 

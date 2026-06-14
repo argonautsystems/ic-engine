@@ -3,7 +3,7 @@ name: investorclaw
 description: Deterministic-first portfolio analyzer for Hermes via MCP-HTTP at localhost:18090. Holdings, performance, Sharpe + Sortino, FRED yields, bond duration, scenario rebalancing.
 homepage: https://github.com/argonautsystems/InvestorClaw
 user-invocable: true
-metadata: {"license":"MIT-0","version":"4.7.7","runtime":"hermes","image":"ghcr.io/argonautsystems/ic-engine:4.7.7-cpu","mcp-endpoint":"http://localhost:18090/mcp"}
+metadata: {"license":"MIT-0","version":"4.8.0","runtime":"hermes","image":"ghcr.io/argonautsystems/ic-engine:4.8.0-cpu","mcp-endpoint":"http://localhost:18090/mcp"}
 ---
 
 <!--
@@ -76,7 +76,7 @@ hermes (host)
   │     mnemos       → http://localhost:5002/mcp
   ▼
 Docker compose (~/.investorclaw/compose.yml)
-  ├── argonautsystems/ic-engine:4.7.7-cpu       :8090   portfolio analysis MCP
+  ├── argonautsystems/ic-engine:4.8.0-cpu       :8090   portfolio analysis MCP
   └── mnemos-os/mnemos-rs:4.2       :5002   memory + KG MCP
        (dashboard at :8092 for portfolio upload + key config)
 ```
@@ -258,3 +258,7 @@ the upstream service (Apache 2.0,
 SKILL.md. If hermes can't see the tools at all, that's an install
 issue — work through `INSTALL.md` and the troubleshooting section
 there.
+
+## Time-window / historical questions
+
+Route last week / last month / last quarter / since DATE / historical performance questions to investorclaw.portfolio_performance_window, not portfolio_ask. Cookbook mapping: last week to period=1w; past two weeks to period=2w; last month or past month to period=1mo; last quarter to period=3mo; past six months to period=6mo; this year or YTD to period=ytd; last year to period=1y; last N days to the nearest supported period token when possible (1d/1w/2w/1mo/3mo/6mo/1y/2y) or to start_date=YYYY-MM-DD plus end_date=YYYY-MM-DD; since DATE to start_date=YYYY-MM-DD; explicit ranges to start_date=YYYY-MM-DD and end_date=YYYY-MM-DD. The tool returns signed per-holding start/end prices, return_pct, contribution, total_return_pct, total_pnl, and top_movers without narration. Keep portfolio_ask for open-ended why/explanation questions after quoting the deterministic window result.

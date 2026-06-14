@@ -71,6 +71,8 @@ _HOLDINGS_CONSUMER_COMMANDS = frozenset(
         "recommendations",
         "analyze",
         "performance",
+        "performance-window",
+        "performance_window",
         "returns",
         "report",
         "export",
@@ -232,6 +234,17 @@ def synthesize_command_args(
         if holdings_file:
             output_file = str(reports_dir / "performance.json")
             return [holdings_file, "ytd", "today", output_file], 0
+        else:
+            print(f"❌ {_ERR_NO_HOLDINGS}")
+            return [], 1
+
+    # Deterministic explicit-window performance defaults to 1mo when no
+    # caller-provided period/start/end is present.
+    if command in ["performance-window", "performance_window"]:
+        holdings_file = _find_holdings_file(reports_dir)
+        if holdings_file:
+            output_file = str(reports_dir / "performance_window.json")
+            return [holdings_file, output_file, "--period", "1mo"], 0
         else:
             print(f"❌ {_ERR_NO_HOLDINGS}")
             return [], 1
