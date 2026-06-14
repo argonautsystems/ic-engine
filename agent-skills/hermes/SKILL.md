@@ -3,7 +3,7 @@ name: investorclaw
 description: Deterministic-first portfolio analyzer for Hermes via MCP-HTTP at localhost:18090. Holdings, performance, Sharpe + Sortino, FRED yields, bond duration, scenario rebalancing.
 homepage: https://github.com/argonautsystems/InvestorClaw
 user-invocable: true
-metadata: {"license":"MIT-0","version":"4.7.0","runtime":"hermes","image":"ghcr.io/argonautsystems/ic-engine:4.7.0-cpu","mcp-endpoint":"http://localhost:18090/mcp"}
+metadata: {"license":"MIT-0","version":"4.7.6","runtime":"hermes","image":"ghcr.io/argonautsystems/ic-engine:4.7.6-cpu","mcp-endpoint":"http://localhost:18090/mcp"}
 ---
 
 <!--
@@ -76,7 +76,7 @@ hermes (host)
   │     mnemos       → http://localhost:5002/mcp
   ▼
 Docker compose (~/.investorclaw/compose.yml)
-  ├── ghcr.io/argonautsystems/ic-engine:4.7.0-cpu       :8090   portfolio analysis MCP
+  ├── argonautsystems/ic-engine:4.7.6-cpu       :8090   portfolio analysis MCP
   └── mnemos-os/mnemos-rs:4.2       :5002   memory + KG MCP
        (dashboard at :8092 for portfolio upload + key config)
 ```
@@ -220,23 +220,27 @@ but worth knowing):
 
 ## Install pointer
 
-**Quick install via ClawHub:**
+**Hermes does not use ClawHub** — ClawHub is the OpenClaw / ZeroClaw
+skill registry. Running `clawhub install` drops the skill into an
+openclaw path, not Hermes (and `hermes skills install investorclaw`
+won't find it — it isn't in a Hermes registry). Install into Hermes
+manually:
 
-```bash
-clawhub install perlowja/investorclaw
-```
+1. Copy this skill directory into `~/.hermes/skills/investorclaw/`.
+2. Bring up the InvestorClaw container (the engine):
+   `cd ~/.investorclaw && docker compose up -d`.
+3. Paste the MCP block from `config-snippet.yaml` into
+   `~/.hermes/config.yaml`, then restart Hermes.
 
-**Claude Code / Claude Desktop:**
+`INSTALL.md` next to this file has the full step-by-step (skill drop,
+compose up, config block, restart, verify).
 
-```
-/plugin marketplace add argonautsystems/InvestorClaw
-/plugin install investorclaw
-```
+> The **dashboard** (`http://localhost:18092`) and the agent's MCP
+> tools both come from the container in step 2 — the skill itself is
+> only the agent-side pointer, so Docker must be running either way.
 
-See `INSTALL.md` next to this file for the full hermes 0.12+ install
-flow (skill drop, compose up, config.yaml MCP block, restart).
-`config-snippet.yaml` has the exact YAML to paste into your
-`~/.hermes/config.yaml`.
+(Claude Code / Claude Desktop users instead install the marketplace
+plugin from `argonautsystems/InvestorClaw`; see `docs/GETTING_STARTED.md`.)
 
 ## What this skill does NOT do
 
@@ -250,7 +254,7 @@ flow (skill drop, compose up, config.yaml MCP block, restart).
 This skill describes the InvestorClaw service from a hermes operator's
 perspective. If a tool returns an unexpected result, the issue is in
 the upstream service (Apache 2.0,
-`mnemos-os/mnemos-ic-runtime` + `perlowja/InvestorClaw`), not in this
+`mnemos-os/mnemos-ic-runtime` + `argonautsystems/InvestorClaw`), not in this
 SKILL.md. If hermes can't see the tools at all, that's an install
 issue — work through `INSTALL.md` and the troubleshooting section
 there.

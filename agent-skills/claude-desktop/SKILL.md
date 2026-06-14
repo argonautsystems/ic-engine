@@ -3,7 +3,7 @@ name: investorclaw
 description: Deterministic-first portfolio analyzer for Claude Desktop via MCP-HTTP at localhost:18090. Holdings, performance, Sharpe + Sortino, FRED yields, bond duration, scenario rebalancing.
 homepage: https://github.com/argonautsystems/InvestorClaw
 user-invocable: true
-metadata: {"license":"MIT-0","version":"4.7.0","runtime":"claude-desktop","image":"ghcr.io/argonautsystems/ic-engine:4.7.0-cpu","mcp-endpoint":"http://localhost:18090/mcp"}
+metadata: {"license":"MIT-0","version":"4.7.6","runtime":"claude-desktop","image":"ghcr.io/argonautsystems/ic-engine:4.7.6-cpu","mcp-endpoint":"http://localhost:18090/mcp"}
 ---
 
 <!--
@@ -157,7 +157,7 @@ Then add the MCP server blocks to `claude_desktop_config.json` and restart Claud
 **OpenClaw / ZeroClaw / Hermes users:** install via ClawHub:
 
 ```bash
-clawhub install perlowja/investorclaw
+clawhub install investorclaw
 ```
 
 ## Where to go next
@@ -174,7 +174,7 @@ clawhub install perlowja/investorclaw
 
 This SKILL.md describes the InvestorClaw service. If a tool returns an
 unexpected result, the issue is in the service
-([`perlowja/InvestorClaw`](https://github.com/perlowja/InvestorClaw),
+([`argonautsystems/InvestorClaw`](https://github.com/argonautsystems/InvestorClaw),
 Apache 2.0) or in the runtime bridge
 ([`mnemos-os/mnemos-ic-runtime`](https://github.com/mnemos-os/mnemos-ic-runtime),
 Apache 2.0), not in this MIT-0-licensed reference doc.

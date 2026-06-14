@@ -3,7 +3,7 @@ name: investorclaw
 description: Deterministic-first portfolio analyzer for OpenClaw via MCP-HTTP at localhost:18090. Holdings, performance, Sharpe + Sortino, FRED yields, bond duration, scenario rebalancing.
 homepage: https://github.com/argonautsystems/InvestorClaw
 user-invocable: true
-metadata: {"license":"MIT-0","version":"4.7.0","runtime":"openclaw","image":"ghcr.io/argonautsystems/ic-engine:4.7.0-cpu","mcp-endpoint":"http://localhost:18090/mcp"}
+metadata: {"license":"MIT-0","version":"4.7.6","runtime":"openclaw","image":"ghcr.io/argonautsystems/ic-engine:4.7.6-cpu","mcp-endpoint":"http://localhost:18090/mcp"}
 ---
 
 <!--
@@ -191,7 +191,7 @@ MCP support handles the rest.
 **OpenClaw / ZeroClaw / Hermes (ClawHub):**
 
 ```bash
-clawhub install perlowja/investorclaw
+clawhub install investorclaw
 ```
 
 **Claude Code / Claude Desktop:**
@@ -208,7 +208,7 @@ See `INSTALL.md` in this directory for manual install steps.
 This SKILL.md describes how openclaw connects to the InvestorClaw
 service. If a tool returns an unexpected result, the issue is in the
 service (Apache 2.0 — `mnemos-os/mnemos-ic-runtime` and
-`perlowja/InvestorClaw`), not in this file. If openclaw fails to register
+`argonautsystems/InvestorClaw`), not in this file. If openclaw fails to register
 the MCP servers, see `INSTALL.md` in this directory — in particular the
 note about always using the validated `openclaw mcp set` /
 `openclaw config patch` CLI rather than editing `openclaw.json` by hand.

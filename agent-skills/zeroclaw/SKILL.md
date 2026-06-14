@@ -3,7 +3,7 @@ name: investorclaw
 description: Deterministic-first portfolio analyzer for ZeroClaw via MCP-HTTP at localhost:18090. Holdings, performance, Sharpe + Sortino, FRED yields, bond duration, scenario rebalancing.
 homepage: https://github.com/argonautsystems/InvestorClaw
 user-invocable: true
-metadata: {"license":"MIT-0","version":"4.7.0","runtime":"zeroclaw","image":"ghcr.io/argonautsystems/ic-engine:4.7.0-cpu","mcp-endpoint":"http://localhost:18090/mcp"}
+metadata: {"license":"MIT-0","version":"4.7.6","runtime":"zeroclaw","image":"ghcr.io/argonautsystems/ic-engine:4.7.6-cpu","mcp-endpoint":"http://localhost:18090/mcp"}
 ---
 
 <!--
@@ -46,12 +46,12 @@ agent startup. No skill code, no shell-out, no per-tool wiring.
 The two services run as a Docker compose stack, bound to localhost:
 
 - `mnemos-os/mnemos-rs:4.2` → `localhost:5002`
-- `ghcr.io/argonautsystems/ic-engine:4.7.0-cpu` → `localhost:18090`
+- `argonautsystems/ic-engine:4.7.6-cpu` → `localhost:18090`
 
 **Quick install via ClawHub:**
 
 ```bash
-clawhub install perlowja/investorclaw
+clawhub install investorclaw
 ```
 
 **Claude Code / Claude Desktop:**
@@ -60,6 +60,9 @@ clawhub install perlowja/investorclaw
 /plugin marketplace add argonautsystems/InvestorClaw
 /plugin install investorclaw
 ```
+
+Claude Code and Claude Desktop use this repo's container-first plugin;
+see `docs/GETTING_STARTED.md`.
 
 If the user has not installed yet, see `INSTALL.md` in this skill
 directory for full manual setup details. zeroclaw cannot install the service from
@@ -163,33 +166,45 @@ the cache.
 zeroclaw will sequence these on its own when the user asks for a full
 review. You don't have to script the chain.
 
-## Recommended narrative model
+## Recommended narration config
 
-zeroclaw routes its chat completions through whichever provider is
-configured in `~/.zeroclaw/config.toml`. **Anthropic on zeroclaw — paid
-path only since 2026-04-04**: routing OAuth-subscription tokens to a
-claws-agent violates Anthropic's ToS per their Apr 3 announcement. To
-use Anthropic models you need either (a) the discounted "extra usage
-bundle" add-on for your subscription, or (b) a direct Anthropic API
-key. Even with paid credits, Anthropic isn't cost-competitive with
-Together for InvestorClaw narrative work; we don't deploy Anthropic on
-our own fleet for zeroclaw.
+InvestorClaw narration is a 3-stage pipeline: the signed envelope →
+Stage-2 **consultant** (compresses to a fact-faithful summary) →
+Stage-3 **narrator** (enriches it into the user answer). Per the
+per-provider hallucination battery (`harness/cobol/PROVIDER_HALLUCINATION_REPORT.md`):
 
-Recommended providers for the InvestorClaw narrative tier (set
-`TOGETHER_API_KEY` in the container's `portfolios/keys.env` or via
-`portfolio_keys_set`):
+- **Consultant — `deepseek-v4-flash`** (direct DeepSeek API). Matches the
+  former `gemma-4-31B` consultant on grounding at a fraction of the cost
+  ($0.14 / $0.28 per 1M tokens, $0.0028 cached) and lifts narration
+  coverage to ~30/30. Set `INVESTORCLAW_CONSULTATION_*` — endpoint
+  `https://api.deepseek.com/v1`, model `deepseek-v4-flash`.
+- **Narrator — `gemini`** (e.g. `gemini-2.5-flash`). Cleanest narrator in
+  the battery (lowest hallucination) with the best coverage. Set
+  `INVESTORCLAW_NARRATIVE_*` — endpoint
+  `https://generativelanguage.googleapis.com/v1beta/openai`.
+- **Legacy / offline alternative** — `gemma-4-31B-it` (Together, or local
+  Ollama `gemma4:e4b`, no key) still works as both consultant and narrator,
+  but with lower coverage and a higher timeout rate than the
+  deepseek-flash + gemini combo.
 
-- **Default narrative** — Together AI `google/gemma-4-31B-it` — serverless,
-  ~100 tok/s, ~$0.0008 / 1 K tokens, fleet default.
-- **Higher-quality alternative** — Together AI `MiniMaxAI/MiniMax-M2` —
-  larger context, but moved off Together's serverless tier 2026-05;
-  requires a paid dedicated endpoint.
-- **Local-only / offline** — Ollama `gemma4:e4b` on host — zero cloud
-  cost, GPU-bound, no key required.
+The HMAC-signed envelope is the real anti-fabrication guardrail: a narrator
+that times out or is API-incompatible falls back to a grounded heuristic
+that restates only signed data, so no provider can fabricate past the
+envelope.
 
-zeroclaw's own model (separate from InvestorClaw's narrative tier)
-follows the same posture — Together gemma-4-31B-it is the fleet default
-for both layers; Anthropic remains a paid-API-only opt-in for end users.
+## Pricing data sources & yfinance fallback
+
+Pricing resolves through a provider chain: **Massive → Alpha Vantage →
+Finnhub → Yahoo Finance (yfinance)**. With a `MASSIVE_API_KEY`, Massive
+serves fast realtime/historical data. **Without any paid key, pricing
+falls through to free Yahoo Finance (`yfinance`, no API key required)** —
+fully usable for typical portfolios.
+
+> ⚠️ **Disclaimer — large portfolios on yfinance.** Yahoo Finance is
+> unofficial and slow. **Large portfolios (many holdings) may hit request
+> timeouts (~30s)** when relying on the yfinance fallback. For large or
+> realtime-sensitive portfolios, configure a `MASSIVE_API_KEY`.
+
 
 ## Important behaviors
 
@@ -247,5 +262,5 @@ This skill payload (`SKILL.md` + `SKILL.toml` in
 
 This skill describes the InvestorClaw service. If a tool returns an
 unexpected result, the bug is in the service (Apache 2.0, see
-`github.com/argonautsystems/ic-engine` and `mnemos-os/mnemos-rs`), not in this
+`mnemos-os/ic-engine` and `mnemos-os/mnemos-rs`), not in this
 manifest.

@@ -3,7 +3,7 @@ name: investorclaw
 description: Deterministic-first portfolio analyzer for Claude Code via MCP-HTTP at localhost:18090. Holdings, performance, Sharpe + Sortino, FRED yields, bond duration, scenario rebalancing.
 homepage: https://github.com/argonautsystems/InvestorClaw
 user-invocable: true
-metadata: {"license":"MIT-0","version":"4.7.0","runtime":"claude-code","image":"ghcr.io/argonautsystems/ic-engine:4.7.0-cpu","mcp-endpoint":"http://localhost:18090/mcp"}
+metadata: {"license":"MIT-0","version":"4.7.6","runtime":"claude-code","image":"ghcr.io/argonautsystems/ic-engine:4.7.6-cpu","mcp-endpoint":"http://localhost:18090/mcp"}
 ---
 
 <!--
@@ -33,9 +33,9 @@ analysis happens inside the user's Docker containers — the agent
 never installs or imports anything.
 
 This is the current Claude Code / Claude Desktop path. The plugin
-installs directly from the `argonautsystems/InvestorClaw` repo and uses
-the same skill bundle and same container-first runtime as every other
-agent.
+installs directly from this repo and uses the same skill bundle and
+same container-first runtime as every other agent. See
+`docs/GETTING_STARTED.md` for the canonical setup.
 
 ## Slash commands the plugin exposes
 
@@ -213,11 +213,10 @@ See INSTALL.md for the full bring-up sequence.
 /plugin install investorclaw
 ```
 
-
 **OpenClaw / ZeroClaw / Hermes users:** install via ClawHub:
 
 ```bash
-clawhub install perlowja/investorclaw
+clawhub install investorclaw
 ```
 
 ## What this plugin does NOT do
@@ -235,7 +234,7 @@ clawhub install perlowja/investorclaw
 - This plugin (manifest, SKILL.md, INSTALL.md) is **MIT-0-licensed**.
 - The InvestorClaw service it connects to is **Apache 2.0**, hosted at
   `github.com/argonautsystems/InvestorClaw` and the runtime container at
-  `github.com/argonautsystems/ic-engine`.
+  `mnemos-os/ic-engine`.
 - The MNEMOS memory service is **Apache 2.0**, hosted at
   `mnemos-os/mnemos-rs`.
 
