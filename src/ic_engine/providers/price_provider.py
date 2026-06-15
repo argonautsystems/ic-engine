@@ -627,8 +627,19 @@ class MassiveProvider(MassiveSurfaceMixin):
         ticker call with an unsupported batch kwarg.
         """
         results: Dict[str, Dict] = {}
-        forex_symbols = [s for s in symbols if "/" in s]
-        stock_symbols = [s for s in symbols if "/" not in s]
+        # Route by Massive/polygon symbology: I:* indices, X:* crypto, A/B forex,
+        # everything else equities. Each market_type uses a distinct snapshot
+        # endpoint, so a benchmark like I:SPX or X:BTCUSD is not silently dropped.
+        index_symbols = [s for s in symbols if s.upper().startswith("I:")]
+        crypto_symbols = [s for s in symbols if s.upper().startswith("X:")]
+        forex_symbols = [
+            s for s in symbols if "/" in s and not s.upper().startswith(("I:", "X:"))
+        ]
+        stock_symbols = [
+            s
+            for s in symbols
+            if "/" not in s and not s.upper().startswith(("I:", "X:"))
+        ]
 
         def _snapshot_all(market_type: str, tickers: List[str]) -> None:
             data = self._with_retry(
@@ -654,6 +665,18 @@ class MassiveProvider(MassiveSurfaceMixin):
                     )
                     or 0
                 )
+                prev = getattr(t, "prev_day", None)
+                prev_close = (
+                    (getattr(prev, "close", None) or getattr(prev, "c", None)) if prev else None
+                )
+                change_pct = getattr(t, "todays_change_perc", None)
+                if change_pct is None:
+                    change_pct = getattr(t, "todaysChangePerc", None)
+                if change_pct is None and price and prev_close:
+                    try:
+                        change_pct = (float(price) - float(prev_close)) / float(prev_close) * 100.0
+                    except (TypeError, ZeroDivisionError, ValueError):
+                        change_pct = None
                 results[ticker] = {
                     "symbol": ticker,
                     "price": price,
@@ -663,6 +686,8 @@ class MassiveProvider(MassiveSurfaceMixin):
                     "volume": (getattr(day, "volume", None) or getattr(day, "v", None))
                     if day
                     else 0,
+                    "prev_close": prev_close,
+                    "change_pct": change_pct,
                     "provider": self.NAME,
                 }
 
@@ -674,6 +699,14 @@ class MassiveProvider(MassiveSurfaceMixin):
                 _snapshot_all("stocks", stock_symbols)
             if forex_symbols:
                 _snapshot_all("forex", forex_symbols)
+            # Indices/crypto are best-effort (separate endpoints + entitlements);
+            # a failure here must not abort the equity quotes already collected.
+            for mt, syms in (("indices", index_symbols), ("crypto", crypto_symbols)):
+                if syms:
+                    try:
+                        _snapshot_all(mt, syms)
+                    except Exception as e:
+                        logger.debug(f"Massive snapshot_all({mt}) unavailable: {e}")
             if results:
                 return results
         except Exception as e:

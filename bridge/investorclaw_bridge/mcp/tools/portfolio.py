@@ -110,6 +110,40 @@ async def portfolio_performance_window(
     return result
 
 
+async def portfolio_market_snapshot(
+    symbols: str | None = None,
+    benchmarks: bool = True,
+) -> dict[str, Any]:
+    """Real-time market snapshot: current price + day change % for the user's
+    holdings plus whole-market benchmarks (SPX/NDX/DJI/VIX, BTC/ETH).
+
+    Use for INTRADAY / "right now" / "how are my holdings doing today" / "are any
+    of my positions up or down X% today" / market-level checks. Provider-agnostic
+    (engine-owned quote chain); the agent must NOT shell out to a vendor API.
+    Cached ~30s so repeated scans don't re-poll providers.
+    """
+    args = ["market-snapshot"]
+    if symbols:
+        args.extend(["--symbols", symbols])
+    if not benchmarks:
+        args.append("--no-benchmarks")
+    result = await _run_ic_engine(args, timeout_sec=120.0)
+    narrative = result.get("narrative") or ""
+    if isinstance(narrative, str):
+        for line in reversed(narrative.splitlines()):
+            raw = line.strip()
+            if raw.startswith("{") and '"sections"' in raw and '"ic_result"' in raw:
+                try:
+                    envelope = json.loads(raw)
+                    if isinstance(envelope, dict):
+                        result.clear()
+                        result.update(envelope)
+                    break
+                except json.JSONDecodeError:
+                    pass
+    return result
+
+
 async def portfolio_refresh() -> dict[str, Any]:
     """Refresh market data without re-uploading portfolio files.
 
@@ -370,6 +404,27 @@ TOOLS: dict[str, dict[str, Any]] = {
         },
         required=[],
         handler=portfolio_performance_window,
+    ),
+    "portfolio_market_snapshot": _tool(
+        description=(
+            "Real-time market snapshot — current price + day change% for the "
+            "user's holdings plus benchmarks (SPX/NDX/DJI/VIX, BTC/ETH). Use for "
+            "INTRADAY / right-now / 'how are my holdings doing today' / 'any "
+            "positions up or down X% today' / market-level checks. Provider-"
+            "agnostic and engine-owned; do NOT shell out to a vendor API."
+        ),
+        parameters={
+            "symbols": {
+                "type": "string",
+                "description": "Optional comma-separated tickers (overrides holdings).",
+            },
+            "benchmarks": {
+                "type": "boolean",
+                "description": "Include index/crypto benchmarks (default true).",
+            },
+        },
+        required=[],
+        handler=portfolio_market_snapshot,
     ),
     "portfolio_refresh": _tool(
         description=(

@@ -9,6 +9,20 @@ Distribution-edge artifacts (`SKILL.md`, `compose.yml`, `install.yaml`,
 `agent-skills/**`) are MIT-0; substantive code (bridge, dashboard,
 Dockerfile, tests) is Apache 2.0.
 
+## [4.9.0] — 2026-06-15
+
+### Added
+
+- **`portfolio_market_snapshot` MCP tool — real-time market data, engine-owned.**
+  Current price + day-change% for the user's holdings plus benchmarks (indices/
+  crypto), via the provider-AGNOSTIC `PriceProvider.get_quotes` chain (Massive
+  batch snapshot -> AlphaVantage/Finnhub/yfinance fallback). The agent calls one
+  signed MCP tool instead of shelling out to a vendor API (no shell/curl, no API
+  key in the agent env, no SSRF surface). Cached ~30s so a 15-min intraday scan
+  doesn't re-poll providers. `PriceProvider.get_quotes` now also returns
+  `change_pct` + `prev_close` and routes I:* indices / X:* crypto to their
+  snapshot endpoints.
+
 ## [4.8.6] — 2026-06-15
 
 ### Fixed

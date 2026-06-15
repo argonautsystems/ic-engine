@@ -9,7 +9,7 @@
 # computer-use, openclaw, hermes) walk this YAML linearly — request user
 # permission per step, execute via shell, report back.
 
-version: "4.8.6"
+version: "4.9.0"
 spec: "compose-x-mcp-services-install/v1"
 # compose.yml is bundled in this skill directory; no remote fetch.
 dashboard_url: http://localhost:18092/
