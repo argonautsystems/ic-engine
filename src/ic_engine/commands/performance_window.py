@@ -55,6 +55,9 @@ from ic_engine.runtime.envelope import (
 )
 from ic_engine.services.portfolio_utils import load_holdings_list
 
+import re
+
+# Canonical terse tokens still accepted verbatim (and surfaced in the error help).
 _PERIOD_ALIASES = {
     "1d": 1,
     "1w": 7,
@@ -74,6 +77,87 @@ _PERIOD_ALIASES = {
     "12mo": 365,
     "2y": 730,
 }
+
+# Single-word natural periods (after relative-prefix stripping, e.g. "last week"
+# → "week"). Calendar approximations: month≈30d, quarter≈90d, year≈365d.
+_WORD_PERIODS = {
+    "yesterday": 1,
+    "today": 1,
+    "day": 1,
+    "week": 7,
+    "fortnight": 14,
+    "month": 30,
+    "quarter": 90,
+    "semester": 180,
+    "year": 365,
+    "decade": 3650,
+}
+_UNIT_DAYS = {"d": 1, "w": 7, "mo": 30, "m": 30, "y": 365}
+# Anything that means "the full available provider history".
+_MAX_TOKENS = {"max", "all", "all_time", "everything", "lifetime", "ever", "alltime"}
+
+
+def _normalize_period(token: str) -> str:
+    """Lowercase, unify separators, and strip relative/filler prefixes so natural
+    phrasings collapse to a canonical form: 'last 20 Years' → '20_years',
+    'over the past 6 months' → '6_months', 'this week' → 'week'."""
+    t = (token or "").strip().lower()
+    t = re.sub(r"[\s\-]+", "_", t)
+    for pre in (
+        "in_the_", "over_the_", "for_the_", "during_the_", "trailing_",
+        "previous_", "past_", "last_", "this_", "the_", "over_", "for_", "in_",
+    ):
+        while t.startswith(pre):
+            t = t[len(pre):]
+    return t.strip("_")
+
+
+def _resolve_period_days(token: str) -> tuple[str, int | None]:
+    """Return ('ytd', None) | ('max', None) | ('days', N) for a period token,
+    accepting terse tokens, natural words, and 'N unit' phrasings (any N)."""
+    raw = (token or "").strip().lower()
+    if raw in _PERIOD_ALIASES:
+        return ("days", _PERIOD_ALIASES[raw])
+    if raw in ("ytd", "year_to_date", "yeartodate"):
+        return ("ytd", None)
+
+    t = _normalize_period(token)
+    if not t:
+        return ("days", _PERIOD_ALIASES["1mo"])
+    if t in ("ytd", "year_to_date", "yeartodate"):
+        return ("ytd", None)
+    if (
+        t in _MAX_TOKENS
+        or t.startswith("entire")
+        or t.startswith("since_inception")
+        or "inception" in t
+        or "history" in t
+        or "all_time" in t
+    ):
+        return ("max", None)
+    if t in _PERIOD_ALIASES:
+        return ("days", _PERIOD_ALIASES[t])
+    if t in _WORD_PERIODS:
+        return ("days", _WORD_PERIODS[t])
+    # "N unit": 20years, 6_months, 90_days, 3yr, 2wks ...
+    m = re.fullmatch(r"(\d+)_?(d|day|days|w|wk|wks|week|weeks|mo|month|months|m|y|yr|yrs|year|years)", t)
+    if m:
+        n = int(m.group(1))
+        unit = m.group(2)
+        if unit.startswith("d"):
+            per = _UNIT_DAYS["d"]
+        elif unit.startswith("w"):
+            per = _UNIT_DAYS["w"]
+        elif unit.startswith("mo") or unit in ("month", "months", "m"):
+            per = _UNIT_DAYS["mo"]
+        else:
+            per = _UNIT_DAYS["y"]
+        return ("days", max(n * per, 1))
+    raise ValueError(
+        f"Unsupported period {token!r}. Use a token (1d, 1w, 1mo, 3mo, 6mo, ytd, "
+        "1y, 2y, max), a natural phrase ('last week', 'last month', 'last year', "
+        "'last 5 years', 'entire history'), or explicit start_date/end_date."
+    )
 
 # "max" must mean provider maximum, not an arbitrary 10-year cap. Request a
 # deliberately old equity-history start; provider responses are then clamped to
@@ -156,15 +240,13 @@ def resolve_window(
     end = explicit_end or anchor
     token = token or "1mo"
 
-    if token == "ytd":
+    kind, days = _resolve_period_days(token)
+    if kind == "ytd":
         start = date(end.year, 1, 1)
-    elif token == "max":
+    elif kind == "max":
         start = _PROVIDER_MAX_START
-    elif token in _PERIOD_ALIASES:
-        start = end - timedelta(days=_PERIOD_ALIASES[token])
     else:
-        allowed = sorted(set(_PERIOD_ALIASES) | {"ytd", "max"})
-        raise ValueError(f"Unsupported period {period!r}; expected one of {allowed}")
+        start = end - timedelta(days=int(days))
 
     if start > end:
         raise ValueError("resolved start_date must be on or before end_date")

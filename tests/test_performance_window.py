@@ -302,3 +302,45 @@ def test_skill_cookbooks_route_temporal_phrases_to_performance_window():
         assert "period=3mo" in text, skill
         assert "period=ytd" in text, skill
         assert "start_date=yyyy-mm-dd" in text, skill
+
+
+@pytest.mark.parametrize(
+    "phrase,expected_days",
+    [
+        ("yesterday", 1),
+        ("last week", 7),
+        ("this week", 7),
+        ("last month", 30),
+        ("previous month", 30),
+        ("last quarter", 90),
+        ("past 6 months", 180),
+        ("last year", 365),
+        ("over the last 3 years", 365 * 3),
+        ("last 5 years", 365 * 5),
+        ("last 10 years", 365 * 10),
+        ("last 20 years", 365 * 20),
+        ("trailing 90 days", 90),
+        ("5y", 365 * 5),
+        ("10y", 365 * 10),
+    ],
+)
+def test_resolve_window_natural_phrasings(phrase, expected_days):
+    today = date(2026, 6, 15)
+    w = resolve_window(period=phrase, today=today)
+    days = (today - date.fromisoformat(w.start_date)).days
+    assert days == expected_days, f"{phrase!r} -> {days}d (want {expected_days})"
+    assert w.end_date == today.isoformat()
+
+
+@pytest.mark.parametrize(
+    "phrase",
+    ["entire massive history", "all time", "max", "since inception", "everything"],
+)
+def test_resolve_window_max_phrasings(phrase):
+    w = resolve_window(period=phrase, today=date(2026, 6, 15))
+    assert w.start_date == "1900-01-01"  # full provider history
+
+
+def test_resolve_window_ytd_phrasings():
+    w = resolve_window(period="ytd", today=date(2026, 6, 15))
+    assert w.start_date == "2026-01-01"

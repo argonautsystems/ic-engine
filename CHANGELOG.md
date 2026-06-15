@@ -9,6 +9,17 @@ Distribution-edge artifacts (`SKILL.md`, `compose.yml`, `install.yaml`,
 `agent-skills/**`) are MIT-0; substantive code (bridge, dashboard,
 Dockerfile, tests) is Apache 2.0.
 
+## [4.8.4] — 2026-06-15
+
+### Added
+
+- **Natural-language period parsing for `portfolio_performance_window`.** Beyond the
+  terse tokens, the resolver now accepts "yesterday", "last week/month/quarter/year",
+  "last N years/months/weeks/days" (any N, e.g. "last 20 years"), relative-prefix
+  phrasings ("over the past 6 months", "trailing 90 days"), and "entire history /
+  all time / since inception" → full provider history. Adds 3y/5y/10y/Ny coverage
+  (was capped at 2y/max). Agents can pass the user's words directly.
+
 ## [4.8.3] — 2026-06-14
 
 ### Fixed
