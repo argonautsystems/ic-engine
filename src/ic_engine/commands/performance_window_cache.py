@@ -754,10 +754,15 @@ def update_and_slice_panel(
     results: dict[str, tuple[pd.DataFrame | None, float, bool]] = {}
     if len(sym_list) <= 1:
         for s in sym_list:
-            sym, sl, div, ok = _process_one_symbol(
-                analyzer, s, start, end, start_date, end_date, today_anchor
-            )
-            results[sym] = (sl, div, ok)
+            try:
+                sym, sl, div, ok = _process_one_symbol(
+                    analyzer, s, start, end, start_date, end_date, today_anchor
+                )
+                results[sym] = (sl, div, ok)
+            except Exception as exc:
+                # One symbol's failure must not abort the whole portfolio window.
+                logger.warning("performance-window symbol %s failed: %s", s, exc)
+                results[s] = (None, 0.0, False)
     else:
         max_workers = min(16, len(sym_list))
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -768,8 +773,16 @@ def update_and_slice_panel(
                 for s in sym_list
             }
             for future in as_completed(futures):
-                sym, sl, div, ok = future.result()
-                results[sym] = (sl, div, ok)
+                s = futures[future]
+                try:
+                    sym, sl, div, ok = future.result()
+                    results[sym] = (sl, div, ok)
+                except Exception as exc:
+                    # Isolate per-symbol failures: a single bad holding must not
+                    # blow up the entire window (prior sequential behavior skipped
+                    # failing symbols too).
+                    logger.warning("performance-window symbol %s failed: %s", s, exc)
+                    results[s] = (None, 0.0, False)
 
     # Reassemble in input order for deterministic output.
     sliced: dict[str, pd.DataFrame] = {}
