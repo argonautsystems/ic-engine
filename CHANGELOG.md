@@ -9,6 +9,22 @@ Distribution-edge artifacts (`SKILL.md`, `compose.yml`, `install.yaml`,
 `agent-skills/**`) are MIT-0; substantive code (bridge, dashboard,
 Dockerfile, tests) is Apache 2.0.
 
+## [4.8.3] — 2026-06-14
+
+### Fixed
+
+- **Panel date corruption (epoch-0 bug).** `_polars_to_indexed_pandas` only detected
+  `Date`/`Datetime`/`index` columns, but `PerformanceAnalyzer.fetch_equity_data`
+  emits a lowercase `date` column — so the date column was missed and every panel
+  row collapsed to `1970-01-01`, producing empty window slices and a spurious "No
+  price/return data available" failure on real portfolios. Date detection is now
+  case-insensitive, and the test fixture matches the real lowercase contract.
+- **Update banner corrupted JSON stdout.** The passive update-available banner was
+  printed to stdout during bootstrap (which runs on every CLI command), corrupting
+  the JSON envelope that machine-consumed commands like `performance-window` emit
+  and breaking the bridge/MCP/REST `json.loads(stdout)` contract. It now prints to
+  stderr.
+
 ## [4.8.2] — 2026-06-14
 
 ### Fixed

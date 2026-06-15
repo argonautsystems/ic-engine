@@ -47,7 +47,10 @@ class _FakeAnalyzer:
         self.exact_range_calls = getattr(self, "exact_range_calls", [])
         self.exact_range_calls.append(exact_range)
         dates = pd.date_range(start_date, end_date, freq="D")
-        frame = pd.DataFrame({"Date": dates})
+        # Lowercase "date" matches the real PerformanceAnalyzer.fetch_equity_data
+        # output (the provider chain emits lowercase); a capital "Date" fixture
+        # previously masked the epoch-0 date-column-detection bug.
+        frame = pd.DataFrame({"date": dates})
         fetched = []
         dividends = {}
         for sym in syms:

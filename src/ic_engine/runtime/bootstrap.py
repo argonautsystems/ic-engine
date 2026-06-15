@@ -25,6 +25,7 @@ Env/config precedence enforced here (highest → lowest):
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 
@@ -59,7 +60,11 @@ def run_bootstrap(skill_dir: Path) -> None:
             # "no update" / "check failed" paths during bootstrap to keep
             # the startup banner clean.
             if "available" in msg and "no update available" not in msg:
-                print(msg)
+                # MUST go to stderr: every CLI command runs bootstrap, and the
+                # machine-consumed commands (e.g. performance-window) emit JSON on
+                # stdout. A banner on stdout corrupts that JSON and breaks the
+                # bridge/MCP/REST contract that does json.loads(stdout).
+                print(msg, file=sys.stderr)
         except Exception:
             pass  # never fail bootstrap on an update-check glitch
 

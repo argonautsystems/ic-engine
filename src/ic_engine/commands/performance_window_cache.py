@@ -278,8 +278,16 @@ def _save_symbol_panel(symbol: str, df: pd.DataFrame) -> None:
 
 def _polars_to_indexed_pandas(price_pl: pl.DataFrame) -> pd.DataFrame:
     price_pd = price_pl.to_pandas()
-    date_col = next((c for c in ("Date", "Datetime", "index") if c in price_pd.columns), None)
-    if date_col:
+    # Detect the date column case-INSENSITIVELY: PerformanceAnalyzer.fetch_equity_data
+    # emits a lowercase "date" column (via the provider chain), while other callers
+    # use "Date"/"Datetime". Missing the lowercase form silently fell through to
+    # pd.to_datetime(RangeIndex) -> every row became 1970-01-01 (epoch 0) and the
+    # panel collapsed to a single garbage bar.
+    date_col = next(
+        (c for c in price_pd.columns if str(c).lower() in ("date", "datetime", "index")),
+        None,
+    )
+    if date_col is not None:
         price_pd = price_pd.set_index(pd.to_datetime(price_pd[date_col]))
         price_pd = price_pd.drop(columns=[date_col])
     else:
