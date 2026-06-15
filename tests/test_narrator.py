@@ -419,16 +419,13 @@ def _add_performance_window(envelope: Envelope) -> Envelope:
         "how is my portfolio doing this week",
     ],
 )
-def test_narrator_answers_performance_window_deterministically(envelope, monkeypatch, question):
+def test_narrator_recovers_performance_window_from_refusal(envelope, monkeypatch, question):
     """Phrasing-variant temporal/performance questions must NOT return OUT_OF_SCOPE
-    when performance_window data exists — they short-circuit to deterministic data
-    regardless of how the LLM would have (mis)handled the wording."""
+    when performance_window data exists: when the LLM refuses, the recovery path
+    surfaces the deterministic performance_window data instead of the refusal."""
     envelope = _add_performance_window(envelope)
 
-    called = {"llm": False}
-
     def _refusing_llm(system_prompt, user_prompt):
-        called["llm"] = True
         return OUT_OF_SCOPE_RESPONSE, "fake-model"
 
     monkeypatch.setattr("ic_engine.runtime.narrator._call_llm", _refusing_llm)
@@ -438,8 +435,6 @@ def test_narrator_answers_performance_window_deterministically(envelope, monkeyp
     assert "0.7818" in result.answer  # total_return_pct
     assert "14227.98" in result.answer  # total_pnl
     assert "NVDA" in result.answer  # top mover
-    assert result.model == "deterministic"
-    assert called["llm"] is False  # short-circuited before the LLM
 
 
 @pytest.mark.parametrize(
@@ -453,9 +448,10 @@ def test_narrator_answers_performance_window_deterministically(envelope, monkeyp
         "Which holdings had return of capital distributions?",
     ],
 )
-def test_narrator_non_performance_question_not_short_circuited(envelope, monkeypatch, question):
-    """Holdings/allocation questions (even with temporal words) must NOT short-
-    circuit to the performance answer — they go to the LLM path."""
+def test_narrator_non_performance_answer_passes_through(envelope, monkeypatch, question):
+    """A non-refused LLM answer to a holdings/allocation question is passed through
+    unchanged — the performance-recovery path only fires on a refusal/hedge, so it
+    must not override a valid non-performance answer with performance data."""
     envelope = _add_performance_window(envelope)
     called = {"llm": False}
 
@@ -465,5 +461,6 @@ def test_narrator_non_performance_question_not_short_circuited(envelope, monkeyp
 
     monkeypatch.setattr("ic_engine.runtime.narrator._call_llm", _fake_llm)
     result = narrate(envelope, question)
-    assert called["llm"] is True  # LLM consulted, not short-circuited
-    assert result.model != "deterministic"
+    assert called["llm"] is True  # LLM consulted
+    assert "holdings summary" in result.answer  # LLM answer preserved, not overridden
+    assert "0.7818" not in result.answer  # performance data NOT injected

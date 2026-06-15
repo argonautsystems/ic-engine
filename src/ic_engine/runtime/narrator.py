@@ -387,46 +387,13 @@ _TEMPORAL_PERFORMANCE_MARKERS = (
     "day",
 )
 
-# Explicit performance-intent phrasings that the LLM intermittently refuses
-# (OUT_OF_SCOPE) because the wording does not lexically match a section name.
-# These must be UNAMBIGUOUS performance markers — bare temporal words
-# ("today"/"day"/"week") are deliberately NOT here, or a holdings question like
-# "show me my positions today" would wrongly short-circuit to performance data.
-# Generic question stems ("how is"/"how are") are also excluded for the same
-# reason; the specific "how … portfolio do/doing" phrases cover the target cases.
-_PERFORMANCE_QUESTION_MARKERS = (
-    "perform",
-    "performance",
-    # NOTE: bare "return"/"returns" is intentionally excluded — it is overloaded
-    # ("return my portfolio to target allocation", "return of capital", "improve
-    # returns if rates rise") and would mis-route advice/allocation questions. The
-    # LLM-refusal recovery path covers bare-"return" performance phrasings.
-    "p&l",
-    "pnl",
-    "profit",
-    "up or down",
-    "gain or loss",
-    "gains or losses",
-    "mover",
-    "movers",
-    # Past-tense "did my portfolio do" is performance intent (how/what did my
-    # portfolio do[?]); deliberately anchored on "did" so "what should my
-    # portfolio do if rates rise?" does NOT match, and no trailing-space hack so
-    # "what did my portfolio do?" is not a false negative.
-    "did my portfolio do",
-    "how is my portfolio doing",
-    "how's my portfolio doing",
-    "portfolio doing",
-)
-
-
-def _is_performance_question(question: str) -> bool:
-    # Require an EXPLICIT performance marker. The LLM-refusal recovery path
-    # (_is_performance_hedge / OUT_OF_SCOPE) remains the backstop for edge
-    # phrasings, so this predicate is high-precision on purpose to avoid
-    # short-circuiting non-performance portfolio questions.
-    q = (question or "").lower()
-    return any(m in q for m in _PERFORMANCE_QUESTION_MARKERS)
+# NOTE: an earlier revision tried a pre-LLM "performance question" predicate to
+# short-circuit to deterministic data, but keyword/substring intent-matching
+# proved too brittle (false positives on "profit margins", "return of capital",
+# "positions today", etc). The robust design instead leaves the LLM path in place
+# and relies on the OUT_OF_SCOPE / _is_performance_hedge RECOVERY (below), which
+# only fires on an actual refusal — exactly the failure mode this fixes — and now
+# reads sections.performance_window. That has zero false-positive surface.
 
 
 def _deterministic_performance_answer(envelope: Envelope, question: str) -> str | None:
@@ -1014,20 +981,6 @@ def narrate(envelope: Envelope, question: str, focus: str | None = None) -> Narr
         response = _ensure_hmac_footer(response, hmac_value)
         # NO validate_narration — these answers don't claim envelope numbers.
         return NarratorResult(answer=response, hmac=hmac_value, model=model)
-
-    # Deterministic guarantee for portfolio performance / time-window questions.
-    # The LLM is phrasing-sensitive and intermittently refuses these (OUT_OF_SCOPE)
-    # even when the data is present, and every model rephrases-and-fails
-    # differently. When the question is clearly a performance/temporal question AND
-    # the signed envelope already contains deterministic performance data, answer
-    # from it directly — no LLM round-trip, no phrasing-dependent refusal.
-    if _is_performance_question(question):
-        deterministic = _deterministic_performance_answer(envelope, question)
-        if deterministic is not None:
-            response = _truncate_runaway(deterministic)
-            response = _ensure_hmac_footer(response, hmac_value)
-            validate_narration(response, envelope)
-            return NarratorResult(answer=response, hmac=hmac_value, model="deterministic")
 
     # Default portfolio mode — strict envelope-only narration.
     # Stage 1: stripped feed (<32k tokens, fits every provider).
