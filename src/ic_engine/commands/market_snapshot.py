@@ -80,6 +80,20 @@ def _as_float(value: Any) -> float | None:
     return f
 
 
+def _default_holdings_path() -> Path | None:
+    """The engine's resolved holdings file (written by the holdings/refresh path)."""
+    try:
+        from ic_engine.config.path_resolver import get_reports_dir
+
+        rd = Path(get_reports_dir())
+    except Exception:
+        return None
+    for cand in (rd / ".raw" / "holdings.json", rd / "holdings.json", rd / "holdings_summary.json"):
+        if cand.exists():
+            return cand
+    return None
+
+
 def _equity_symbols(holdings: list[dict[str, Any]]) -> list[str]:
     out: list[str] = []
     seen: set[str] = set()
@@ -123,14 +137,18 @@ def build_market_snapshot(
     holdings_hash = "market-snapshot"
     if symbols:
         requested = [str(s).upper().strip() for s in symbols if str(s).strip()]
-    elif holdings_file is not None:
-        holdings_path = Path(holdings_file).expanduser()
-        holdings = load_holdings_list(str(holdings_path))
-        requested = _equity_symbols(holdings)
-        try:
-            holdings_hash = portfolio_id_for_holdings(holdings_path)
-        except Exception:
-            holdings_hash = "market-snapshot"
+    else:
+        # No explicit symbols -> snapshot the user's holdings. Resolve the
+        # engine's holdings file when the caller (the MCP bridge) didn't pass one,
+        # so "how are my holdings doing" works without arguments.
+        holdings_path = Path(holdings_file).expanduser() if holdings_file else _default_holdings_path()
+        if holdings_path is not None and holdings_path.exists():
+            holdings = load_holdings_list(str(holdings_path))
+            requested = _equity_symbols(holdings)
+            try:
+                holdings_hash = portfolio_id_for_holdings(holdings_path)
+            except Exception:
+                holdings_hash = "market-snapshot"
 
     bench = list(_DEFAULT_BENCHMARKS) if benchmarks else []
     all_symbols = list(dict.fromkeys([*requested, *bench]))
