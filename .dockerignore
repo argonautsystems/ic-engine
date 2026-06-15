@@ -10,3 +10,19 @@ results
 *.bundle
 assets
 docs/blog
+
+# Secret / runtime-state hygiene — never bake credentials or data into an image.
+# (COPY is already selective, but exclude these defensively so no stray copy or
+# future `COPY .` can leak them. Keys live in the runtime /data/keys.env volume.)
+**/.env
+**/*.env
+**/keys.env
+**/secrets*
+**/.secret*
+**/*.pem
+**/*.key
+**/.netrc
+**/auth.json
+**/.api_keys*
+data
+/data
