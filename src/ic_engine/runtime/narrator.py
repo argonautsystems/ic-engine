@@ -397,8 +397,10 @@ _TEMPORAL_PERFORMANCE_MARKERS = (
 _PERFORMANCE_QUESTION_MARKERS = (
     "perform",
     "performance",
-    "return",
-    "returns",
+    # NOTE: bare "return"/"returns" is intentionally excluded — it is overloaded
+    # ("return my portfolio to target allocation", "return of capital", "improve
+    # returns if rates rise") and would mis-route advice/allocation questions. The
+    # LLM-refusal recovery path covers bare-"return" performance phrasings.
     "p&l",
     "pnl",
     "profit",

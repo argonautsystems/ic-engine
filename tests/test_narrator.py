@@ -449,6 +449,8 @@ def test_narrator_answers_performance_window_deterministically(envelope, monkeyp
         "How is my portfolio allocated?",
         "What are my holdings this week?",
         "What should my portfolio do if rates rise?",
+        "How should I return my portfolio to target allocation?",
+        "Which holdings had return of capital distributions?",
     ],
 )
 def test_narrator_non_performance_question_not_short_circuited(envelope, monkeypatch, question):
