@@ -246,7 +246,12 @@ def resolve_window(
     elif kind == "max":
         start = _PROVIDER_MAX_START
     else:
-        start = end - timedelta(days=int(days))
+        # Clamp an absurdly large N (e.g. "last 9999 years") to the provider
+        # history floor instead of overflowing `date` arithmetic.
+        if int(days) >= (end - _PROVIDER_MAX_START).days:
+            start = _PROVIDER_MAX_START
+        else:
+            start = end - timedelta(days=int(days))
 
     if start > end:
         raise ValueError("resolved start_date must be on or before end_date")
