@@ -407,11 +407,14 @@ _PERFORMANCE_QUESTION_MARKERS = (
     "gains or losses",
     "mover",
     "movers",
-    "how did my portfolio do",
+    # Past-tense "did my portfolio do" is performance intent (how/what did my
+    # portfolio do[?]); deliberately anchored on "did" so "what should my
+    # portfolio do if rates rise?" does NOT match, and no trailing-space hack so
+    # "what did my portfolio do?" is not a false negative.
+    "did my portfolio do",
     "how is my portfolio doing",
     "how's my portfolio doing",
     "portfolio doing",
-    "portfolio do ",
 )
 
 

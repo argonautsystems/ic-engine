@@ -413,6 +413,7 @@ def _add_performance_window(envelope: Envelope) -> Envelope:
     [
         "How did my portfolio PERFORM last week?",
         "How did my portfolio do last week?",
+        "What did my portfolio do?",
         "Was my portfolio up or down last week?",
         "What was my P&L last week?",
         "how is my portfolio doing this week",
@@ -447,6 +448,7 @@ def test_narrator_answers_performance_window_deterministically(envelope, monkeyp
         "Show me my positions today",
         "How is my portfolio allocated?",
         "What are my holdings this week?",
+        "What should my portfolio do if rates rise?",
     ],
 )
 def test_narrator_non_performance_question_not_short_circuited(envelope, monkeypatch, question):
