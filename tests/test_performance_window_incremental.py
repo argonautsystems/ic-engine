@@ -204,10 +204,13 @@ def test_build_performance_window_new_day_fetches_gap_only(monkeypatch, tmp_path
     second = _FakeAnalyzer()
     monkeypatch.setattr("ic_engine.commands.performance_window.PerformanceAnalyzer", lambda: second)
     build_performance_window(holdings, period="1w", today=date(2026, 6, 15))
-    assert second.calls == [
-        (("AAA",), "2026-06-15", "2026-06-15"),
-        (("BBB",), "2026-06-15", "2026-06-15"),
-    ]
+    # Per-symbol fetches run concurrently, so compare order-insensitively.
+    assert sorted(second.calls) == sorted(
+        [
+            (("AAA",), "2026-06-15", "2026-06-15"),
+            (("BBB",), "2026-06-15", "2026-06-15"),
+        ]
+    )
 
 
 def test_same_day_repeat_uses_signed_result_cache_no_provider_call(monkeypatch, tmp_path):
@@ -640,6 +643,44 @@ def test_narrow_then_wide_same_end_keeps_older_dividends(monkeypatch, tmp_path):
         analyzer, ["AAA"], "2026-01-01", "2026-06-14"
     )
     assert abs(wide_div["AAA"] - 1.25) < 1e-9
+
+
+def test_large_portfolio_processes_symbols_concurrently(monkeypatch, tmp_path):
+    """Scale guard: a large portfolio must NOT serialize per-symbol provider
+    round-trips (the 442-symbol timeout regression). Verify the per-symbol work
+    runs concurrently and every symbol is processed."""
+    import threading
+    import time
+
+    monkeypatch.setenv("INVESTORCLAW_OHLCV_PANEL_DIR", str(tmp_path / "panel"))
+    from ic_engine.commands import performance_window_cache as cache
+
+    monkeypatch.setattr(cache, "_fetch_dividend_events", lambda *a, **k: ([], True))
+
+    lock = threading.Lock()
+    state = {"cur": 0, "max": 0}
+
+    class _Concurrent(_FakeAnalyzer):
+        def fetch_equity_data(self, symbols, start_date, end_date, *, exact_range=False):
+            with lock:
+                state["cur"] += 1
+                state["max"] = max(state["max"], state["cur"])
+            time.sleep(0.02)  # hold the slot so overlap is observable
+            try:
+                return super().fetch_equity_data(
+                    symbols, start_date, end_date, exact_range=exact_range
+                )
+            finally:
+                with lock:
+                    state["cur"] -= 1
+
+    syms = [f"SY{i:03d}" for i in range(40)]
+    analyzer = _Concurrent()
+    _pl, _div, fetched = cache.update_and_slice_panel(
+        analyzer, syms, "2026-06-01", "2026-06-05"
+    )
+    assert len(fetched) == 40  # all processed
+    assert state["max"] > 1  # ran concurrently, not serialized
 
 
 def test_new_symbol_triggers_its_fetch_only(monkeypatch, tmp_path):

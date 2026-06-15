@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import contextlib
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import fcntl
 import hashlib
 import json
@@ -578,185 +579,212 @@ def _missing_ranges(
     return ranges
 
 
+def _process_one_symbol(
+    analyzer: Any,
+    symbol: str,
+    start: date,
+    end: date,
+    start_date: str,
+    end_date: str,
+    today_anchor: date,
+) -> tuple[str, pd.DataFrame | None, float, bool]:
+    """Delta-update one symbol's panel and return its window slice + dividend.
+
+    Self-contained under the per-symbol file lock so it is safe to run across a
+    thread pool: distinct symbols touch distinct panel/meta/dividend/lock files,
+    and the only shared object is ``analyzer`` whose provider layer is designed
+    for thread fan-out. Returns (symbol, symbol_slice_or_None, window_dividend,
+    has_data).
+    """
+    with _symbol_file_lock(symbol):
+        panel = _load_symbol_panel(symbol)
+        prior_panel_min = (
+            pd.Timestamp(panel.index.min()).date() if not panel.empty else None
+        )
+        meta = _load_meta(symbol)
+        div_events = _load_dividend_events(symbol)
+        changed = False
+        discontinuity = False
+        aggregate_hint = 0.0
+
+        def _record_attempted(fstart: date, fend: date, got_dates: set[date]) -> None:
+            # Finalize past holes (weekends/holidays) so they aren't retried, but
+            # never finalize today/future days whose bar we did not get: an
+            # intraday call before the EOD bar exists must refetch today later.
+            last_final = fend
+            while (
+                last_final >= today_anchor
+                and last_final not in got_dates
+                and last_final >= fstart
+            ):
+                last_final = last_final - timedelta(days=1)
+            if last_final >= fstart:
+                _add_attempted_range(meta, fstart, last_final)
+
+        def fetch_and_merge(fetch_start: date, fetch_end: date) -> None:
+            nonlocal panel, changed, discontinuity, aggregate_hint
+            if fetch_start > fetch_end:
+                return
+            try:
+                fetched, aggregate = _fetch_symbol_range(
+                    analyzer, symbol, fetch_start.isoformat(), fetch_end.isoformat()
+                )
+                aggregate_hint = max(aggregate_hint, aggregate)
+                if _looks_like_split(panel, fetched):
+                    discontinuity = True
+                got = {pd.Timestamp(i).date() for i in getattr(fetched, "index", [])}
+                panel = _merge_panel(panel, fetched)
+                _record_attempted(fetch_start, fetch_end, got)
+                changed = True
+            except Exception as exc:
+                # Transient provider failure: do NOT record an attempted range, or
+                # the hole becomes a permanent no-refetch. A successful-but-empty
+                # response (got=) still finalizes past holes above.
+                logger.warning(
+                    "OHLCV panel delta fetch failed for %s %s..%s: %s (retryable)",
+                    symbol, fetch_start, fetch_end, exc,
+                )
+
+        for fetch_start, fetch_end in _missing_ranges(panel, meta, start, end):
+            fetch_and_merge(fetch_start, fetch_end)
+
+        # Sync dividends at most once per symbol per window end. Full dated history
+        # (1900-01-01) so a wider same-end window keeps older dividends; the fresh
+        # authoritative snapshot REPLACES the store (no accumulation/double-count).
+        dividend_drift = False
+        div_synced_through = str(meta.get("dividend_synced_through") or "")
+        if end.isoformat() > div_synced_through:
+            fresh_events, div_ok = _fetch_dividend_events(
+                symbol, "1900-01-01", end_date, aggregate_hint
+            )
+            if div_ok:
+                fresh_norm = _normalize_dividend_events(fresh_events)
+                # A dividend at ex-date D re-bases every bar before D, so any change
+                # to a dividend with ex-date > earliest cached bar requires a rebuild.
+                if prior_panel_min is not None:
+                    floor = prior_panel_min.isoformat()
+                    prior_affecting = {
+                        (e["date"], round(e["amount"], 12))
+                        for e in div_events
+                        if e["date"] > floor
+                    }
+                    fresh_affecting = {
+                        (e["date"], round(e["amount"], 12))
+                        for e in fresh_norm
+                        if e["date"] > floor
+                    }
+                    if prior_affecting != fresh_affecting:
+                        dividend_drift = True
+                if fresh_norm != div_events:
+                    div_events = fresh_norm
+                    changed = True
+                meta["dividend_synced_through"] = end.isoformat()
+                changed = True
+
+        rebuilt = False
+        if discontinuity or dividend_drift:
+            logger.info(
+                "OHLCV panel adjustment-basis change for %s; full window rebuild", symbol
+            )
+            panel = pd.DataFrame(columns=list(_OHLCV_FIELDS))
+            meta["attempted_ranges"] = []
+            meta["split_rebuilt_at"] = end.isoformat()
+            rebuilt = True
+            try:
+                fetched, aggregate = _fetch_symbol_range(
+                    analyzer, symbol, start.isoformat(), end.isoformat()
+                )
+                aggregate_hint = max(aggregate_hint, aggregate)
+                got = {pd.Timestamp(i).date() for i in getattr(fetched, "index", [])}
+                panel = _merge_panel(panel, fetched)
+                _record_attempted(start, end, got)
+            except Exception as exc:
+                logger.warning("OHLCV panel split rebuild failed for %s: %s", symbol, exc)
+            changed = True
+
+        if changed:
+            if not rebuilt:
+                disk_panel = _load_symbol_panel(symbol)
+                if not disk_panel.empty and disk_panel is not panel:
+                    panel = _merge_panel(disk_panel, panel)
+            elif panel is None or panel.empty:
+                stale_panel_path, _stale_meta = _symbol_paths(symbol)
+                try:
+                    stale_panel_path.unlink()
+                except OSError:
+                    pass
+            _save_symbol_panel(symbol, panel)
+            _save_meta(symbol, meta)
+            _save_dividend_events(symbol, div_events)
+
+        if not panel.empty:
+            mask = (panel.index >= pd.Timestamp(start)) & (panel.index <= pd.Timestamp(end))
+            symbol_slice = panel.loc[mask].sort_index()
+        else:
+            symbol_slice = pd.DataFrame(columns=list(_OHLCV_FIELDS))
+        window_dividend = _sum_dividends(div_events, start_date, end_date)
+
+    if (
+        symbol_slice.empty
+        or "Close" not in symbol_slice.columns
+        or symbol_slice["Close"].dropna().empty
+    ):
+        return symbol, None, window_dividend, False
+    return symbol, symbol_slice, window_dividend, True
+
+
 def update_and_slice_panel(
     analyzer: Any,
     symbols: Iterable[str],
     start_date: str,
     end_date: str,
 ) -> tuple[pl.DataFrame, dict[str, float], list[str]]:
-    """Load per-symbol panels, fetch only missing deltas, and return a sliced panel."""
+    """Load per-symbol panels, fetch only missing deltas, and return a sliced panel.
+
+    Per-symbol work runs across a bounded thread pool. A large portfolio (hundreds
+    of holdings) would otherwise serialize hundreds of provider round-trips and
+    blow past request timeouts (the regression that motivated this); distinct
+    symbols use distinct panel/meta/lock files so they parallelize cleanly.
+    """
     start = pd.Timestamp(start_date).date()
     end = pd.Timestamp(end_date).date()
+    today_anchor = date.today()
+    sym_list = [str(s).upper() for s in symbols]
+
+    results: dict[str, tuple[pd.DataFrame | None, float, bool]] = {}
+    if len(sym_list) <= 1:
+        for s in sym_list:
+            sym, sl, div, ok = _process_one_symbol(
+                analyzer, s, start, end, start_date, end_date, today_anchor
+            )
+            results[sym] = (sl, div, ok)
+    else:
+        max_workers = min(16, len(sym_list))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(
+                    _process_one_symbol, analyzer, s, start, end, start_date, end_date, today_anchor
+                ): s
+                for s in sym_list
+            }
+            for future in as_completed(futures):
+                sym, sl, div, ok = future.result()
+                results[sym] = (sl, div, ok)
+
+    # Reassemble in input order for deterministic output.
     sliced: dict[str, pd.DataFrame] = {}
     dividends: dict[str, float] = {}
     fetched_symbols: list[str] = []
-
-    for raw_symbol in symbols:
-        symbol = str(raw_symbol).upper()
-        with _symbol_file_lock(symbol):
-            panel = _load_symbol_panel(symbol)
-            prior_panel_min = (
-                pd.Timestamp(panel.index.min()).date() if not panel.empty else None
-            )
-            meta = _load_meta(symbol)
-            div_events = _load_dividend_events(symbol)
-            changed = False
-            discontinuity = False
-            aggregate_hint = 0.0
-            today_anchor = date.today()
-
-            def _record_attempted(
-                fstart: date, fend: date, got_dates: set[date]
-            ) -> None:
-                # Finalize past holes (weekends/holidays) so they aren't retried,
-                # but never finalize today/future days whose bar we did not get:
-                # an intraday call before the EOD bar exists must be able to
-                # refetch today once the data lands.
-                last_final = fend
-                while (
-                    last_final >= today_anchor
-                    and last_final not in got_dates
-                    and last_final >= fstart
-                ):
-                    last_final = last_final - timedelta(days=1)
-                if last_final >= fstart:
-                    _add_attempted_range(meta, fstart, last_final)
-
-            def fetch_and_merge(fetch_start: date, fetch_end: date) -> None:
-                nonlocal panel, changed, discontinuity, aggregate_hint
-                if fetch_start > fetch_end:
-                    return
-                try:
-                    fetched, aggregate = _fetch_symbol_range(
-                        analyzer, symbol, fetch_start.isoformat(), fetch_end.isoformat()
-                    )
-                    aggregate_hint = max(aggregate_hint, aggregate)
-                    if _looks_like_split(panel, fetched):
-                        # Fresh bars sit on a different split/adjustment basis than
-                        # the cached bars (any large day-over-day discontinuity).
-                        discontinuity = True
-                    got = {pd.Timestamp(i).date() for i in getattr(fetched, "index", [])}
-                    panel = _merge_panel(panel, fetched)
-                    _record_attempted(fetch_start, fetch_end, got)
-                    changed = True
-                except Exception as exc:
-                    # Transient provider failure: do NOT record an attempted range,
-                    # or the hole becomes a permanent no-refetch. A successful but
-                    # empty response (above, got=∅) still finalizes past holes; only
-                    # exceptions stay retryable on the next call.
-                    logger.warning(
-                        "OHLCV panel delta fetch failed for %s %s..%s: %s (retryable)",
-                        symbol, fetch_start, fetch_end, exc,
-                    )
-
-            for fetch_start, fetch_end in _missing_ranges(panel, meta, start, end):
-                fetch_and_merge(fetch_start, fetch_end)
-
-            # Sync dividends at most once per symbol per window end. Fetch the FULL
-            # dated history (start "1900-01-01") so a later WIDER same-end window
-            # is not starved of older dividends by a prior narrow sync. The fresh
-            # snapshot is authoritative and REPLACES the stored events (rather than
-            # accumulating), so a corrected amount on an existing ex-date cannot
-            # double-count, and a legitimate same-date special+regular pair is
-            # still preserved by the (date, amount) identity in normalization.
-            dividend_drift = False
-            div_synced_through = str(meta.get("dividend_synced_through") or "")
-            if end.isoformat() > div_synced_through:
-                fresh_events, div_ok = _fetch_dividend_events(
-                    symbol, "1900-01-01", end_date, aggregate_hint
-                )
-                # Only act on an authoritative response. A transient failure
-                # (div_ok False) keeps the prior store and does NOT advance
-                # dividend_synced_through, so it retries next call.
-                if div_ok:
-                    fresh_norm = _normalize_dividend_events(fresh_events)
-                    # A dividend at ex-date D retroactively re-adjusts every bar
-                    # BEFORE D, so any change (new/removed/corrected) to a dividend
-                    # with ex-date > the earliest cached bar affects cached rows
-                    # and requires a rebuild — including a brand-new dividend that
-                    # lands AFTER the cached tail but still re-bases older bars.
-                    if prior_panel_min is not None:
-                        floor = prior_panel_min.isoformat()
-                        prior_affecting = {
-                            (e["date"], round(e["amount"], 12))
-                            for e in div_events
-                            if e["date"] > floor
-                        }
-                        fresh_affecting = {
-                            (e["date"], round(e["amount"], 12))
-                            for e in fresh_norm
-                            if e["date"] > floor
-                        }
-                        if prior_affecting != fresh_affecting:
-                            dividend_drift = True
-                    # Replace with the authoritative snapshot even when empty (a
-                    # removed dividend must clear the stale stored event).
-                    if fresh_norm != div_events:
-                        div_events = fresh_norm
-                        changed = True
-                    meta["dividend_synced_through"] = end.isoformat()
-                    changed = True
-
-            # Corporate-action rebuild trigger: a large price discontinuity OR a
-            # dividend change inside the already-cached range (Massive re-adjusts
-            # cached bars retroactively for either).
-            rebuilt = False
-            if discontinuity or dividend_drift:
-                logger.info(
-                    "OHLCV panel adjustment-basis change for %s; full window rebuild", symbol
-                )
-                panel = pd.DataFrame(columns=list(_OHLCV_FIELDS))
-                meta["attempted_ranges"] = []
-                meta["split_rebuilt_at"] = end.isoformat()
-                rebuilt = True
-                try:
-                    fetched, aggregate = _fetch_symbol_range(
-                        analyzer, symbol, start.isoformat(), end.isoformat()
-                    )
-                    aggregate_hint = max(aggregate_hint, aggregate)
-                    got = {pd.Timestamp(i).date() for i in getattr(fetched, "index", [])}
-                    panel = _merge_panel(panel, fetched)
-                    _record_attempted(start, end, got)
-                except Exception as exc:
-                    logger.warning("OHLCV panel split rebuild failed for %s: %s", symbol, exc)
-                changed = True
-
-            if changed:
-                if not rebuilt:
-                    # Merge with the latest on-disk state while still locked so a
-                    # concurrent writer's overlapping refresh is preserved.
-                    disk_panel = _load_symbol_panel(symbol)
-                    if not disk_panel.empty and disk_panel is not panel:
-                        panel = _merge_panel(disk_panel, panel)
-                elif panel is None or panel.empty:
-                    # Rebuild produced nothing; remove the stale parquet so the old
-                    # adjustment basis cannot linger on disk.
-                    stale_panel_path, _stale_meta = _symbol_paths(symbol)
-                    try:
-                        stale_panel_path.unlink()
-                    except OSError:
-                        pass
-                _save_symbol_panel(symbol, panel)
-                _save_meta(symbol, meta)
-                _save_dividend_events(symbol, div_events)
-
-            if not panel.empty:
-                mask = (panel.index >= pd.Timestamp(start)) & (panel.index <= pd.Timestamp(end))
-                symbol_slice = panel.loc[mask].sort_index()
-            else:
-                symbol_slice = pd.DataFrame(columns=list(_OHLCV_FIELDS))
-            window_dividend = _sum_dividends(div_events, start_date, end_date)
-
-        if (
-            symbol_slice.empty
-            or "Close" not in symbol_slice.columns
-            or symbol_slice["Close"].dropna().empty
-        ):
-            dividends[symbol] = window_dividend
+    seen: set[str] = set()
+    for s in sym_list:
+        if s in seen:
             continue
-        sliced[symbol] = symbol_slice
-        fetched_symbols.append(symbol)
-        dividends[symbol] = float(window_dividend)
+        seen.add(s)
+        sl, div, ok = results.get(s, (None, 0.0, False))
+        dividends[s] = float(div)
+        if ok and sl is not None:
+            sliced[s] = sl
+            fetched_symbols.append(s)
 
     if not sliced:
         return pl.DataFrame(), dividends, fetched_symbols
@@ -769,11 +797,18 @@ def update_and_slice_panel(
             if metric in only.columns:
                 price_pd[metric] = only[metric]
     else:
+        # Build every per-symbol column at once: inserting 5×N columns one-by-one
+        # fragments the frame (O(N^2)) and is a real cost at hundreds of holdings.
+        col_data: dict[str, pd.Series] = {}
         for symbol, df in sliced.items():
             aligned = df.reindex(price_pd.index)
             for metric in _OHLCV_FIELDS:
                 if metric in aligned.columns:
-                    price_pd[f"{metric}_{symbol}"] = aligned[metric]
+                    col_data[f"{metric}_{symbol}"] = aligned[metric]
+        if col_data:
+            price_pd = pd.concat(
+                [price_pd, pd.DataFrame(col_data, index=price_pd.index)], axis=1
+            )
     return pl.from_pandas(price_pd.reset_index()), dividends, fetched_symbols
 
 

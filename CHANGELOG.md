@@ -9,6 +9,18 @@ Distribution-edge artifacts (`SKILL.md`, `compose.yml`, `install.yaml`,
 `agent-skills/**`) are MIT-0; substantive code (bridge, dashboard,
 Dockerfile, tests) is Apache 2.0.
 
+## [4.8.2] — 2026-06-14
+
+### Fixed
+
+- **Large-portfolio performance.** The incremental `performance_window` processed
+  symbols strictly sequentially, so a several-hundred-holding portfolio serialized
+  hundreds of provider round-trips and exceeded request timeouts (a regression vs
+  the pre-incremental single-batch fetch). Per-symbol delta work now runs across a
+  bounded thread pool (distinct symbols use distinct panel/meta/lock files), and
+  the multi-symbol result frame is assembled in one `pd.concat` instead of
+  thousands of fragmenting per-column inserts.
+
 ## [4.8.1] — 2026-06-14
 
 ### Added
