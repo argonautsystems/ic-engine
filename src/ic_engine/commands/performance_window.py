@@ -304,15 +304,31 @@ def _first_last_valid(series: pd.Series) -> tuple[float | None, float | None, st
     return start, end, start_day, end_day
 
 
+# A single window return beyond this magnitude (10,000,000%) is not a real
+# equity return — it indicates corrupt long-span data (an unadjusted split, a
+# zero/near-zero price producing a near-infinite daily return, etc.), which
+# otherwise explodes the compounded product (e.g. a multi-decade "max" window
+# yielding 5e+211%). Treat such a symbol as bad data and skip it.
+_MAX_SANE_RETURN_PCT = 1e7
+
+
 def _compound_return_pct(returns: np.ndarray) -> float | None:
-    """Compound analyzer-return array into a window total-return percent."""
+    """Compound analyzer-return array into a window total-return percent.
+
+    Returns None for empty/degenerate input or a non-finite / absurd compounded
+    result (corrupt long-history data), so the caller skips that symbol rather
+    than letting one bad series dominate the portfolio total.
+    """
     if returns is None or len(returns) == 0:
         return None
     arr = np.asarray(returns, dtype=float)
-    arr = arr[~np.isnan(arr)]
+    arr = arr[np.isfinite(arr)]
     if len(arr) == 0:
         return None
-    return float((np.prod(1.0 + arr) - 1.0) * 100.0)
+    pct = float((np.prod(1.0 + arr) - 1.0) * 100.0)
+    if not math.isfinite(pct) or abs(pct) > _MAX_SANE_RETURN_PCT:
+        return None
+    return pct
 
 
 def _holding_shares(holding: dict[str, Any], end_price: float | None) -> float:
