@@ -387,6 +387,39 @@ _TEMPORAL_PERFORMANCE_MARKERS = (
     "day",
 )
 
+# Everyday phrasings of "how did my portfolio do" that the LLM intermittently
+# refuses (OUT_OF_SCOPE) because the wording does not lexically match a section
+# name. When the question matches AND deterministic data exists, the narrator
+# answers from the signed envelope directly instead of risking a phrasing-
+# dependent refusal.
+_PERFORMANCE_QUESTION_MARKERS = (
+    "perform",
+    "performance",
+    "return",
+    "returns",
+    "p&l",
+    "pnl",
+    "profit",
+    "loss",
+    "gain",
+    "up or down",
+    "how did",
+    "how's",
+    "how was",
+    "how is",
+    "how are",
+    "doing",
+    "mover",
+    "movers",
+)
+
+
+def _is_performance_question(question: str) -> bool:
+    q = (question or "").lower()
+    return any(m in q for m in _PERFORMANCE_QUESTION_MARKERS) or any(
+        m in q for m in _TEMPORAL_PERFORMANCE_MARKERS
+    )
+
 
 def _deterministic_performance_answer(envelope: Envelope, question: str) -> str | None:
     """Recover from LLM portfolio-performance refusals using envelope data.
@@ -399,7 +432,48 @@ def _deterministic_performance_answer(envelope: Envelope, question: str) -> str 
     sections = envelope.get("sections", {}) or {}
     performance = sections.get("performance") or {}
     whatchanged = sections.get("whatchanged") or {}
+    performance_window = sections.get("performance_window") or {}
     lines: list[str] = []
+
+    # The deterministic time-window tool (performance_window) is the source of
+    # truth for "how did my portfolio do last week / past month / last quarter".
+    # Wiring it here lets those answers be served deterministically regardless of
+    # question phrasing, instead of relying on the LLM (which refuses when the
+    # wording does not lexically match a section name).
+    if isinstance(performance_window, dict):
+        pw_lines: list[str] = []
+        period = _plain_value(performance_window.get("period"))
+        start_date = _plain_value(performance_window.get("start_date"))
+        end_date = _plain_value(performance_window.get("end_date"))
+        if period is not None:
+            pw_lines.append(f"  - period: {period}")
+        if start_date is not None and end_date is not None:
+            pw_lines.append(f"  - window: {start_date} to {end_date}")
+        totals = performance_window.get("totals") or {}
+        if isinstance(totals, dict):
+            for key in ("total_return_pct", "total_pnl", "start_value", "end_value"):
+                text = _plain_value(totals.get(key))
+                if text is not None:
+                    pw_lines.append(f"  - {key}: {text}")
+            top_movers = totals.get("top_movers") or []
+            if isinstance(top_movers, list):
+                mover_lines = []
+                for item in top_movers:
+                    if not isinstance(item, dict):
+                        continue
+                    parts = []
+                    for key in ("symbol", "return_pct", "contribution", "pnl"):
+                        text = _plain_value(item.get(key))
+                        if text is not None:
+                            parts.append(f"{key}: {text}")
+                    if parts:
+                        mover_lines.append(f"    - {', '.join(parts)}")
+                if mover_lines:
+                    pw_lines.append("  top_movers:")
+                    pw_lines.extend(mover_lines)
+        if pw_lines:
+            lines.append("performance_window:")
+            lines.extend(pw_lines)
 
     if isinstance(performance, dict):
         portfolio_summary = performance.get("portfolio_summary") or {}
@@ -932,6 +1006,20 @@ def narrate(envelope: Envelope, question: str, focus: str | None = None) -> Narr
         response = _ensure_hmac_footer(response, hmac_value)
         # NO validate_narration — these answers don't claim envelope numbers.
         return NarratorResult(answer=response, hmac=hmac_value, model=model)
+
+    # Deterministic guarantee for portfolio performance / time-window questions.
+    # The LLM is phrasing-sensitive and intermittently refuses these (OUT_OF_SCOPE)
+    # even when the data is present, and every model rephrases-and-fails
+    # differently. When the question is clearly a performance/temporal question AND
+    # the signed envelope already contains deterministic performance data, answer
+    # from it directly — no LLM round-trip, no phrasing-dependent refusal.
+    if _is_performance_question(question):
+        deterministic = _deterministic_performance_answer(envelope, question)
+        if deterministic is not None:
+            response = _truncate_runaway(deterministic)
+            response = _ensure_hmac_footer(response, hmac_value)
+            validate_narration(response, envelope)
+            return NarratorResult(answer=response, hmac=hmac_value, model="deterministic")
 
     # Default portfolio mode — strict envelope-only narration.
     # Stage 1: stripped feed (<32k tokens, fits every provider).

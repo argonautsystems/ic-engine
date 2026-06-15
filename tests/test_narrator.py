@@ -379,3 +379,63 @@ def test_temporal_hedge_with_hmac_footer_still_recovers(envelope, monkeypatch):
     assert "couldn't retrieve" not in result.answer.lower()
     assert "whatchanged.top_movers" in result.answer
 
+
+
+def _add_performance_window(envelope: Envelope) -> Envelope:
+    """Attach a deterministic performance_window section (the temporal tool)."""
+    envelope["sections"]["performance_window"] = {
+        "period": "1w",
+        "start_date": "2026-06-08",
+        "end_date": "2026-06-15",
+        "holdings": [{"symbol": "AAPL", "return_pct": 1.5, "pnl": 100.0}],
+        "totals": {
+            "period": "1w",
+            "total_return_pct": 0.7818,
+            "total_pnl": 14227.98,
+            "start_value": 1819937.66,
+            "end_value": 1834165.64,
+            "top_movers": [
+                {"symbol": "NVDA", "return_pct": 4.2, "contribution": 5000.0, "pnl": 5000.0},
+            ],
+        },
+    }
+    envelope["section_meta"]["performance_window"] = {
+        "computed_at": envelope["generated_at"],
+        "ttl_seconds": 300,
+        "source": "performance_window",
+        "status": "success",
+    }
+    return attach_hmac(envelope)
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "How did my portfolio PERFORM last week?",
+        "How did my portfolio do last week?",
+        "Was my portfolio up or down last week?",
+        "What was my P&L last week?",
+        "how is my portfolio doing this week",
+    ],
+)
+def test_narrator_answers_performance_window_deterministically(envelope, monkeypatch, question):
+    """Phrasing-variant temporal/performance questions must NOT return OUT_OF_SCOPE
+    when performance_window data exists — they short-circuit to deterministic data
+    regardless of how the LLM would have (mis)handled the wording."""
+    envelope = _add_performance_window(envelope)
+
+    called = {"llm": False}
+
+    def _refusing_llm(system_prompt, user_prompt):
+        called["llm"] = True
+        return OUT_OF_SCOPE_RESPONSE, "fake-model"
+
+    monkeypatch.setattr("ic_engine.runtime.narrator._call_llm", _refusing_llm)
+
+    result = narrate(envelope, question)
+    assert not result.answer.startswith(OUT_OF_SCOPE_RESPONSE)
+    assert "0.7818" in result.answer  # total_return_pct
+    assert "14227.98" in result.answer  # total_pnl
+    assert "NVDA" in result.answer  # top mover
+    assert result.model == "deterministic"
+    assert called["llm"] is False  # short-circuited before the LLM
