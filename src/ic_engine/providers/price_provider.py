@@ -296,42 +296,64 @@ class YFinanceProvider:
         return sym.replace(".", "-")
 
     def get_quotes(self, symbols: List[str]) -> Dict[str, Dict]:
-        """Batch quote download — one HTTP call for all symbols."""
+        """Batch quote download — one HTTP call for all symbols.
+
+        Symbols arrive already in yfinance dialect (the market-data router
+        translates canonical ``I:SPX``/``X:BTCUSD`` to ``^GSPC``/``BTC-USD``
+        before dispatch). A 2-day window is requested so a day-change percent
+        and previous close can be derived — yfinance quotes carry no change
+        field of their own, and the snapshot needs it for movers/VIX.
+        """
         if not symbols:
             return {}
 
         yf_syms = [self._yf_symbol(s) for s in symbols]
         reverse = {self._yf_symbol(s): s for s in symbols}
+
+        def _row(closes) -> Optional[Dict]:
+            try:
+                vals = [float(c) for c in closes.dropna().tolist()]
+            except Exception:
+                return None
+            if not vals:
+                return None
+            price = vals[-1]
+            row: Dict = {"price": price, "provider": self.NAME}
+            if len(vals) >= 2 and vals[-2]:
+                prev = vals[-2]
+                row["prev_close"] = prev
+                row["change_pct"] = (price - prev) / prev * 100.0
+            return row
+
         try:
             data = self._yf.download(
                 yf_syms if len(yf_syms) > 1 else yf_syms[0],
-                period="1d",
+                period="2d",
                 progress=False,
                 auto_adjust=True,
             )
             results = {}
-            if data.empty:
+            if data is None or data.empty:
                 return {}
 
             if len(yf_syms) == 1:
                 yf_sym = yf_syms[0]
                 orig = reverse[yf_sym]
-                row = data.iloc[-1]
-                close_val = row.get("Close", row.get("close", 0))
-                if hasattr(close_val, "iloc"):
-                    close_val = close_val.iloc[0] if len(close_val) > 0 else 0
-                results[orig] = {
-                    "symbol": orig,
-                    "price": float(close_val),
-                    "provider": self.NAME,
-                }
+                close = data["Close"] if "Close" in data.columns else data.get("close")
+                if hasattr(close, "columns"):  # single symbol can still come back as a frame
+                    close = close.iloc[:, 0]
+                r = _row(close)
+                if r:
+                    r["symbol"] = orig
+                    results[orig] = r
             else:
                 close = data["Close"] if "Close" in data.columns else data["close"]
                 for yf_sym in yf_syms:
-                    orig = reverse[yf_sym]
-                    if yf_sym in close.columns and not close[yf_sym].isna().all():
-                        price = float(close[yf_sym].dropna().iloc[-1])
-                        results[orig] = {"symbol": orig, "price": price, "provider": self.NAME}
+                    if yf_sym in close.columns:
+                        r = _row(close[yf_sym])
+                        if r:
+                            r["symbol"] = reverse[yf_sym]
+                            results[reverse[yf_sym]] = r
             return results
         except Exception as e:
             logger.warning(f"yfinance batch quotes: {e}")
@@ -1883,25 +1905,34 @@ class PriceProvider:
             results.update(self.get_futures_quotes(futures_syms))
         remaining = [s for s in clean if s not in results]
 
-        for provider in self._providers_for_op("quotes"):
-            if not remaining:
-                break
-            fn = getattr(provider, "get_quotes", None)
-            if fn is None:
-                continue
-            try:
-                # Charge quota BEFORE batch dispatch so over-budget requests get properly gated
-                cost = self._estimate_quota_cost(provider.NAME, "get_quotes", len(remaining))
-                self._use_quota(provider.NAME, cost)
+        # Single path: capability-matrix + canonical-symbology routing. Each
+        # symbol goes only to providers that declare its asset class, in the
+        # matrix' fallback order, translated into each provider's dialect — so
+        # an index Massive can't serve resolves via yfinance (^GSPC) instead of
+        # silently going missing. An operator override (primary=/env) is passed
+        # as a forced provider order but STILL gets symbology, and each provider
+        # is dispatched (and quota-charged) at most once per symbol.
+        if remaining:
+            from ic_engine.market_data.router import resolve_quotes
 
-                batch = fn(remaining)
-                if batch:
-                    results.update(batch)
-                    remaining = [s for s in remaining if s not in results]
-            except NotImplementedError:
-                pass
-            except Exception as e:
-                logger.warning(f"{provider.NAME}.get_quotes({len(remaining)} syms) failed: {e}")
+            def _available(name: str) -> bool:
+                p = self._pool.get(name)
+                return bool(p) and self._quota_used.get(name, 0) < self._quotas.get(name, 0)
+
+            def _charge(name: str, count: int) -> None:
+                self._use_quota(name, self._estimate_quota_cost(name, "get_quotes", count))
+
+            order = ([self._override] + self._fallback_names) if self._override else None
+            routed = resolve_quotes(
+                remaining,
+                self._pool,
+                is_available=_available,
+                on_dispatch=_charge,
+                provider_order=order,
+            )
+            if routed:
+                results.update(routed)
+                remaining = [s for s in remaining if s not in results]
 
         if remaining:
             logger.warning(
