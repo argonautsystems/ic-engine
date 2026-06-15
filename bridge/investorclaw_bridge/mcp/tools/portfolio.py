@@ -68,12 +68,15 @@ async def portfolio_ask(question: str) -> dict[str, Any]:
 async def portfolio_holdings() -> dict[str, Any]:
     """Current holdings snapshot — positions, values, weights, account hierarchy.
 
-    Equivalent to portfolio_ask with a fixed holdings-focused prompt; provides
-    a more focused contract for callers that always want holdings data.
+    Runs the DETERMINISTIC ``holdings`` command (fetch_holdings.py), which reads
+    the authoritative holdings file and returns a compact JSON of total/net
+    value, top equities (symbol, value, weight, gain/loss), sector weights, top
+    bonds, and per-account breakdown. Deliberately NOT the narrative ``ask``
+    path — ``ask`` refuses holdings questions whose data isn't in the cached
+    envelope ("can't answer without making up numbers"), which left callers with
+    no holdings at all. This path always returns the real positions.
     """
-    return await _run_ic_engine(
-        ["ask", "What is in my portfolio? Show me holdings, values, and weights."]
-    )
+    return await _run_ic_engine(["holdings"])
 
 
 async def portfolio_performance_window(
