@@ -9,6 +9,18 @@ Distribution-edge artifacts (`SKILL.md`, `compose.yml`, `install.yaml`,
 `agent-skills/**`) are MIT-0; substantive code (bridge, dashboard,
 Dockerfile, tests) is Apache 2.0.
 
+## [4.8.6] — 2026-06-15
+
+### Fixed
+
+- **Stateless MCP transport (fixes intermittent "Unknown tool").** The FastMCP
+  streamable-http server ran stateful, so a client's session silently expired
+  after ~10-15 min idle (or whenever the engine container recreated) and the
+  agent's tool registry vanished — surfacing as "Unknown tool" with no request
+  even reaching the engine. The MCP server now runs `stateless_http=True` +
+  `json_response=True`: every request is self-contained, so the agent always
+  sees the live tool list regardless of idle time or engine restarts.
+
 ## [4.8.5] — 2026-06-15
 
 ### Fixed

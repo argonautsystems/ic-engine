@@ -443,7 +443,23 @@ def main() -> int:
             )
         else:
             _sec = TransportSecuritySettings(enable_dns_rebinding_protection=False)
-        mcp_app = FastMCP("investorclaw", transport_security=_sec)
+        # stateless_http: no per-client session to expire on idle or to be
+        # invalidated by an engine restart. A stateful streamable-http session
+        # silently dropped the agent's tool registry after ~10-15 min idle (or
+        # whenever ic-engine recreated), surfacing as "Unknown tool" in the agent
+        # WITHOUT any request reaching the engine. Stateless makes every request
+        # self-contained, so the MCP client always sees the live tool list.
+        # json_response keeps responses plain JSON for the widest client compat.
+        try:
+            mcp_app = FastMCP(
+                "investorclaw",
+                transport_security=_sec,
+                stateless_http=True,
+                json_response=True,
+            )
+        except TypeError:
+            # Older mcp SDK without stateless_http support — fall back to stateful.
+            mcp_app = FastMCP("investorclaw", transport_security=_sec)
         mcp_server.register_tools(mcp_app)
         try:
             mcp_asgi = mcp_app.streamable_http_app()
