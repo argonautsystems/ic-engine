@@ -421,10 +421,13 @@ _PERFORMANCE_RECOVERY_PHRASES = (
 
 
 def _wants_performance_recovery(question: str) -> bool:
+    # Require an actual PERFORMANCE phrase — a bare temporal marker is not enough.
+    # "What are my holdings this week?" is temporal but NOT a performance question,
+    # so recovering it with performance data would be a mis-route. The target
+    # temporal-performance questions all carry a performance phrase ("perform",
+    # "did my portfolio do", "p&l", "up or down", ...).
     q = (question or "").lower()
-    return any(m in q for m in _TEMPORAL_PERFORMANCE_MARKERS) or any(
-        m in q for m in _PERFORMANCE_RECOVERY_PHRASES
-    )
+    return any(m in q for m in _PERFORMANCE_RECOVERY_PHRASES)
 
 
 def _deterministic_performance_answer(envelope: Envelope, question: str) -> str | None:
@@ -1042,7 +1045,12 @@ def narrate(envelope: Envelope, question: str, focus: str | None = None) -> Narr
         # asks about performance/time-window; otherwise keep the honest refusal.
         if _wants_performance_recovery(question):
             response = _deterministic_performance_answer(envelope, question) or response
-    elif _is_performance_hedge(response, question, envelope):
+    elif _wants_performance_recovery(question) and _is_performance_hedge(
+        response, question, envelope
+    ):
+        # Same intent gate on the non-sentinel-hedge branch: a short temporal hedge
+        # to a non-performance question (e.g. "holdings this week") must not be
+        # replaced with performance data.
         response = _deterministic_performance_answer(envelope, question) or response
     response = _truncate_runaway(response)
     response = _ensure_hmac_footer(response, hmac_value)

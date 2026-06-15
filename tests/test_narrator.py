@@ -487,3 +487,18 @@ def test_narrator_refused_non_performance_keeps_refusal(envelope, monkeypatch, q
     result = narrate(envelope, question)
     assert result.answer.startswith(OUT_OF_SCOPE_RESPONSE)  # refusal preserved
     assert "0.7818" not in result.answer  # no performance data injected
+
+
+def test_narrator_non_performance_temporal_hedge_kept(envelope, monkeypatch):
+    """A short temporal hedge to a NON-performance holdings question must be kept,
+    not replaced with performance_window data (the hedge branch is intent-gated)."""
+    envelope = _add_performance_window(envelope)
+    hedge = "I don't have holdings data for this week."
+
+    monkeypatch.setattr(
+        "ic_engine.runtime.narrator._call_llm",
+        lambda _s, _u: (hedge, "fake-model"),
+    )
+    result = narrate(envelope, "What are my holdings this week?")
+    assert result.answer.startswith(hedge)  # hedge preserved
+    assert "0.7818" not in result.answer  # no performance data injected
