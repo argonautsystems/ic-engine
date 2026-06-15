@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import math
 import os
 import sys
@@ -163,6 +164,8 @@ def _resolve_period_days(token: str) -> tuple[str, int | None]:
 # deliberately old equity-history start; provider responses are then clamped to
 # their actual earliest returned row per holding.
 _PROVIDER_MAX_START = date(1900, 1, 1)
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -394,12 +397,18 @@ def _compute_window_envelope(
         # Reuse the analyzer's total-return calculation path. This is the
         # load-bearing correctness point: dividends are included exactly where
         # analyze_performance_polars includes them, avoiding a divergent
-        # price-only implementation.
-        returns = analyzer.calculate_returns(
-            price_pl,
-            symbol,
-            annual_dividend=float(dividends.get(symbol, 0.0) or 0.0),
-        )
+        # price-only implementation. Isolate per-symbol: a single holding with
+        # bad/partial data (e.g. "SYM prices: partial NaN values") must be
+        # skipped, not fail the entire portfolio window.
+        try:
+            returns = analyzer.calculate_returns(
+                price_pl,
+                symbol,
+                annual_dividend=float(dividends.get(symbol, 0.0) or 0.0),
+            )
+        except Exception as exc:
+            logger.warning("performance-window: skipping %s (returns failed): %s", symbol, exc)
+            continue
         ret_pct = _compound_return_pct(returns)
         if ret_pct is None:
             continue
