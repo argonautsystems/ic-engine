@@ -823,6 +823,16 @@ _STRONG_OWNERSHIP_PHRASES = (
     # Direct portfolio references
     "my portfolio", "my holdings", "my positions", "my account",
     "in my portfolio", "in my holdings",
+    # Singular / superlative / instrument forms — "what is my single largest
+    # holding?" must read the envelope, not hit the "what is" concept stem and
+    # return a textbook definition. These are unambiguously portfolio-data
+    # questions in a portfolio assistant.
+    "my holding", "my position", "my stock", "my stocks", "my share", "my shares",
+    "my investment", "my investments", "my asset", "my assets",
+    "my largest", "my biggest", "my smallest", "my top", "my single",
+    "my best", "my worst", "my winner", "my loser", "my mover", "my movers",
+    "my gain", "my gains", "my loss", "my losses", "my profit",
+    "my value", "my balance", "my net worth", "my worth", "my total",
     # Portfolio-computed metrics — these are answered FROM the portfolio
     # envelope, not as general concepts. Adding to strong-ownership lets
     # "What is my Sharpe ratio?" route to portfolio-mode instead of being
