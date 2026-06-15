@@ -54,7 +54,7 @@ def _holdings_file(tmp_path: Path) -> Path:
         ("ytd", "2026-01-01"),
         ("1y", "2025-06-14"),
         ("2y", "2024-06-14"),
-        ("max", "1900-01-01"),
+        ("max", "1996-06-21"),
     ],
 )
 def test_period_resolver_tokens(period, start):
@@ -94,9 +94,9 @@ def test_max_period_requests_full_provider_history_and_clamps_to_earliest_availa
 
     envelope = build_performance_window(_holdings_file(tmp_path), period="max", today=date(2026, 6, 14))
     validate_envelope(envelope)
-    assert seen["start_date"] == "1900-01-01"
+    assert seen["start_date"] == "1996-06-21"
     section = envelope["sections"]["performance_window"]
-    assert section["requested_start_date"] == "1900-01-01"
+    assert section["requested_start_date"] == "1996-06-21"
     assert section["start_date"] == "1999-01-04"
     assert section["end_date"] == "2026-06-14"
 
@@ -338,7 +338,7 @@ def test_resolve_window_natural_phrasings(phrase, expected_days):
 )
 def test_resolve_window_max_phrasings(phrase):
     w = resolve_window(period=phrase, today=date(2026, 6, 15))
-    assert w.start_date == "1900-01-01"  # full provider history
+    assert w.start_date == "1996-06-22"  # ~30-year practical deep horizon
 
 
 def test_resolve_window_ytd_phrasings():

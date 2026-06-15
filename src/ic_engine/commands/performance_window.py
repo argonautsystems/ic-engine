@@ -164,6 +164,8 @@ def _resolve_period_days(token: str) -> tuple[str, int | None]:
 # deliberately old equity-history start; provider responses are then clamped to
 # their actual earliest returned row per holding.
 _PROVIDER_MAX_START = date(1900, 1, 1)
+# Practical deep horizon for "max"/"entire history" (≈30 years).
+_MAX_HORIZON_DAYS = 30 * 365
 
 logger = logging.getLogger(__name__)
 
@@ -247,7 +249,14 @@ def resolve_window(
     if kind == "ytd":
         start = date(end.year, 1, 1)
     elif kind == "max":
-        start = _PROVIDER_MAX_START
+        # "max" / "entire history" maps to a deep-but-PRACTICAL horizon rather
+        # than 1900: a single-window portfolio total can't meaningfully span the
+        # full life of the oldest holding when most holdings are far younger and
+        # the sparse 60+yr-old data is often corrupt (unadjusted splits/zeros).
+        # 30 years captures essentially all of a living portfolio's history,
+        # fetches in reasonable time, and avoids the degenerate ancient-data case.
+        # For a literal longer window, callers pass an explicit "last N years".
+        start = end - timedelta(days=_MAX_HORIZON_DAYS)
     else:
         # Clamp an absurdly large N (e.g. "last 9999 years") to the provider
         # history floor instead of overflowing `date` arithmetic.
