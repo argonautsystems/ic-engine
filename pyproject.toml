@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ic-engine"
-version = "4.8.4"
+version = "4.8.5"
 description = "Python portfolio-analysis library powering the InvestorClaw skill ecosystem. Consumed by claws-runtime and Claude Code adapters. FINOS CDM 5.x inspired data model."
 license = { text = "Apache 2.0 Dual License" }
 requires-python = ">=3.10"

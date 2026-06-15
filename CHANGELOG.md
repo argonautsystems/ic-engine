@@ -9,6 +9,17 @@ Distribution-edge artifacts (`SKILL.md`, `compose.yml`, `install.yaml`,
 `agent-skills/**`) are MIT-0; substantive code (bridge, dashboard,
 Dockerfile, tests) is Apache 2.0.
 
+## [4.8.5] — 2026-06-15
+
+### Fixed
+
+- **Sanity-guard absurd compound returns + practical max horizon.** Deep windows
+  surfaced holdings with corrupt long-span data (unadjusted splits/zero prices)
+  whose compounded return exploded (~5e+211%) and dominated the portfolio total;
+  `_compound_return_pct` now drops non-finite / >1e7% results so the caller skips
+  that symbol. `max`/`entire history` resolves to a ~30-year practical horizon
+  instead of 1900 (a literal 60+yr window is degenerate for a modern portfolio).
+
 ## [4.8.4] — 2026-06-15
 
 ### Added
