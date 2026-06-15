@@ -60,6 +60,19 @@ def register_tools(app: Any) -> None:
         )
 
     @app.tool()
+    async def portfolio_market_snapshot(
+        symbols: str | None = None,
+        benchmarks: bool = True,
+    ) -> dict[str, Any]:
+        """Real-time market snapshot — current price + day change% for holdings +
+        benchmarks (SPX/NDX/DJI/VIX, BTC/ETH). Use for intraday / right-now /
+        'how are my holdings doing today' / market-level checks. Provider-agnostic
+        and engine-owned; do NOT shell out to a vendor API."""
+        return await TOOL_REGISTRY["portfolio_market_snapshot"]["handler"](
+            symbols, benchmarks
+        )
+
+    @app.tool()
     async def portfolio_refresh() -> dict[str, Any]:
         """Refresh market data without re-uploading portfolio files."""
         return await TOOL_REGISTRY["portfolio_refresh"]["handler"]()
