@@ -503,3 +503,25 @@ def test_narrator_non_performance_temporal_hedge_kept(envelope, monkeypatch):
     result = narrate(envelope, "What are my holdings this week?")
     assert result.answer.startswith(hedge)  # hedge preserved
     assert "0.7818" not in result.answer  # no performance data injected
+
+
+@pytest.mark.parametrize(
+    "question,expected",
+    [
+        ("What is my single largest holding?", "portfolio"),
+        ("What's my biggest position?", "portfolio"),
+        ("What is my top holding?", "portfolio"),
+        ("What is my biggest stock?", "portfolio"),
+        ("Who is my worst loser today?", "portfolio"),
+        ("What is my best performer?", "portfolio"),
+        ("What is my net worth?", "portfolio"),
+        # generic concepts (no ownership) must stay concept
+        ("What is asset allocation?", "concept"),
+        ("What is a Sharpe ratio?", "concept"),
+        ("Explain dollar cost averaging", "concept"),
+    ],
+)
+def test_question_mode_ownership_superlatives_route_to_portfolio(question, expected):
+    from ic_engine.runtime.narrator import _question_mode
+
+    assert _question_mode(question) == expected
