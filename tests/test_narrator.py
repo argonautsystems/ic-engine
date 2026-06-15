@@ -472,6 +472,7 @@ def test_narrator_non_performance_answer_passes_through(envelope, monkeypatch, q
         "Which of my holdings had return of capital distributions?",
         "Which portfolio companies have the highest profit margins?",
         "What should my portfolio do if rates rise?",
+        "What performance fees am I paying on my funds?",
     ],
 )
 def test_narrator_refused_non_performance_keeps_refusal(envelope, monkeypatch, question):

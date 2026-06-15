@@ -404,8 +404,17 @@ _TEMPORAL_PERFORMANCE_MARKERS = (
 # of UNAMBIGUOUS performance phrases (deliberately excluding overloaded words like
 # bare "return"/"profit").
 _PERFORMANCE_RECOVERY_PHRASES = (
-    "perform",
-    "performance",
+    # "perform"/"performance" are anchored to portfolio-scoped forms so unrelated
+    # questions ("performance fees", "performance review", "perform a rebalance")
+    # do not match. Substring intent-matching has an unavoidable long tail, but
+    # this recovery only post-processes an already-refused/hedged answer, so the
+    # cost of a residual false positive is merely surfacing available portfolio
+    # data instead of a flat refusal.
+    "portfolio perform",
+    "portfolio's perform",
+    "my portfolio's perform",
+    "portfolio performance",
+    "my performance",
     "p&l",
     "pnl",
     "up or down",
