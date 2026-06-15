@@ -464,3 +464,26 @@ def test_narrator_non_performance_answer_passes_through(envelope, monkeypatch, q
     assert called["llm"] is True  # LLM consulted
     assert "holdings summary" in result.answer  # LLM answer preserved, not overridden
     assert "0.7818" not in result.answer  # performance data NOT injected
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Which of my holdings had return of capital distributions?",
+        "Which portfolio companies have the highest profit margins?",
+        "What should my portfolio do if rates rise?",
+    ],
+)
+def test_narrator_refused_non_performance_keeps_refusal(envelope, monkeypatch, question):
+    """A refused NON-performance question must keep the honest OUT_OF_SCOPE
+    refusal even when performance_window data exists — recovery is gated to
+    performance/time-window intent."""
+    envelope = _add_performance_window(envelope)
+
+    def _refusing_llm(system_prompt, user_prompt):
+        return OUT_OF_SCOPE_RESPONSE, "fake-model"
+
+    monkeypatch.setattr("ic_engine.runtime.narrator._call_llm", _refusing_llm)
+    result = narrate(envelope, question)
+    assert result.answer.startswith(OUT_OF_SCOPE_RESPONSE)  # refusal preserved
+    assert "0.7818" not in result.answer  # no performance data injected

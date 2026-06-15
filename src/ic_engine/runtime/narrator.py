@@ -393,7 +393,38 @@ _TEMPORAL_PERFORMANCE_MARKERS = (
 # "positions today", etc). The robust design instead leaves the LLM path in place
 # and relies on the OUT_OF_SCOPE / _is_performance_hedge RECOVERY (below), which
 # only fires on an actual refusal — exactly the failure mode this fixes — and now
-# reads sections.performance_window. That has zero false-positive surface.
+# reads sections.performance_window.
+
+# Signal used to GATE the OUT_OF_SCOPE recovery so a refused NON-performance
+# question (e.g. "which holdings had return of capital distributions?") is not
+# replaced with performance data. This gate only post-processes an already-refused
+# answer, so it is intentionally recall-biased: a false positive merely swaps one
+# refusal for available performance data, while a false negative would re-expose
+# the original phrasing-sensitivity bug. It uses temporal markers plus a small set
+# of UNAMBIGUOUS performance phrases (deliberately excluding overloaded words like
+# bare "return"/"profit").
+_PERFORMANCE_RECOVERY_PHRASES = (
+    "perform",
+    "performance",
+    "p&l",
+    "pnl",
+    "up or down",
+    "gain or loss",
+    "gains or losses",
+    "mover",
+    "movers",
+    "did my portfolio do",
+    "how is my portfolio doing",
+    "how's my portfolio doing",
+    "portfolio doing",
+)
+
+
+def _wants_performance_recovery(question: str) -> bool:
+    q = (question or "").lower()
+    return any(m in q for m in _TEMPORAL_PERFORMANCE_MARKERS) or any(
+        m in q for m in _PERFORMANCE_RECOVERY_PHRASES
+    )
 
 
 def _deterministic_performance_answer(envelope: Envelope, question: str) -> str | None:
@@ -1007,7 +1038,10 @@ def narrate(envelope: Envelope, question: str, focus: str | None = None) -> Narr
     if not response:
         response = _heuristic_narration(envelope, question)
     elif response.strip().startswith(OUT_OF_SCOPE_RESPONSE):
-        response = _deterministic_performance_answer(envelope, question) or response
+        # Only recover a refusal with performance data when the question actually
+        # asks about performance/time-window; otherwise keep the honest refusal.
+        if _wants_performance_recovery(question):
+            response = _deterministic_performance_answer(envelope, question) or response
     elif _is_performance_hedge(response, question, envelope):
         response = _deterministic_performance_answer(envelope, question) or response
     response = _truncate_runaway(response)
