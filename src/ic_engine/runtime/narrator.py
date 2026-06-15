@@ -387,11 +387,13 @@ _TEMPORAL_PERFORMANCE_MARKERS = (
     "day",
 )
 
-# Everyday phrasings of "how did my portfolio do" that the LLM intermittently
-# refuses (OUT_OF_SCOPE) because the wording does not lexically match a section
-# name. When the question matches AND deterministic data exists, the narrator
-# answers from the signed envelope directly instead of risking a phrasing-
-# dependent refusal.
+# Explicit performance-intent phrasings that the LLM intermittently refuses
+# (OUT_OF_SCOPE) because the wording does not lexically match a section name.
+# These must be UNAMBIGUOUS performance markers — bare temporal words
+# ("today"/"day"/"week") are deliberately NOT here, or a holdings question like
+# "show me my positions today" would wrongly short-circuit to performance data.
+# Generic question stems ("how is"/"how are") are also excluded for the same
+# reason; the specific "how … portfolio do/doing" phrases cover the target cases.
 _PERFORMANCE_QUESTION_MARKERS = (
     "perform",
     "performance",
@@ -400,25 +402,26 @@ _PERFORMANCE_QUESTION_MARKERS = (
     "p&l",
     "pnl",
     "profit",
-    "loss",
-    "gain",
     "up or down",
-    "how did",
-    "how's",
-    "how was",
-    "how is",
-    "how are",
-    "doing",
+    "gain or loss",
+    "gains or losses",
     "mover",
     "movers",
+    "how did my portfolio do",
+    "how is my portfolio doing",
+    "how's my portfolio doing",
+    "portfolio doing",
+    "portfolio do ",
 )
 
 
 def _is_performance_question(question: str) -> bool:
+    # Require an EXPLICIT performance marker. The LLM-refusal recovery path
+    # (_is_performance_hedge / OUT_OF_SCOPE) remains the backstop for edge
+    # phrasings, so this predicate is high-precision on purpose to avoid
+    # short-circuiting non-performance portfolio questions.
     q = (question or "").lower()
-    return any(m in q for m in _PERFORMANCE_QUESTION_MARKERS) or any(
-        m in q for m in _TEMPORAL_PERFORMANCE_MARKERS
-    )
+    return any(m in q for m in _PERFORMANCE_QUESTION_MARKERS)
 
 
 def _deterministic_performance_answer(envelope: Envelope, question: str) -> str | None:

@@ -439,3 +439,27 @@ def test_narrator_answers_performance_window_deterministically(envelope, monkeyp
     assert "NVDA" in result.answer  # top mover
     assert result.model == "deterministic"
     assert called["llm"] is False  # short-circuited before the LLM
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Show me my positions today",
+        "How is my portfolio allocated?",
+        "What are my holdings this week?",
+    ],
+)
+def test_narrator_non_performance_question_not_short_circuited(envelope, monkeypatch, question):
+    """Holdings/allocation questions (even with temporal words) must NOT short-
+    circuit to the performance answer — they go to the LLM path."""
+    envelope = _add_performance_window(envelope)
+    called = {"llm": False}
+
+    def _fake_llm(system_prompt, user_prompt):
+        called["llm"] = True
+        return "Your holdings summary: total_value $100.00.", "fake-model"
+
+    monkeypatch.setattr("ic_engine.runtime.narrator._call_llm", _fake_llm)
+    result = narrate(envelope, question)
+    assert called["llm"] is True  # LLM consulted, not short-circuited
+    assert result.model != "deterministic"
