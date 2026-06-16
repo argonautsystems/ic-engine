@@ -49,6 +49,46 @@ def register_tools(app: Any) -> None:
         return await TOOL_REGISTRY["portfolio_holdings"]["handler"]()
 
     @app.tool()
+    async def portfolio_performance() -> dict[str, Any]:
+        """Deterministic portfolio performance & risk: Sharpe ratio, Sortino, volatility, max drawdown, returns, top/bottom performers."""
+        return await TOOL_REGISTRY["portfolio_performance"]["handler"]()
+
+    @app.tool()
+    async def portfolio_analyst() -> dict[str, Any]:
+        """Wall Street analyst consensus per holding: ratings, price targets, upside."""
+        return await TOOL_REGISTRY["portfolio_analyst"]["handler"]()
+
+    @app.tool()
+    async def portfolio_optimize() -> dict[str, Any]:
+        """Portfolio optimization (Modern Portfolio Theory): Sharpe-max, min-volatility, and target-return allocations on the efficient frontier."""
+        return await TOOL_REGISTRY["portfolio_optimize"]["handler"]()
+
+    @app.tool()
+    async def portfolio_rebalance() -> dict[str, Any]:
+        """Rebalancing analysis: current vs target allocation with a trade list and capital-gains / tax impact."""
+        return await TOOL_REGISTRY["portfolio_rebalance"]["handler"]()
+
+    @app.tool()
+    async def portfolio_bonds() -> dict[str, Any]:
+        """Fixed-income analytics: bond exposure, yield-to-maturity, duration, convexity, coupons, maturities, laddering."""
+        return await TOOL_REGISTRY["portfolio_bonds"]["handler"]()
+
+    @app.tool()
+    async def portfolio_cashflow() -> dict[str, Any]:
+        """Projected cash-flow calendar: upcoming dividends, bond coupons, and maturities."""
+        return await TOOL_REGISTRY["portfolio_cashflow"]["handler"]()
+
+    @app.tool()
+    async def portfolio_eod() -> dict[str, Any]:
+        """End-of-day portfolio report: daily summary, P&L, movers, and index closes."""
+        return await TOOL_REGISTRY["portfolio_eod"]["handler"]()
+
+    @app.tool()
+    async def portfolio_news() -> dict[str, Any]:
+        """News correlated to holdings: recent headlines per position plus broad market news."""
+        return await TOOL_REGISTRY["portfolio_news"]["handler"]()
+
+    @app.tool()
     async def portfolio_performance_window(
         period: str | None = None,
         start_date: str | None = None,

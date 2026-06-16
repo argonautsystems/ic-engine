@@ -79,6 +79,79 @@ async def portfolio_holdings() -> dict[str, Any]:
     return await _run_ic_engine(["holdings"])
 
 
+async def portfolio_performance() -> dict[str, Any]:
+    """Deterministic portfolio performance & risk: Sharpe ratio, Sortino, volatility, max drawdown, returns, top/bottom performers. Use for 'how am I doing', 'Sharpe', 'risk', 'drawdown', 'volatility', 'performance metrics'.
+
+    Deterministic: runs the engine `performance` command (a dedicated section
+    materializer), never the narrative `ask` path — so it returns real signed
+    data instead of an anti-fabrication refusal.
+    """
+    return await _run_ic_engine(["performance"], timeout_sec=180.0)
+
+async def portfolio_analyst() -> dict[str, Any]:
+    """Wall Street analyst consensus per holding: ratings, price targets, upside. Use for 'what do analysts think', 'analyst ratings', 'price targets', 'buy/sell/hold'.
+
+    Deterministic: runs the engine `analyst` command (a dedicated section
+    materializer), never the narrative `ask` path — so it returns real signed
+    data instead of an anti-fabrication refusal.
+    """
+    return await _run_ic_engine(["analyst"], timeout_sec=180.0)
+
+async def portfolio_optimize() -> dict[str, Any]:
+    """Portfolio optimization (Modern Portfolio Theory): Sharpe-max, min-volatility, and target-return allocations on the efficient frontier. Use for 'optimal allocation', 'maximize my Sharpe', 'minimum-volatility allocation', 'efficient frontier'.
+
+    Deterministic: runs the engine `optimize` command (a dedicated section
+    materializer), never the narrative `ask` path — so it returns real signed
+    data instead of an anti-fabrication refusal.
+    """
+    return await _run_ic_engine(["optimize"], timeout_sec=180.0)
+
+async def portfolio_rebalance() -> dict[str, Any]:
+    """Rebalancing analysis: current vs target allocation with a trade list and capital-gains / tax impact. Use for 'should I rebalance', 'rebalance with tax', 'target allocation', 'how to rebalance'.
+
+    Deterministic: runs the engine `rebalance` command (a dedicated section
+    materializer), never the narrative `ask` path — so it returns real signed
+    data instead of an anti-fabrication refusal.
+    """
+    return await _run_ic_engine(["rebalance"], timeout_sec=180.0)
+
+async def portfolio_bonds() -> dict[str, Any]:
+    """Fixed-income analytics: bond exposure, yield-to-maturity, duration, convexity, coupons, maturities, laddering. Use for 'my bonds', 'YTM', 'bond strategy', 'fixed income', 'bond ladder', 'duration'.
+
+    Deterministic: runs the engine `bonds` command (a dedicated section
+    materializer), never the narrative `ask` path — so it returns real signed
+    data instead of an anti-fabrication refusal.
+    """
+    return await _run_ic_engine(["bonds"], timeout_sec=180.0)
+
+async def portfolio_cashflow() -> dict[str, Any]:
+    """Projected cash-flow calendar: upcoming dividends, bond coupons, and maturities. Use for 'cash flow', 'dividends', 'income', 'coupons next quarter', 'distributions'.
+
+    Deterministic: runs the engine `cashflow` command (a dedicated section
+    materializer), never the narrative `ask` path — so it returns real signed
+    data instead of an anti-fabrication refusal.
+    """
+    return await _run_ic_engine(["cashflow"], timeout_sec=180.0)
+
+async def portfolio_eod() -> dict[str, Any]:
+    """End-of-day portfolio report: daily summary, P&L, movers, and index closes. Use for 'EOD report', 'daily summary', 'end of day', 'todays report'.
+
+    Deterministic: runs the engine `eod` command (a dedicated section
+    materializer), never the narrative `ask` path — so it returns real signed
+    data instead of an anti-fabrication refusal.
+    """
+    return await _run_ic_engine(["eod"], timeout_sec=180.0)
+
+async def portfolio_news() -> dict[str, Any]:
+    """News correlated to holdings: recent headlines per position plus broad market news. Use for 'news on my holdings', 'mergers or M&A today', 'market news', 'crypto news', 'whats happening in markets', 'dollar/forex news'.
+
+    Deterministic: runs the engine `news` command (a dedicated section
+    materializer), never the narrative `ask` path — so it returns real signed
+    data instead of an anti-fabrication refusal.
+    """
+    return await _run_ic_engine(["news"], timeout_sec=180.0)
+
+
 async def portfolio_performance_window(
     period: str | None = None,
     start_date: str | None = None,
@@ -383,6 +456,70 @@ TOOLS: dict[str, dict[str, Any]] = {
         parameters={},
         required=[],
         handler=portfolio_holdings,
+    ),
+    "portfolio_performance": _tool(
+        description=(
+            "Deterministic portfolio performance & risk: Sharpe ratio, Sortino, volatility, max drawdown, returns, top/bottom performers. Use for 'how am I doing', 'Sharpe', 'risk', 'drawdown', 'volatility', 'performance metrics'."
+        ),
+        parameters={},
+        required=[],
+        handler=portfolio_performance,
+    ),
+    "portfolio_analyst": _tool(
+        description=(
+            "Wall Street analyst consensus per holding: ratings, price targets, upside. Use for 'what do analysts think', 'analyst ratings', 'price targets', 'buy/sell/hold'."
+        ),
+        parameters={},
+        required=[],
+        handler=portfolio_analyst,
+    ),
+    "portfolio_optimize": _tool(
+        description=(
+            "Portfolio optimization (Modern Portfolio Theory): Sharpe-max, min-volatility, and target-return allocations on the efficient frontier. Use for 'optimal allocation', 'maximize my Sharpe', 'minimum-volatility allocation', 'efficient frontier'."
+        ),
+        parameters={},
+        required=[],
+        handler=portfolio_optimize,
+    ),
+    "portfolio_rebalance": _tool(
+        description=(
+            "Rebalancing analysis: current vs target allocation with a trade list and capital-gains / tax impact. Use for 'should I rebalance', 'rebalance with tax', 'target allocation', 'how to rebalance'."
+        ),
+        parameters={},
+        required=[],
+        handler=portfolio_rebalance,
+    ),
+    "portfolio_bonds": _tool(
+        description=(
+            "Fixed-income analytics: bond exposure, yield-to-maturity, duration, convexity, coupons, maturities, laddering. Use for 'my bonds', 'YTM', 'bond strategy', 'fixed income', 'bond ladder', 'duration'."
+        ),
+        parameters={},
+        required=[],
+        handler=portfolio_bonds,
+    ),
+    "portfolio_cashflow": _tool(
+        description=(
+            "Projected cash-flow calendar: upcoming dividends, bond coupons, and maturities. Use for 'cash flow', 'dividends', 'income', 'coupons next quarter', 'distributions'."
+        ),
+        parameters={},
+        required=[],
+        handler=portfolio_cashflow,
+    ),
+    "portfolio_eod": _tool(
+        description=(
+            "End-of-day portfolio report: daily summary, P&L, movers, and index closes. Use for 'EOD report', 'daily summary', 'end of day', 'todays report'."
+        ),
+        parameters={},
+        required=[],
+        handler=portfolio_eod,
+    ),
+    "portfolio_news": _tool(
+        description=(
+            "News correlated to holdings: recent headlines per position plus broad market news. Use for 'news on my holdings', 'mergers or M&A today', 'market news', 'crypto news', 'whats happening in markets', 'dollar/forex news'."
+        ),
+        parameters={},
+        required=[],
+        handler=portfolio_news,
     ),
     "portfolio_performance_window": _tool(
         description=(
