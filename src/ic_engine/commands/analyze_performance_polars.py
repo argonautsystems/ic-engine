@@ -168,6 +168,12 @@ def _build_compact_summary(analysis_data: dict) -> dict:
             "success_rate": analysis_data.get("success_rate"),
             "weighted_volatility": round(ps.get("weighted_volatility", 0), 4),
             "weighted_sharpe": round(ps.get("weighted_sharpe", 0), 4),
+            "weighted_sortino": round(ps.get("weighted_sortino", 0), 4),
+            # Portfolio max drawdown + return belong in the compact view too —
+            # without these the tool surfaced Sharpe but not drawdown, so agents
+            # answered "max drawdown not reported" to a Sharpe+drawdown question.
+            "weighted_max_drawdown": round(ps.get("weighted_max_drawdown", 0), 4),
+            "weighted_annual_return": round(ps.get("weighted_annual_return", 0), 4),
         },
         "top_performers": top_5,
         "bottom_performers": bottom_5,
