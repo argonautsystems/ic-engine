@@ -54,11 +54,18 @@ class ProviderSpec:
 # CAPABILITY MATRIX — edit here to add/grant/remove provider capabilities.
 # =============================================================================
 PROVIDER_MATRIX: Dict[str, ProviderSpec] = {
-    # Primary: equities + crypto. NO index entitlement (I:* returns empty).
+    # Primary override provider: equities + crypto + INDICES + forex. Massive
+    # DOES serve indices via get_quotes(["I:SPX","I:DJI",...]) — verified — so it
+    # is the index source of record too; yfinance is only the free fallback.
     "massive": ProviderSpec(
         name="massive",
         capabilities={Capability.QUOTES, Capability.HISTORY, Capability.ANALYST},
-        symbol_classes={SymbolClass.STOCK, SymbolClass.CRYPTO, SymbolClass.FOREX},
+        symbol_classes={
+            SymbolClass.STOCK,
+            SymbolClass.CRYPTO,
+            SymbolClass.FOREX,
+            SymbolClass.INDEX,
+        },
         method_map={
             Capability.QUOTES: "get_quotes",
             Capability.HISTORY: "get_history",
@@ -109,8 +116,9 @@ _DEFAULT_ORDER: List[str] = ["massive", "finnhub", "alpha_vantage", "yfinance"]
 # Explicit per-(capability, symbol-class) fallback order. Names that do not
 # declare support in PROVIDER_MATRIX are filtered out, so this stays honest.
 _FALLBACK_ORDER: Dict[Tuple[Capability, SymbolClass], List[str]] = {
-    # Indices: massive has no entitlement, so go straight to the capable ones.
-    (Capability.QUOTES, SymbolClass.INDEX): ["yfinance", "alpha_vantage"],
+    # Indices: massive FIRST (it is the override/premium provider and serves
+    # I:SPX/I:DJI/I:NDX/I:VIX), yfinance only as the free fallback.
+    (Capability.QUOTES, SymbolClass.INDEX): ["massive", "yfinance", "alpha_vantage"],
     (Capability.QUOTES, SymbolClass.CRYPTO): ["massive", "yfinance"],
     (Capability.QUOTES, SymbolClass.STOCK): [
         "massive",

@@ -60,10 +60,28 @@ def test_to_canonical_roundtrip_yfinance():
 
 # --- capability matrix -----------------------------------------------------
 
-def test_indices_route_skips_massive():
+def test_indices_route_massive_first():
+    # Massive serves indices (I:SPX/I:DJI/...) and is the override provider, so
+    # it leads; yfinance is the free fallback.
     order = providers_for(Capability.QUOTES, SymbolClass.INDEX)
-    assert order == ["yfinance", "alpha_vantage"]
-    assert "massive" not in order  # no index entitlement
+    assert order == ["massive", "yfinance", "alpha_vantage"]
+    assert order[0] == "massive"
+
+
+def test_canonicalize_index_aliases():
+    from ic_engine.market_data.symbology import canonicalize
+    assert canonicalize("DJI") == "I:DJI"
+    assert canonicalize("DOW") == "I:DJI"
+    assert canonicalize("^DJI") == "I:DJI"
+    assert canonicalize("S&P 500".replace("500", "")) == "I:SPX"  # "S&P"
+    assert canonicalize("SPX") == "I:SPX"
+    assert canonicalize("VIX") == "I:VIX"
+    assert canonicalize("AAPL") == "AAPL"  # ordinary ticker untouched
+    assert canonicalize("I:DJI") == "I:DJI"  # already canonical
+    # classify routes the alias as an index
+    assert classify("DJI") is SymbolClass.INDEX
+    # to_native gives massive the canonical I:DJI (not bare DJI)
+    assert to_native("DJI", "massive") == "I:DJI"
 
 
 def test_stock_route_prefers_massive():

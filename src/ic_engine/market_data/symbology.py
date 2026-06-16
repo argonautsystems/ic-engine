@@ -35,10 +35,39 @@ from .enums import SymbolClass
 _INDEX_PREFIX = "I:"
 _CRYPTO_PREFIX = "X:"
 
+# Bare/colloquial index aliases -> canonical I:* form. Agents (and users) say
+# "DJI"/"DOW"/"S&P"/"NASDAQ"/"^DJI"/".DJI"; without this they'd be classified as
+# equities and come back as missing_symbols. canonicalize() is applied at the
+# request boundary so every form resolves to the same index.
+_INDEX_ALIASES: Dict[str, str] = {
+    "DJI": "I:DJI", "DOW": "I:DJI", "DJIA": "I:DJI", "^DJI": "I:DJI", ".DJI": "I:DJI",
+    "INDU": "I:DJI",
+    "SPX": "I:SPX", "S&P": "I:SPX", "S&P500": "I:SPX", "SP500": "I:SPX",
+    "^GSPC": "I:SPX", ".SPX": "I:SPX", "GSPC": "I:SPX",
+    "NDX": "I:NDX", "NASDAQ100": "I:NDX", "^NDX": "I:NDX", ".NDX": "I:NDX",
+    "IXIC": "I:IXIC", "NASDAQ": "I:IXIC", "COMP": "I:IXIC", "^IXIC": "I:IXIC",
+    "VIX": "I:VIX", "^VIX": "I:VIX", ".VIX": "I:VIX",
+    "RUT": "I:RUT", "RUSSELL2000": "I:RUT", "^RUT": "I:RUT",
+}
+
+
+def canonicalize(symbol: str) -> str:
+    """Normalize a colloquial/alias symbol into the engine's canonical form.
+
+    Index aliases (``DJI``/``DOW``/``^DJI`` -> ``I:DJI``, ``SPX``/``S&P`` ->
+    ``I:SPX``, ...) are mapped; already-canonical and ordinary tickers pass
+    through unchanged. Apply this at the request boundary before classify().
+    """
+    s = (symbol or "").strip()
+    key = s.upper().replace(" ", "").replace("-", "")
+    if key in _INDEX_ALIASES:
+        return _INDEX_ALIASES[key]
+    return s
+
 
 def classify(symbol: str) -> SymbolClass:
     """Infer the :class:`SymbolClass` of a canonical symbol from its shape."""
-    s = (symbol or "").strip().upper()
+    s = canonicalize(symbol).strip().upper()
     if s.startswith(_INDEX_PREFIX):
         return SymbolClass.INDEX
     if s.startswith(_CRYPTO_PREFIX):
@@ -99,7 +128,7 @@ def _yf_default(symbol: str, cls: SymbolClass) -> str:
 
 def to_native(symbol: str, provider: str) -> str:
     """Translate a canonical symbol into ``provider``'s native dialect."""
-    s = (symbol or "").strip()
+    s = canonicalize((symbol or "").strip())
     explicit = _EXPLICIT.get(provider, {})
     if s.upper() in explicit:
         return explicit[s.upper()]
